@@ -1,0 +1,27 @@
+# Environment variables
+.env
+.env.local
+
+# Node/React
+node_modules/
+dist/
+build/
+.npm/
+
+# .NET / C#
+bin/
+obj/
+*.user
+*.userosscache
+*.sln.docstates
+
+# IDE / OS
+.vscode/
+.idea/
+.vs/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln.xcworkspace
+.DS_Store
+Thumbs.db
