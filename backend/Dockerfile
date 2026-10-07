@@ -1,8 +1,19 @@
-# Alap image .NET-hez (SDK a fejlesztéshez/build-hez)
+# Alap image .NET-hez
 FROM mcr.microsoft.com/dotnet/sdk:8.0
 
 WORKDIR /app
 
-# Amíg nincs tényleges kód, ez egy minimális előkészítés, 
-# ami ébren tartja a konténert
-CMD ["tail", "-f", "/dev/null"]
+# Backend fájlok bemásolása
+COPY . .
+
+# Függőségek telepítése
+RUN dotnet restore
+
+# Projekt buildelése
+RUN dotnet build
+
+# Backend portja
+EXPOSE 80
+
+# ASP.NET Core indítása
+CMD ["dotnet", "run", "--urls", "http://0.0.0.0:80"]
