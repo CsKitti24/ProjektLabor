@@ -162,6 +162,30 @@ dotnet tool run dotnet-ef database update --project backend
 - **Automatikus migráció konténer indulásakor:**
 A `docker-compose.yml`-ben a `backend` konténer számára az `APPLY_MIGRATIONS=true` környezeti változó van beállítva, így a backend indításakor automatikusan és biztonságosan lefut a `Database.Migrate()` parancs.
 
+## Tesztek és ellenőrzések futtatása
+
+A fejlesztés során és Pull Request benyújtása előtt helyileg is lefuttathatók az ellenőrzések:
+
+### Backend build és tesztek
+```bash
+dotnet build ProjektLabor.sln
+dotnet test ProjektLabor.sln
+```
+
+### Frontend lint és build
+```bash
+cd frontend
+npm ci
+npm run lint
+npm run build
+```
+
+### Docker konfiguráció és konténer-buildek ellenőrzése
+```bash
+docker compose --env-file .env.example config
+docker compose --env-file .env.example build
+```
+
 ## CI – GitHub Actions
 
 A CI-folyamatnak Pull Request nyitásakor és frissítésekor, valamint a `main` ágra történő push/merge után kell lefutnia. Legalább az alábbi lépéseket kell végrehajtania:
