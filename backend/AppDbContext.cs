@@ -19,6 +19,7 @@ namespace ProjektLabor.Data
         public DbSet<MegbizhatosagiEsemeny> MegbizhatosagiEsemenyek { get; set; }
         public DbSet<AuditLog> AuditLogok { get; set; }
         public DbSet<Rendszerparameter> Rendszerparameterek { get; set; }
+        public DbSet<KulcsTerem> KulcsTermek { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -74,7 +75,6 @@ namespace ProjektLabor.Data
                     throw new InvalidOperationException($"Booking for room {booking.TeremId} overlaps with an existing booking.");
                 }
             }
-        }
         }
     }
 }

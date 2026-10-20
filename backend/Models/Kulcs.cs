@@ -25,5 +25,6 @@ namespace ProjektLabor.Models
         public ICollection<Kulcsmozgas> Kulcsmozgasok { get; set; }
         public ICollection<MesterkulcsJogosultsag> MesterkulcsJogosultsagok { get; set; }
         public ICollection<MegbizhatosagiEsemeny> MegbizhatosagiEsemenyek { get; set; }
+        public ICollection<KulcsTerem> KulcsTeremKapcsok { get; set; }
     }
 }

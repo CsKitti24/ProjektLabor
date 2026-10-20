@@ -34,8 +34,8 @@ namespace ProjektLabor.Models
         public ICollection<MesterkulcsJogosultsag> MesterkulcsJogosultsagok { get; set; }
         public ICollection<Kulcsmozgas> Kulcsmozgasok { get; set; }
         public ICollection<Hibajegy> Hibajegyek { get; set; }
-        public ICollection<Karbantartasi_idosav> KarbantartasiIdosavok { get; set; }
-        public ICollection<Megbizhatosagi_esemeny> MegbizhatosagiEsemenyek { get; set; }
+        public ICollection<KarbantartasiIdosav> KarbantartasiIdosavok { get; set; }
+        public ICollection<MegbizhatosagiEsemeny> MegbizhatosagiEsemenyek { get; set; }
         public ICollection<AuditLog> AuditLogok { get; set; }
     }
 }

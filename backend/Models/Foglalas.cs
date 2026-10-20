@@ -33,6 +33,6 @@ namespace ProjektLabor.Models
         // Navigation collections
         public ICollection<Kulcsmozgas> Kulcsmozgasok { get; set; }
         public ICollection<Ertesites> Ertesitesek { get; set; }
-        public ICollection<Megbizhatosagi_esemeny> MegbizhatosagiEsemenyek { get; set; }
+        public ICollection<MegbizhatosagiEsemeny> MegbizhatosagiEsemenyek { get; set; }
     }
 }
