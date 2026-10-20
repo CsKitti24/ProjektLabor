@@ -36,16 +36,37 @@ namespace ProjektLabor.Data
             modelBuilder.Entity<KulcsTerem>()
                 .HasOne(kt => kt.Kulcs)
                 .WithMany(k => k.KulcsTeremKapcsok)
-                .HasForeignKey(kt => kt.KulcsId);
+                .HasForeignKey(kt => kt.KulcsId)
+                .OnDelete(DeleteBehavior.Cascade);
             modelBuilder.Entity<KulcsTerem>()
                 .HasOne(kt => kt.Terem)
                 .WithMany(t => t.KulcsTeremKapcsok)
-                .HasForeignKey(kt => kt.TeremId);
+                .HasForeignKey(kt => kt.TeremId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Explicit relationships for models with multiple references or navigation ambiguities
+            modelBuilder.Entity<MegbizhatosagiEsemeny>()
+                .HasOne(m => m.Felhasznalo)
+                .WithMany(u => u.MegbizhatosagiEsemenyek)
+                .HasForeignKey(m => m.FelhasznaloId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<MegbizhatosagiEsemeny>()
+                .HasOne(m => m.LetrehozoFelhasznalo)
+                .WithMany()
+                .HasForeignKey(m => m.LetrehozoFelhasznaloId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Kulcsmozgas>()
+                .HasOne(k => k.Operátor)
+                .WithMany(u => u.Kulcsmozgasok)
+                .HasForeignKey(k => k.OperátorId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             // Seed default system parameters
             modelBuilder.Entity<Rendszerparameter>().HasData(
-                new Rendszerparameter { Kulcs = "napi_kulcsleadasi_zarasi_idopont", Ertek = "22:00", Leiras = "Napi kulcsleadási zárási időpont", ModositasIdeje = DateTime.UtcNow },
-                new Rendszerparameter { Kulcs = "no_show_idokorlat_perc", Ertek = "15", Leiras = "No-show időkorlát percben", ModositasIdeje = DateTime.UtcNow }
+                new Rendszerparameter { Kulcs = "napi_kulcsleadasi_zarasi_idopont", Ertek = "22:00", Leiras = "Napi kulcsleadási zárási időpont", ModositasIdeje = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
+                new Rendszerparameter { Kulcs = "no_show_idokorlat_perc", Ertek = "15", Leiras = "No-show időkorlát percben", ModositasIdeje = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) }
             );
         }
 
