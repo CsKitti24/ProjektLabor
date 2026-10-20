@@ -18,6 +18,7 @@ services:
     ports:
       - "5000:5000"
     environment:
+      - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;
       - APPLY_MIGRATIONS=true
       - ASPNETCORE_URLS=http://+:5000

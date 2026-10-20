@@ -149,6 +149,15 @@ GET http://localhost:5000/api/rooms/{id}
 - **Sikeres válasz (HTTP 200 OK):** A kiválasztott terem DTO adatai.
 - **Ha nem található (HTTP 404 Not Found):** `{"message": "A(z) {id} azonosítójú terem nem található."}`
 
+### 4. Swagger UI és OpenAPI specifikáció (fejlesztői környezetben)
+
+Fejlesztési környezetben a böngészőből elérhető az interaktív Swagger UI és az OpenAPI specifikáció:
+
+- **Swagger UI felület:** `http://localhost:5000/swagger`
+- **OpenAPI v1 JSON specifikáció:** `http://localhost:5000/swagger/v1/swagger.json`
+
+A Swagger UI segítségével a végpontok közvetlenül kipróbálhatók és dokumentálva vannak a válaszmodellek (`RoomDto`, `ProblemDetails`) és a lehetséges HTTP státuszkódok. Éles (Production) környezetben a felület biztonsági okokból le van tiltva (`404 Not Found`).
+
 ## Adatbázis és migrációk
 
 Az adatbázis sémáját Entity Framework Core migrációk verziózzák (`backend/Migrations`).

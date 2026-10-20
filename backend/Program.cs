@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.OpenApi.Models;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs;
 
@@ -6,7 +7,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "ProjektLabor API",
+        Version = "v1",
+        Description = "ProjektLabor terem- és kulcskezelő rendszer REST API dokumentációja."
+    });
+});
 
 // Register DbContext with connection string from configuration
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -49,8 +58,54 @@ app.UseCors("AllowFrontend");
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
+    // Normalization middleware: Swashbuckle 6.6.2 bundles a Swagger UI version whose validator
+    // regex recognizes OpenAPI 3.0.0 through 3.0.3 (or 2.0 / 3.1.0). The Microsoft.OpenApi 1.6.30 dependency
+    // serializes OpenApi3_0 as "3.0.4", causing Swagger UI to report:
+    // "Unable to render this definition. The provided definition does not specify a valid version field."
+    // Normalizing "3.0.4" to "3.0.1" allows Swagger UI to seamlessly parse and render the document.
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.Value?.EndsWith("/swagger.json", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var originalBody = context.Response.Body;
+            using var memStream = new MemoryStream();
+            context.Response.Body = memStream;
+
+            await next();
+
+            if (context.Response.StatusCode == StatusCodes.Status200OK)
+            {
+                memStream.Seek(0, SeekOrigin.Begin);
+                using var reader = new StreamReader(memStream, System.Text.Encoding.UTF8);
+                var content = await reader.ReadToEndAsync();
+
+                if (content.Contains("\"openapi\": \"3.0.4\""))
+                {
+                    content = content.Replace("\"openapi\": \"3.0.4\"", "\"openapi\": \"3.0.1\"");
+                }
+
+                var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+                context.Response.Body = originalBody;
+                context.Response.ContentLength = bytes.Length;
+                await context.Response.Body.WriteAsync(bytes, 0, bytes.Length);
+                return;
+            }
+
+            memStream.Seek(0, SeekOrigin.Begin);
+            await memStream.CopyToAsync(originalBody);
+            context.Response.Body = originalBody;
+            return;
+        }
+
+        await next();
+    });
+
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "ProjektLabor API v1");
+        options.RoutePrefix = "swagger";
+    });
 }
 
 // Automatic migrations on startup if configured (e.g. Docker environment)
@@ -124,6 +179,10 @@ app.MapGet("/api/health", async (AppDbContext dbContext, ILogger<Program> logger
 })
 .WithName("GetHealth")
 .WithSummary("Egészségellenőrző végpont (alkalmazás és adatbázis kapcsolat)")
+.WithDescription("Ellenőrzi a backend alkalmazás és az adatbázis-kapcsolat elérhetőségét.")
+.WithTags("Health")
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status503ServiceUnavailable)
 .WithOpenApi();
 
 // -----------------------------------------------------------------------------------------
@@ -159,6 +218,10 @@ app.MapGet("/api/rooms", async (AppDbContext dbContext, ILogger<Program> logger)
 })
 .WithName("GetRooms")
 .WithSummary("Termek listájának lekérdezése")
+.WithDescription("Lekérdezi a rendszerben rögzített összes terem listáját.")
+.WithTags("Rooms")
+.Produces<List<RoomDto>>(StatusCodes.Status200OK)
+.ProducesProblem(StatusCodes.Status500InternalServerError)
 .WithOpenApi();
 
 app.MapGet("/api/rooms/{id:int}", async (int id, AppDbContext dbContext, ILogger<Program> logger) =>
@@ -197,6 +260,11 @@ app.MapGet("/api/rooms/{id:int}", async (int id, AppDbContext dbContext, ILogger
 })
 .WithName("GetRoomById")
 .WithSummary("Egy adott terem adatainak lekérdezése azonosító alapján")
+.WithDescription("Egy adott terem részletes adatait adja vissza az azonosítója (ID) alapján.")
+.WithTags("Rooms")
+.Produces<RoomDto>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status404NotFound)
+.ProducesProblem(StatusCodes.Status500InternalServerError)
 .WithOpenApi();
 
 app.Run();
