@@ -98,21 +98,69 @@ A portok a `docker-compose.yml` fájlban ellenőrizhetők. Ha ott változnak, ez
 
 ## API-ellenőrzés
 
-A második bemutató kötelező minimuma egy működő állapotjelző végpont:
+A backend az alábbi ellenőrző és adatlekérdező végpontokat biztosítja:
+
+### 1. Egészségellenőrzés (Health Check)
 
 ```text
 GET http://localhost:5000/api/health
 ```
 
-A végpont elvárt viselkedése: sikeres HTTP-válasz, amely jelzi, hogy a backend fut. A végleges implementációban az adatbázis-kapcsolat állapotát is ellenőrizni kell, vagy külön kell jelezni, hogy a backend él-e és az adatbázis elérhető-e.
+- **Sikeres válasz (HTTP 200 OK):**
+```json
+{
+  "status": "ok",
+  "database": "connected"
+}
+```
+- **Hiba esetén (HTTP 503 Service Unavailable):**
+```json
+{
+  "status": "unhealthy",
+  "database": "disconnected"
+}
+```
 
-Egy alapvető adatlekérdező végpontot is létre kell hozni. A pontos útvonalat és a visszaadott entitást a backend implementációja és az adatmodell alapján kell rögzíteni ebben a dokumentumban.
+### 2. Termek listázása (Rooms Query)
+
+```text
+GET http://localhost:5000/api/rooms
+```
+
+- **Válasz (HTTP 200 OK):** Termek listája DTO formátumban (üres lista, ha még nincs rögzített terem):
+```json
+[
+  {
+    "id": 1,
+    "nev": "I. előadó",
+    "kapacitas": 120,
+    "leiras": "Főépület 1. emelet",
+    "aktivalva": true
+  }
+]
+```
+
+### 3. Egy adott terem lekérdezése
+
+```text
+GET http://localhost:5000/api/rooms/{id}
+```
+
+- **Sikeres válasz (HTTP 200 OK):** A kiválasztott terem DTO adatai.
+- **Ha nem található (HTTP 404 Not Found):** `{"message": "A(z) {id} azonosítójú terem nem található."}`
 
 ## Adatbázis és migrációk
 
-Az adatbázis sémáját Entity Framework Core migrációkkal kell verziózni. A migrációk célja, hogy a táblák és a kulcsok megismételhetően, a fejlesztők gépein és a konténeres környezetben is létrehozhatók legyenek.
+Az adatbázis sémáját Entity Framework Core migrációk verziózzák (`backend/Migrations`).
+A kezdeti migráció neve: `InitialCreate`.
 
-A kezdeti sémának legalább az ER-diagram alapján kiválasztott fő entitásokat, elsődleges kulcsokat, idegen kulcsokat és kapcsolatokat kell tartalmaznia. A teljes üzleti logika ezen a mérföldkövön még nem követelmény.
+- **Migrációk futtatása fejlesztői parancssorból:**
+```bash
+dotnet tool run dotnet-ef database update --project backend
+```
+
+- **Automatikus migráció konténer indulásakor:**
+A `docker-compose.yml`-ben a `backend` konténer számára az `APPLY_MIGRATIONS=true` környezeti változó van beállítva, így a backend indításakor automatikusan és biztonságosan lefut a `Database.Migrate()` parancs.
 
 ## CI – GitHub Actions
 
