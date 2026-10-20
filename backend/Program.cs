@@ -20,7 +20,13 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 {
     if (!string.IsNullOrWhiteSpace(connectionString))
     {
-        options.UseSqlServer(connectionString);
+        options.UseSqlServer(connectionString, sqlOptions =>
+        {
+            sqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(5),
+                errorNumbersToAdd: null);
+        });
     }
 });
 
@@ -54,15 +60,31 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    try
+    
+    const int maxRetries = 10;
+    const int delaySeconds = 3;
+
+    for (int attempt = 1; attempt <= maxRetries; attempt++)
     {
-        logger.LogInformation("Checking and applying pending database migrations...");
-        dbContext.Database.Migrate();
-        logger.LogInformation("Database migrations applied successfully.");
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Failed to apply database migrations on startup.");
+        try
+        {
+            logger.LogInformation("Checking and applying pending database migrations (Attempt {Attempt}/{MaxRetries})...", attempt, maxRetries);
+            dbContext.Database.Migrate();
+            logger.LogInformation("Database migrations applied successfully.");
+            break;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to apply database migrations on attempt {Attempt}/{MaxRetries}. Waiting {Delay}s before retry...", attempt, maxRetries, delaySeconds);
+            if (attempt < maxRetries)
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(delaySeconds));
+            }
+            else
+            {
+                logger.LogError(ex, "Database migrations could not be applied after {MaxRetries} attempts.", maxRetries);
+            }
+        }
     }
 }
 

@@ -91,7 +91,7 @@ A jelenlegi fejlesztői Compose-beállításban rögzített portkiosztás:
 | Szolgáltatás | Gazdagépen elérhető port | Konténerport | Megjegyzés |
 |---|---:|---:|---|
 | Frontend | `3000` | `3000` | Böngészőből: `http://localhost:3000` |
-| Backend API | `5000` | `80` | Az API gazdagépről: `http://localhost:5000` |
+| Backend API | `5000` | `5000` | Az API gazdagépről: `http://localhost:5000` |
 | Microsoft SQL Server | `1433` | `1433` | Adatbázis-kapcsolathoz; a hitelesítési adatokat a `.env` tartalmazza |
 
 A portok a `docker-compose.yml` fájlban ellenőrizhetők. Ha ott változnak, ezt a táblázatot is frissíteni kell.

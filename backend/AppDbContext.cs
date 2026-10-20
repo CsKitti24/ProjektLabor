@@ -36,11 +36,13 @@ namespace ProjektLabor.Data
             modelBuilder.Entity<KulcsTerem>()
                 .HasOne(kt => kt.Kulcs)
                 .WithMany(k => k.KulcsTeremKapcsok)
-                .HasForeignKey(kt => kt.KulcsId);
+                .HasForeignKey(kt => kt.KulcsId)
+                .OnDelete(DeleteBehavior.Cascade);
             modelBuilder.Entity<KulcsTerem>()
                 .HasOne(kt => kt.Terem)
                 .WithMany(t => t.KulcsTeremKapcsok)
-                .HasForeignKey(kt => kt.TeremId);
+                .HasForeignKey(kt => kt.TeremId)
+                .OnDelete(DeleteBehavior.NoAction);
 
             // Explicit relationships for models with multiple references or navigation ambiguities
             modelBuilder.Entity<MegbizhatosagiEsemeny>()
