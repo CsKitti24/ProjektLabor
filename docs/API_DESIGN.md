@@ -207,8 +207,8 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| N1 | GET | `/api/notifications/my` | Saját értesítések lekérdezése | 🔴 Hiányzik |
-| N2 | GET | `/api/notifications/pending` | Kiküldendő értesítések (belső szolgáltatás) | 🔴 Hiányzik |
+| N1 | GET | `/api/notifications/my` | Saját értesítések lekérdezése | ✅ Kész |
+| N2 | GET | `/api/notifications/pending` | Függőben lévő értesítések (Adminisztrátor / Portás) | ✅ Kész |
 
 ### Egészségellenőrzés
 
@@ -1051,13 +1051,27 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
   "id": "int", "foglalasId": "int",
   "ertesitesTipus": "string (BeforeEnd)",
   "idoPont": "datetime",
-  "allapot": "string (Kesz|KuldesAlatt|Hiba)"
+  "allapot": "string (Kesz|KuldesAlatt|Hiba)",
+  "createdAt": "datetime",
+  "foglalasKezdete": "datetime", "foglalasVege": "datetime"
 }]
 ```
 
 **Kapcsolódó entitások:** `Ertesitesek`, `Foglalasok`
 
 **HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`
+
+---
+
+### N2 – GET `/api/notifications/pending`
+
+**Funkció:** A `KuldesAlatt` állapotú értesítések listája a belső kézbesítési folyamat számára.
+
+**Jogosultság:** `Adminisztrator`, `Portas`.
+
+**Válasz:** Ugyanaz az értesítés-DTO, mint az N1 végpontnál; tartalmazza a kapcsolódó foglalás azonosítóját, kezdetét és lejáratát is.
+
+**HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`.
 
 ---
 
@@ -1153,6 +1167,7 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 | GET /api/reports/reliability | ❌ | ❌ | ✅ | ✅ |
 | **Értesítések** | | | | |
 | GET /api/notifications/my | ✅ | ❌ | ❌ | ❌ |
+| GET /api/notifications/pending | ❌ | ✅ | ✅ | ❌ |
 | **Health** | | | | |
 | GET /api/health | ✅ | ✅ | ✅ | ✅ |
 
@@ -1434,9 +1449,9 @@ Minden végpontnál egységes hibakezelés szükséges:
 | GET `/api/rooms/{id}` | JWT autentikáció és jogosultságellenőrzés hiányzik |
 | `AppDbContext.ValidateBookings()` | DB szintű ütközésvizsgálat megvan, de API szinten nincs 409-es válasz és érthető üzenet |
 
-### 🔴 Teljesen hiányzó (implementálásra vár)
+### 🔴 További hiányzó végpontok
 
-Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api/key-movements/*`, `/api/bookings/*`, `/api/tickets/*`, `/api/maintenance/*`, `/api/reliability/*`, `/api/reports/*`, `/api/notifications/*`.
+A többi hiányzó végpont: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api/key-movements/*`, `/api/bookings/*`, `/api/tickets/*`, `/api/maintenance/*`, `/api/reliability/*`, `/api/reports/*`.
 
 ### Infrastrukturális hiányosságok
 
@@ -1446,8 +1461,9 @@ Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `
 | RBAC policy-k regisztrációja (`AddAuthorization`) | 🔴 Hiányzik |
 | BCrypt jelszó-hash könyvtár | 🔴 Hiányzik (NuGet: `BCrypt.Net-Next`) |
 | Általános Audit log service (újrafelhasználható) | 🔴 Hiányzik |
-| No-show automatizmus (háttérszolgáltatás / ütemező) | 🔴 Hiányzik |
-| Értesítés-generáló háttérszolgáltatás | 🔴 Hiányzik |
+| No-show automatizmus (`BackgroundService`) | ✅ Kész |
+| Foglalásvége-értesítés (`BackgroundService`) | ✅ Kész |
+| Napi zárási +3 büntetőpont (`BackgroundService`) | ✅ Kész |
 | Service-réteg kialakítása (jelenleg minden a `Program.cs`-ben van) | 🔴 Hiányzik |
 
 ---
@@ -1505,8 +1521,9 @@ Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `
 | 35 | GET `/api/notifications/my` | Értesítések lekérdezése |
 | 36 | POST `/api/auth/logout` | Token invalidálás |
 | 37 | MK1–MK3 (mesterkulcs-jogosultságok) | Speciális kulcsjogosultságok |
-| 38 | No-show automatizmus (`IHostedService`) | Automatikus státuszváltás |
-| 39 | Értesítés-generáló háttérszolgáltatás | Foglalás-végfigyelmeztető |
+| 38 | No-show automatizmus (`BackgroundService`) | ✅ Kész |
+| 39 | Foglalás lejárta előtti értesítés | ✅ Kész |
+| 40 | Napi zárási +3 büntetőpont | ✅ Kész |
 
 ---
 
