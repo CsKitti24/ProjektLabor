@@ -4,12 +4,12 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 
 namespace ProjektLabor.Endpoints;
 
 public static class MaintenanceEndpoints
 {
-    private const string AdministratorRole = "Adminisztrátor";
     private const string CancelledBookingStatus = "Megszuntetve";
     private static readonly Expression<Func<KarbantartasiIdosav, MaintenanceResponse>> ResponseProjection =
         item => new(
@@ -25,20 +25,21 @@ public static class MaintenanceEndpoints
 
     public static IEndpointRouteBuilder MapMaintenanceEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var maintenance = endpoints.MapGroup("/api/maintenance");
+        var maintenance = endpoints.MapGroup("/api/maintenance")
+            .RequireAuthorization();
 
         maintenance.MapGet("/", GetAllAsync)
             .WithName("GetMaintenance");
         maintenance.MapGet("/{id:int}", GetByIdAsync)
             .WithName("GetMaintenanceById");
         maintenance.MapPost("/", CreateAsync)
-            .RequireAuthorization()
+            .RequireAuthorization(RolePolicies.Administrator)
             .WithName("CreateMaintenance");
         maintenance.MapPut("/{id:int}", UpdateAsync)
-            .RequireAuthorization()
+            .RequireAuthorization(RolePolicies.Administrator)
             .WithName("UpdateMaintenance");
         maintenance.MapDelete("/{id:int}", DeleteAsync)
-            .RequireAuthorization()
+            .RequireAuthorization(RolePolicies.Administrator)
             .WithName("DeleteMaintenance");
 
         return endpoints;
@@ -213,7 +214,7 @@ public static class MaintenanceEndpoints
         AppDbContext db,
         CancellationToken cancellationToken)
     {
-        if (!user.IsInRole(AdministratorRole))
+        if (!user.IsInRole(RoleNames.Adminisztrator))
         {
             return null;
         }
@@ -225,7 +226,7 @@ public static class MaintenanceEndpoints
         }
 
         return await db.Felhasznalok
-            .Where(account => account.Id == userId && account.Role == AdministratorRole)
+            .Where(account => account.Id == userId && account.Role == RoleNames.Adminisztrator)
             .Select(account => (int?)account.Id)
             .SingleOrDefaultAsync(cancellationToken);
     }

@@ -79,13 +79,13 @@ namespace ProjektLabor.Services
                 new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
                 new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
                 new Claim(JwtRegisteredClaimNames.Email, user.Email),
-                new Claim(ClaimTypes.Role, user.Role),
+                new Claim("role", user.Role),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
 
             var token = new JwtSecurityToken(
-                issuer: _config["Jwt:Issuer"],
-                audience: _config["Jwt:Audience"],
+                issuer: _config["Authentication:Jwt:Issuer"] ?? _config["Jwt:Issuer"],
+                audience: _config["Authentication:Jwt:Audience"] ?? _config["Jwt:Audience"],
                 claims: claims,
                 expires: DateTime.UtcNow.AddHours(GetExpiresInHours()),
                 signingCredentials: credentials
@@ -123,7 +123,7 @@ namespace ProjektLabor.Services
 
         public SymmetricSecurityKey GetSigningKey()
         {
-            var keyString = _config["Jwt:Key"]
+            var keyString = _config["Authentication:Jwt:SigningKey"] ?? _config["Jwt:Key"]
                 ?? throw new InvalidOperationException("JWT kulcs nincs konfigurálva (Jwt:Key).");
 
             if (keyString.Length < 32)
