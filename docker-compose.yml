@@ -21,6 +21,10 @@ services:
       - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;
       - APPLY_MIGRATIONS=true
       - ASPNETCORE_URLS=http://+:5000
+      - Jwt__Key=${JWT_KEY:-ProjektLaborDevSecretKey_ChangeInProduction_MinLength32Chars!}
+      - Jwt__Issuer=${JWT_ISSUER:-ProjektLaborAPI}
+      - Jwt__Audience=${JWT_AUDIENCE:-ProjektLaborClient}
+      - Jwt__ExpiresInHours=${JWT_EXPIRES_IN_HOURS:-8}
     networks:
       - app-network
     depends_on:

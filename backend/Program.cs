@@ -1,12 +1,95 @@
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs;
+using ProjektLabor.DTOs.Auth;
+using ProjektLabor.Endpoints;
+using ProjektLabor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// -----------------------------------------------------------------------------------------
+// JWT Authentication
+// -----------------------------------------------------------------------------------------
+var jwtKey = builder.Configuration["Jwt:Key"]
+    ?? throw new InvalidOperationException("JWT kulcs nincs konfigurálva (Jwt:Key).");
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer           = true,
+            ValidateAudience         = true,
+            ValidateLifetime         = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer              = builder.Configuration["Jwt:Issuer"],
+            ValidAudience            = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ClockSkew                = TimeSpan.FromSeconds(30)
+        };
+    });
+
+// -----------------------------------------------------------------------------------------
+// RBAC Authorization policies
+// -----------------------------------------------------------------------------------------
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("Adminisztrator",        p => p.RequireRole("Adminisztrator"));
+    options.AddPolicy("Portas",                p => p.RequireRole("Portas"));
+    options.AddPolicy("Oktato",                p => p.RequireRole("Oktato"));
+    options.AddPolicy("UzemeltetesiIgazgato",  p => p.RequireRole("UzemeltetesiIgazgato"));
+    options.AddPolicy("AdminOrIgazgato",       p => p.RequireRole("Adminisztrator", "UzemeltetesiIgazgato"));
+    options.AddPolicy("AdminOrPortas",         p => p.RequireRole("Adminisztrator", "Portas"));
+    // Bármely bejelentkezett felhasználó
+    options.AddPolicy("Authenticated",         p => p.RequireAuthenticatedUser());
+});
+
+// -----------------------------------------------------------------------------------------
+// Application Services
+// -----------------------------------------------------------------------------------------
+builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<AuditService>();
+
 // Add services to the container.
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "ProjektLabor API",
+        Version = "v1",
+        Description = "ProjektLabor terem- és kulcskezelő rendszer REST API dokumentációja."
+    });
+
+    // JWT Bearer auth Swagger UI-ban
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name         = "Authorization",
+        Type         = SecuritySchemeType.Http,
+        Scheme       = "bearer",
+        BearerFormat = "JWT",
+        In           = ParameterLocation.Header,
+        Description  = "Írd be a JWT tokent. Példa: eyJhbGci..."
+    });
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id   = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 
 // Register DbContext with connection string from configuration
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -45,6 +128,10 @@ var app = builder.Build();
 
 // Enable CORS
 app.UseCors("AllowFrontend");
+
+// Authentication & Authorization middleware – sorrendük kritikus!
+app.UseAuthentication();
+app.UseAuthorization();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -89,6 +176,79 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
 }
 
 // -----------------------------------------------------------------------------------------
+// Auth endpoints (A1, A2, A3)
+// -----------------------------------------------------------------------------------------
+
+// A1 – POST /api/auth/login
+app.MapPost("/api/auth/login", async (LoginRequestDto request, AuthService authService, ILogger<Program> logger) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Jelszo))
+    {
+        return Results.BadRequest(new { message = "A felhasználónév és a jelszó megadása kötelező." });
+    }
+
+    var result = await authService.LoginAsync(request);
+
+    if (result is null)
+    {
+        return Results.Json(
+            new { message = "Hibás felhasználónév vagy jelszó." },
+            statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    return Results.Ok(result);
+})
+.WithName("Login")
+.WithSummary("Felhasználói bejelentkezés – JWT token kiadás")
+.WithDescription("Hitelesíti a felhasználót username és jelszó alapján. Sikeres hitelesítés esetén JWT Bearer tokent ad vissza.")
+.WithTags("Auth")
+.Produces<LoginResponseDto>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest)
+.Produces(StatusCodes.Status401Unauthorized)
+.WithOpenApi();
+
+// A2 – POST /api/auth/logout
+app.MapPost("/api/auth/logout", (HttpContext context) =>
+{
+    // JWT stateless: a szerver oldalon nincs mit invalidálni.
+    // A kliens oldali token törlése a frontend feladata.
+    // Jövőbeli fejlesztés: token blacklist implementálható itt.
+    var username = context.User.Identity?.Name ?? "ismeretlen";
+    return Results.Ok(new { message = "Sikeres kijelentkezés." });
+})
+.WithName("Logout")
+.WithSummary("Kijelentkezés")
+.WithDescription("JWT stateless kijelentkezés. A kliens feladata a token törlése. Szerver oldali token invalidálás nem implementált.")
+.WithTags("Auth")
+.RequireAuthorization("Authenticated")
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status401Unauthorized)
+.WithOpenApi();
+
+// A3 – GET /api/auth/me
+app.MapGet("/api/auth/me", async (HttpContext context, AuthService authService) =>
+{
+    var user = await authService.GetCurrentUserAsync(context.User);
+
+    if (user is null)
+    {
+        return Results.Json(
+            new { message = "A felhasználó nem található." },
+            statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    return Results.Ok(user);
+})
+.WithName("GetCurrentUser")
+.WithSummary("Bejelentkezett felhasználó adatai")
+.WithDescription("A JWT tokenből azonosítja a bejelentkezett felhasználót és visszaadja az adatait.")
+.WithTags("Auth")
+.RequireAuthorization("Authenticated")
+.Produces<CurrentUserDto>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status401Unauthorized)
+.WithOpenApi();
+
+// -----------------------------------------------------------------------------------------
 // 5.1 Health endpoint
 // -----------------------------------------------------------------------------------------
 app.MapGet("/api/health", async (AppDbContext dbContext, ILogger<Program> logger) =>
@@ -127,77 +287,14 @@ app.MapGet("/api/health", async (AppDbContext dbContext, ILogger<Program> logger
 .WithOpenApi();
 
 // -----------------------------------------------------------------------------------------
-// 5.2 Adatlekérdező végpontok (Rooms / Termek)
+// Module Endpoint Groups
 // -----------------------------------------------------------------------------------------
-app.MapGet("/api/rooms", async (AppDbContext dbContext, ILogger<Program> logger) =>
-{
-    try
-    {
-        var rooms = await dbContext.Termek
-            .AsNoTracking()
-            .Select(t => new RoomDto
-            {
-                Id = t.Id,
-                Nev = t.Nev,
-                Kapacitas = t.Kapacitas,
-                Leiras = t.Leiras,
-                Aktivalva = t.Aktivalva
-            })
-            .ToListAsync();
-
-        return Results.Ok(rooms);
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error occurred while retrieving rooms from database.");
-        return Results.Problem(
-            statusCode: StatusCodes.Status500InternalServerError,
-            title: "Internal Server Error",
-            detail: "Hiba történt a termek lekérdezése során."
-        );
-    }
-})
-.WithName("GetRooms")
-.WithSummary("Termek listájának lekérdezése")
-.WithOpenApi();
-
-app.MapGet("/api/rooms/{id:int}", async (int id, AppDbContext dbContext, ILogger<Program> logger) =>
-{
-    try
-    {
-        var room = await dbContext.Termek
-            .AsNoTracking()
-            .Where(t => t.Id == id)
-            .Select(t => new RoomDto
-            {
-                Id = t.Id,
-                Nev = t.Nev,
-                Kapacitas = t.Kapacitas,
-                Leiras = t.Leiras,
-                Aktivalva = t.Aktivalva
-            })
-            .FirstOrDefaultAsync();
-
-        if (room is null)
-        {
-            return Results.NotFound(new { message = $"A(z) {id} azonosítójú terem nem található." });
-        }
-
-        return Results.Ok(room);
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error occurred while retrieving room {RoomId} from database.", id);
-        return Results.Problem(
-            statusCode: StatusCodes.Status500InternalServerError,
-            title: "Internal Server Error",
-            detail: "Hiba történt a terem lekérdezése során."
-        );
-    }
-})
-.WithName("GetRoomById")
-.WithSummary("Egy adott terem adatainak lekérdezése azonosító alapján")
-.WithOpenApi();
+app.MapUserEndpoints();
+app.MapRoomEndpoints();
+app.MapKeyEndpoints();
+app.MapKeyMovementEndpoints();
+app.MapBookingEndpoints();
+app.MapTicketEndpoints();
 
 app.Run();
 
