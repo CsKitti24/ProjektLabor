@@ -38,7 +38,6 @@ public sealed class SqlServerIntegrationTests
         db.Termek.Add(room);
         await db.SaveChangesAsync();
         await transaction.RollbackAsync();
-
         var suffix = Guid.NewGuid().ToString("N")[..10];
         var roleConfiguration = RoleNames.All.ToDictionary(
             role => role,

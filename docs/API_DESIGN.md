@@ -4,11 +4,13 @@
 
 ## Aktuális backend-összefoglaló
 
-Az API ASP.NET Core Minimal API, JWT-hitelesítéssel és szerepkör-alapú policykkel. A ténylegesen regisztrált végpontcsoportok: `/api/auth`, `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets`, `/api/maintenance`, `/api/keys/{id}/master-access`, `/api/reliability`, `/api/admin`, `/api/reports` és `/api/health`.
+Az API ASP.NET Core Minimal API, JWT-hitelesítéssel és szerepkör-alapú policykkel. A ténylegesen regisztrált végpontcsoportok: `/api/auth`, `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets`, `/api/maintenance`, `/api/keys/{id}/master-access`, `/api/reliability`, `/api/notifications`, `/api/admin`, `/api/reports` és `/api/health`.
 
 ### Üzleti integritás
 
-- Foglalás létrehozásakor a backend ellenőrzi az időintervallumot, az aktív termet, a meglévő foglalásokkal és karbantartással való ütközést. A frissítés az időintervallumot és az ütközéseket ellenőrzi.
+- Foglalási idő: egy naptári napon belül 08:00–20:00; kezdés és hossz 45 perces rácshoz igazodik.
+- A foglalás létrehozása és módosítása ugyanazt az idő-, aktív terem-, ütközés- és karbantartási validációt használja; a lemondott és `NoShow` státuszú foglalások nem blokkolnak.
+- Az automatizált `NoShow`, foglalásvége előtti értesítés és napi kulcszárási folyamatok idempotens háttérfeldolgozókkal futnak.
 - Kulcskiadás és -visszavétel: `POST /api/key-movements/issue` és `POST /api/key-movements/return`, `Portas` jogosultsággal. A kiadás sorosítható adatbázis-tranzakciót, kulcs–terem megfeleltetést és a foglaló jogosultságának ellenőrzését használja.
 - A `Portas` szerepkör adhat ki és vehet vissza kulcsot; listázni a `Portas`, `Adminisztrator` és `UzemeltetesiIgazgato` szerepkörök tudnak.
 - Production környezetben a JWT issuer, audience és legalább 32 bájtos aláírókulcs konfigurálása kötelező; a forráskódbeli és minta kulcsokkal a backend nem indul el.
@@ -53,7 +55,7 @@ React Frontend (port 3000)
         │
         │ HTTP/REST + JWT Bearer token
         ▼
-ASP.NET Core Minimal API (port 5000)
+ASP.NET Core Minimal API (port 8000)
         │
         ├── JWT Authentication Middleware
         ├── RBAC Authorization Middleware
@@ -228,8 +230,8 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| N1 | GET | `/api/notifications/my` | Saját értesítések lekérdezése | 🔴 Hiányzik |
-| N2 | GET | `/api/notifications/pending` | Kiküldendő értesítések (belső szolgáltatás) | 🔴 Hiányzik |
+| N1 | GET | `/api/notifications/my` | Saját értesítések lekérdezése | ✅ Kész |
+| N2 | GET | `/api/notifications/pending` | Függőben lévő értesítések (Adminisztrátor / Portás) | ✅ Kész |
 
 ### Egészségellenőrzés
 
@@ -1072,13 +1074,27 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
   "id": "int", "foglalasId": "int",
   "ertesitesTipus": "string (BeforeEnd)",
   "idoPont": "datetime",
-  "allapot": "string (Kesz|KuldesAlatt|Hiba)"
+  "allapot": "string (Kesz|KuldesAlatt|Hiba)",
+  "createdAt": "datetime",
+  "foglalasKezdete": "datetime", "foglalasVege": "datetime"
 }]
 ```
 
 **Kapcsolódó entitások:** `Ertesitesek`, `Foglalasok`
 
 **HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`
+
+---
+
+### N2 – GET `/api/notifications/pending`
+
+**Funkció:** A `KuldesAlatt` állapotú értesítések listája a belső kézbesítési folyamat számára.
+
+**Jogosultság:** `Adminisztrator`, `Portas`.
+
+**Válasz:** Ugyanaz az értesítés-DTO, mint az N1 végpontnál; tartalmazza a kapcsolódó foglalás azonosítóját, kezdetét és lejáratát is.
+
+**HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`.
 
 ---
 
@@ -1174,6 +1190,7 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 | GET /api/reports/reliability | ❌ | ❌ | ✅ | ✅ |
 | **Értesítések** | | | | |
 | GET /api/notifications/my | ✅ | ❌ | ❌ | ❌ |
+| GET /api/notifications/pending | ❌ | ✅ | ✅ | ❌ |
 | **Health** | | | | |
 | GET /api/health | ✅ | ✅ | ✅ | ✅ |
 
@@ -1457,9 +1474,9 @@ Az alábbi rész korábbi állapotfelvételből maradt a dokumentumban; a benne 
 | GET `/api/rooms/{id}` | JWT autentikáció és jogosultságellenőrzés hiányzik |
 | `AppDbContext.ValidateBookings()` | DB szintű ütközésvizsgálat megvan, de API szinten nincs 409-es válasz és érthető üzenet |
 
-### 🔴 Teljesen hiányzó (implementálásra vár)
+### 🔴 További hiányzó végpontok
 
-Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api/key-movements/*`, `/api/bookings/*`, `/api/tickets/*`, `/api/maintenance/*`, `/api/reliability/*`, `/api/reports/*`, `/api/notifications/*`.
+A többi hiányzó végpont: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api/key-movements/*`, `/api/bookings/*`, `/api/tickets/*`, `/api/maintenance/*`, `/api/reliability/*`, `/api/reports/*`.
 
 ### Infrastrukturális hiányosságok
 
@@ -1469,8 +1486,9 @@ Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `
 | RBAC policy-k regisztrációja (`AddAuthorization`) | 🔴 Hiányzik |
 | BCrypt jelszó-hash könyvtár | 🔴 Hiányzik (NuGet: `BCrypt.Net-Next`) |
 | Általános Audit log service (újrafelhasználható) | 🔴 Hiányzik |
-| No-show automatizmus (háttérszolgáltatás / ütemező) | 🔴 Hiányzik |
-| Értesítés-generáló háttérszolgáltatás | 🔴 Hiányzik |
+| No-show automatizmus (`BackgroundService`) | ✅ Kész |
+| Foglalásvége-értesítés (`BackgroundService`) | ✅ Kész |
+| Napi zárási +3 büntetőpont (`BackgroundService`) | ✅ Kész |
 | Service-réteg kialakítása (jelenleg minden a `Program.cs`-ben van) | 🔴 Hiányzik |
 
 ---
@@ -1530,8 +1548,9 @@ Az alábbi prioritási lista a korábbi bemutatóterv része, nem aktuális fejl
 | 35 | GET `/api/notifications/my` | Értesítések lekérdezése |
 | 36 | POST `/api/auth/logout` | Token invalidálás |
 | 37 | MK1–MK3 (mesterkulcs-jogosultságok) | Speciális kulcsjogosultságok |
-| 38 | No-show automatizmus (`IHostedService`) | Automatikus státuszváltás |
-| 39 | Értesítés-generáló háttérszolgáltatás | Foglalás-végfigyelmeztető |
+| 38 | No-show automatizmus (`BackgroundService`) | ✅ Kész |
+| 39 | Foglalás lejárta előtti értesítés | ✅ Kész |
+| 40 | Napi zárási +3 büntetőpont | ✅ Kész |
 
 ---
 

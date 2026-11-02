@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Models;
 using ProjektLabor.Security;
+using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints;
 
@@ -62,6 +63,7 @@ public static class MasterAccessEndpoints
         MasterAccessRequest request,
         ClaimsPrincipal principal,
         [FromServices] AppDbContext db,
+        [FromServices] AuditService auditService,
         CancellationToken cancellationToken)
     {
         if (await GetAdministratorIdAsync(principal, db, cancellationToken) is null)
@@ -104,8 +106,18 @@ public static class MasterAccessEndpoints
             CreatedAt = DateTime.UtcNow
         };
 
+        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+            ? null
+            : await db.Database.BeginTransactionAsync(cancellationToken);
         db.MesterkulcsJogosultsagok.Add(access);
         await db.SaveChangesAsync(cancellationToken);
+        await auditService.LogAsync(
+            principal, "GRANT", "MesterkulcsJogosultsag", access.Id.ToString(),
+            ujErtek: $"KulcsId: {id}; FelhasznaloId: {instructor.Id}");
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         return Results.Created(
             $"/api/keys/{id}/master-access/{instructor.Id}",
@@ -117,6 +129,7 @@ public static class MasterAccessEndpoints
         int userId,
         ClaimsPrincipal principal,
         [FromServices] AppDbContext db,
+        [FromServices] AuditService auditService,
         CancellationToken cancellationToken)
     {
         if (await GetAdministratorIdAsync(principal, db, cancellationToken) is null)
@@ -138,8 +151,18 @@ public static class MasterAccessEndpoints
             return Results.NotFound(new { message = "A jogosultság nem található." });
         }
 
+        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+            ? null
+            : await db.Database.BeginTransactionAsync(cancellationToken);
         db.MesterkulcsJogosultsagok.Remove(access);
         await db.SaveChangesAsync(cancellationToken);
+        await auditService.LogAsync(
+            principal, "REVOKE", "MesterkulcsJogosultsag", access.Id.ToString(),
+            regiErtek: $"KulcsId: {id}; FelhasznaloId: {userId}");
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         return Results.NoContent();
     }

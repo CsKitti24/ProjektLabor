@@ -62,9 +62,9 @@ public class ReportEndpointTests : IClassFixture<WebApplicationFactory<Program>>
             "/api/reports/room-utilization?kezdet=2026-10-12&veg=2026-10-12");
         Assert.NotNull(utilization);
         Assert.Equal(2, utilization.Termek.Count);
-        Assert.Equal(2, utilization.OsszesFoglaltOra);
-        Assert.Equal(48, utilization.OsszesRendelkezesreAlloOra);
-        Assert.Equal(4.17, utilization.KihasznaltsagSzazalek);
+        Assert.Equal(1.5, utilization.OsszesFoglaltOra);
+        Assert.Equal(24, utilization.OsszesRendelkezesreAlloOra);
+        Assert.Equal(6.25, utilization.KihasznaltsagSzazalek);
 
         var keyTraffic = await client.GetFromJsonAsync<ReportEndpoints.KeyTrafficReportResponse>(
             "/api/reports/key-traffic?kezdet=2026-10-12&veg=2026-10-12");
@@ -159,7 +159,7 @@ public class ReportEndpointTests : IClassFixture<WebApplicationFactory<Program>>
             {
                 FelhasznaloId = instructor.Id,
                 TeremId = firstRoom.Id,
-                StartTime = ReportDay.AddHours(9),
+                StartTime = ReportDay.AddHours(9).AddMinutes(30),
                 EndTime = ReportDay.AddHours(11),
                 Status = "Aktiv"
             },
@@ -167,8 +167,8 @@ public class ReportEndpointTests : IClassFixture<WebApplicationFactory<Program>>
             {
                 FelhasznaloId = instructor.Id,
                 TeremId = secondRoom.Id,
-                StartTime = ReportDay.AddHours(12),
-                EndTime = ReportDay.AddHours(13),
+                StartTime = ReportDay.AddHours(12).AddMinutes(30),
+                EndTime = ReportDay.AddHours(13).AddMinutes(15),
                 Status = "NoShow"
             });
         await db.SaveChangesAsync();

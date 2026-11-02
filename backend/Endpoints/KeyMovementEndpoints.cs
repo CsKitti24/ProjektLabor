@@ -1,5 +1,5 @@
-using System.Data;
 using System.Security.Claims;
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.KeyMovements;
@@ -73,7 +73,6 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.BadRequest(new { message = $"A foglalás nem aktív (jelenlegi státusz: {booking.Status})." });
                     }
-
                     if (booking.TeremId != key.TeremId)
                     {
                         return Results.BadRequest(new { message = "A foglalás nem ehhez a kulcshoz tartozó teremre szól." });

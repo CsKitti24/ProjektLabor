@@ -16,7 +16,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "5000:5000"
+      - "8000:8000"
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - Authentication__Jwt__Issuer=${JWT_ISSUER:?Set JWT_ISSUER in .env}
@@ -36,14 +36,14 @@ services:
       - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=sa;TrustServerCertificate=True;
       - Database__Password=${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}
       - APPLY_MIGRATIONS=true
-      - ASPNETCORE_URLS=http://+:5000
+      - ASPNETCORE_URLS=http://+:8000
     networks:
       - app-network
     depends_on:
       mssql:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:5000/api/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

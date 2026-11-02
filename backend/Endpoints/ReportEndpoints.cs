@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
+using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints;
 
@@ -157,8 +158,19 @@ public static class ReportEndpoints
                 booking.Status != "Megszuntetve")
             .Select(booking => new { booking.TeremId, booking.StartTime, booking.EndTime })
             .ToListAsync(cancellationToken);
+        var maintenances = await db.KarbantartasiIdosavok
+            .AsNoTracking()
+            .Where(maintenance =>
+                maintenance.StartTime < end &&
+                maintenance.EndTime > start)
+            .Select(maintenance => new
+            {
+                maintenance.TeremId,
+                maintenance.StartTime,
+                maintenance.EndTime
+            })
+            .ToListAsync(cancellationToken);
 
-        var periodHours = (end - start).TotalHours;
         var roomReports = rooms.Select(room =>
         {
             var bookedHours = bookings
@@ -170,16 +182,35 @@ public static class ReportEndpoints
                     return Math.Max(0, (overlapEnd - overlapStart).TotalHours);
                 });
 
+            var maintenanceHours = maintenances
+                .Where(maintenance => maintenance.TeremId == room.Id)
+                .Sum(maintenance =>
+                {
+                    var overlapStart = maintenance.StartTime > start ? maintenance.StartTime : start;
+                    var overlapEnd = maintenance.EndTime < end ? maintenance.EndTime : end;
+                    return Math.Max(0, (overlapEnd - overlapStart).TotalHours);
+                });
+            var availableHours = Math.Max(
+                0,
+                (end - start).TotalDays * (BookingRules.ClosingTime - BookingRules.OpeningTime).TotalHours -
+                maintenanceHours);
+            var utilization = availableHours == 0
+                ? 0
+                : Math.Clamp(bookedHours / availableHours * 100, 0, 100);
+
             return new RoomUtilizationItem(
                 room.Id,
                 room.Nev,
                 Math.Round(bookedHours, 2),
-                periodHours,
-                periodHours == 0 ? 0 : Math.Round(bookedHours / periodHours * 100, 2));
+                Math.Round(availableHours, 2),
+                Math.Round(utilization, 2));
         }).ToList();
 
         var totalBookedHours = roomReports.Sum(room => room.FoglaltOra);
-        var totalAvailableHours = periodHours * rooms.Count;
+        var totalAvailableHours = roomReports.Sum(room => room.RendelkezesreAlloOra);
+        var totalUtilization = totalAvailableHours == 0
+            ? 0
+            : Math.Clamp(totalBookedHours / totalAvailableHours * 100, 0, 100);
 
         return Results.Ok(new RoomUtilizationReportResponse(
             startDay,
@@ -187,7 +218,7 @@ public static class ReportEndpoints
             roomReports,
             Math.Round(totalBookedHours, 2),
             Math.Round(totalAvailableHours, 2),
-            totalAvailableHours == 0 ? 0 : Math.Round(totalBookedHours / totalAvailableHours * 100, 2)));
+            Math.Round(totalUtilization, 2)));
     }
 
     private static async Task<IResult> GetKeyTrafficAsync(

@@ -52,7 +52,9 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetRooms")
             .WithSummary("Termek listájának lekérdezése")
+            .RequireAuthorization("Authenticated")
             .Produces<List<RoomDto>>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .WithOpenApi();
 
@@ -93,7 +95,9 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetRoomById")
             .WithSummary("Egy terem adatainak lekérdezése azonosító alapján")
+            .RequireAuthorization("Authenticated")
             .Produces<RoomDto>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .WithOpenApi();

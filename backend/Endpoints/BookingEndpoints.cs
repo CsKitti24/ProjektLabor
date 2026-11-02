@@ -225,9 +225,10 @@ namespace ProjektLabor.Endpoints
                     return Results.Unauthorized();
                 }
 
-                if (request.StartTime >= request.EndTime)
+                var timeError = BookingRules.ValidateTimeRange(request.StartTime, request.EndTime);
+                if (timeError is not null)
                 {
-                    return Results.BadRequest(new { message = "A kezdési időpontnak meg kell előznie a befejezési időpontot." });
+                    return Results.BadRequest(new { message = timeError });
                 }
 
                 var room = await db.Termek.FindAsync(request.TeremId);
@@ -259,26 +260,11 @@ namespace ProjektLabor.Endpoints
                 }
 
                 // Check for overlapping active bookings in the room
-                bool hasConflict = await db.Foglalasok.AnyAsync(f =>
-                    f.TeremId == request.TeremId &&
-                    f.Status != "Megszuntetve" &&
-                    request.StartTime < f.EndTime &&
-                    request.EndTime > f.StartTime);
-
-                if (hasConflict)
+                var validationError = await BookingRules.ValidateAsync(
+                    db, request.TeremId, request.StartTime, request.EndTime);
+                if (validationError is not null)
                 {
-                    return Results.Conflict(new { message = "A megadott idősáv ütközik egy már meglévő foglalással." });
-                }
-
-                // Check for overlapping maintenance
-                bool maintenanceConflict = await db.KarbantartasiIdosavok.AnyAsync(m =>
-                    m.TeremId == request.TeremId &&
-                    request.StartTime < m.EndTime &&
-                    request.EndTime > m.StartTime);
-
-                if (maintenanceConflict)
-                {
-                    return Results.Conflict(new { message = "A terem a megadott időszakban karbantartás alatt áll." });
+                    return Results.Conflict(new { message = validationError });
                 }
 
                 var booking = new Foglalas
@@ -367,24 +353,17 @@ namespace ProjektLabor.Endpoints
                 var newStart = request.StartTime ?? booking.StartTime;
                 var newEnd = request.EndTime ?? booking.EndTime;
 
-                if (newStart >= newEnd)
+                var timeError = BookingRules.ValidateTimeRange(newStart, newEnd);
+                if (timeError is not null)
                 {
-                    return Results.BadRequest(new { message = "A kezdési időpontnak meg kell előznie a befejezési időpontot." });
+                    return Results.BadRequest(new { message = timeError });
                 }
 
-                if (request.StartTime.HasValue || request.EndTime.HasValue)
+                var validationError = await BookingRules.ValidateAsync(
+                    db, booking.TeremId, newStart, newEnd, id);
+                if (validationError is not null)
                 {
-                    bool conflict = await db.Foglalasok.AnyAsync(f =>
-                        f.Id != id &&
-                        f.TeremId == booking.TeremId &&
-                        f.Status != "Megszuntetve" &&
-                        newStart < f.EndTime &&
-                        newEnd > f.StartTime);
-
-                    if (conflict)
-                    {
-                        return Results.Conflict(new { message = "Az új időpont ütközik egy már meglévő foglalással." });
-                    }
+                    return Results.Conflict(new { message = validationError });
                 }
 
                 if (!string.IsNullOrWhiteSpace(request.Status))
@@ -393,6 +372,10 @@ namespace ProjektLabor.Endpoints
                     if (canonicalStatus == null)
                     {
                         return Results.BadRequest(new { message = $"Érvénytelen foglalás státusz: '{request.Status}'. Megengedett: Aktiv, NoShow, Megszuntetve, Kesz." });
+                    }
+                    if (!BookingRules.IsUserStatusChangeAllowed(booking.Status, canonicalStatus, isAdmin))
+                    {
+                        return Results.Forbid();
                     }
                     booking.Status = canonicalStatus;
                 }
