@@ -13,7 +13,7 @@ RUN dotnet restore
 RUN dotnet build
 
 # Backend portja
-EXPOSE 5000
+EXPOSE 8000
 
 # ASP.NET Core indítása
-CMD ["dotnet", "run", "--urls", "http://0.0.0.0:5000"]
+CMD ["dotnet", "run", "--urls", "http://0.0.0.0:8000"]
