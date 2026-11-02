@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.KeyMovements;
@@ -22,7 +23,11 @@ namespace ProjektLabor.Endpoints
                 AuditService auditService,
                 ClaimsPrincipal caller) =>
             {
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
                 var key = await db.Kulcsok
+                    .Include(k => k.Terem)
                     .Include(k => k.Kulcsmozgasok)
                     .FirstOrDefaultAsync(k => k.Id == request.KulcsId);
 
@@ -49,7 +54,9 @@ namespace ProjektLabor.Endpoints
                 // Check booking if provided
                 if (request.FoglalasId.HasValue)
                 {
-                    var booking = await db.Foglalasok.FindAsync(request.FoglalasId.Value);
+                    var booking = await db.Foglalasok
+                        .Include(f => f.Felhasznalo)
+                        .FirstOrDefaultAsync(f => f.Id == request.FoglalasId.Value);
                     if (booking is null)
                     {
                         return Results.NotFound(new { message = $"A(z) {request.FoglalasId.Value} azonosítójú foglalás nem található." });
@@ -57,6 +64,20 @@ namespace ProjektLabor.Endpoints
                     if (booking.Status != "Aktiv")
                     {
                         return Results.BadRequest(new { message = $"A foglalás nem aktív (jelenlegi státusz: {booking.Status})." });
+                    }
+                    if (booking.TeremId != key.TeremId)
+                    {
+                        return Results.BadRequest(new { message = "A foglalás nem ehhez a kulcshoz tartozó teremre szól." });
+                    }
+
+                    var isAuthorizedRecipient =
+                        booking.Felhasznalo?.Role == "Oktato" &&
+                        (key.Tipus != "Mesterkulcs" ||
+                         await db.MesterkulcsJogosultsagok.AnyAsync(a =>
+                             a.KulcsId == key.Id && a.FelhasznaloId == booking.FelhasznaloId));
+                    if (!isAuthorizedRecipient)
+                    {
+                        return Results.Forbid();
                     }
                 }
 
@@ -87,6 +108,10 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Kulcsmozgas",
                     entitasId: movement.Id.ToString(),
                     ujErtek: $"KulcsId: {key.Id}, FoglalasId: {request.FoglalasId}");
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
 
                 var opUser = await db.Felhasznalok.FindAsync(operatorId);
                 var bookingUser = request.FoglalasId.HasValue
@@ -127,6 +152,9 @@ namespace ProjektLabor.Endpoints
                 AuditService auditService,
                 ClaimsPrincipal caller) =>
             {
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
                 var key = await db.Kulcsok
                     .Include(k => k.Kulcsmozgasok)
                     .FirstOrDefaultAsync(k => k.Id == request.KulcsId);
@@ -172,6 +200,10 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Kulcsmozgas",
                     entitasId: returnMovement.Id.ToString(),
                     ujErtek: $"KulcsId: {key.Id}");
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
 
                 var opUser = await db.Felhasznalok.FindAsync(operatorId);
 

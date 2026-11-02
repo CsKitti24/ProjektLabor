@@ -83,8 +83,8 @@ namespace backend.Tests
             var (client, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("Foglalas Terem 1");
 
-            var start = DateTime.UtcNow.Date.AddDays(1).AddHours(10);
-            var end = start.AddHours(2);
+            var start = DateTime.UtcNow.Date.AddDays(1).AddHours(10).AddMinutes(15);
+            var end = start.AddMinutes(90);
 
             // 1. Create first booking
             var response1 = await client.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
@@ -100,8 +100,8 @@ namespace backend.Tests
             Assert.Equal("Aktiv", b1.Status);
 
             // 2. Try creating overlapping booking in same room
-            var overlapStart = start.AddMinutes(30);
-            var overlapEnd = end.AddMinutes(30);
+            var overlapStart = start;
+            var overlapEnd = start.AddMinutes(135);
 
             var (client2, _) = await CreateAuthenticatedUserAsync("Oktato");
             var response2 = await client2.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
@@ -123,8 +123,8 @@ namespace backend.Tests
             var (client2, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("Foglalas Terem 2");
 
-            var start = DateTime.UtcNow.Date.AddDays(2).AddHours(10);
-            var end = start.AddHours(2);
+            var start = DateTime.UtcNow.Date.AddDays(2).AddHours(10).AddMinutes(15);
+            var end = start.AddMinutes(90);
 
             await client1.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
             {
@@ -156,7 +156,7 @@ namespace backend.Tests
             var roomId = await SeedRoomAsync("Foglalas Terem 3");
 
             var start = DateTime.UtcNow.Date.AddDays(3).AddHours(14);
-            var end = start.AddHours(1);
+            var end = start.AddMinutes(45);
 
             var createRes = await client.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
             {

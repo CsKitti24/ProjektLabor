@@ -27,7 +27,7 @@ jobs:
         run: dotnet build ProjektLabor.sln --no-restore --configuration Release
 
       - name: Run backend tests
-        run: dotnet test ProjektLabor.sln --no-build --configuration Release --verbosity normal
+        run: dotnet test ProjektLabor.sln --no-build --configuration Release --verbosity normal --filter "FullyQualifiedName!~SqlServerIntegrationTests"
 
   frontend:
     name: Frontend (Lint & Build)

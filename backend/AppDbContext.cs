@@ -98,16 +98,32 @@ namespace ProjektLabor.Data
 
         private void ValidateBookings()
         {
-            var overlapping = ChangeTracker.Entries<Foglalas>()
+            var changedBookings = ChangeTracker.Entries<Foglalas>()
                 .Where(e => e.State == Microsoft.EntityFrameworkCore.EntityState.Added || e.State == Microsoft.EntityFrameworkCore.EntityState.Modified)
                 .Select(e => e.Entity);
-            foreach (var booking in overlapping)
+            foreach (var booking in changedBookings)
             {
-                var conflict = Foglalasok.Any(f => f.Id != booking.Id && f.TeremId == booking.TeremId &&
-                    ((booking.StartTime < f.EndTime) && (booking.EndTime > f.StartTime)));
-                if (conflict)
+                if (!Services.BookingRules.IsActive(booking.Status))
                 {
-                    throw new InvalidOperationException($"Booking for room {booking.TeremId} overlaps with an existing booking.");
+                    continue;
+                }
+
+                var conflict = Foglalasok.Any(f => f.Id != booking.Id &&
+                    f.TeremId == booking.TeremId &&
+                    f.Status != "Megszuntetve" &&
+                    f.Status != "NoShow" &&
+                    booking.StartTime < f.EndTime &&
+                    booking.EndTime > f.StartTime);
+                var maintenanceConflict = KarbantartasiIdosavok.Any(m =>
+                    m.TeremId == booking.TeremId &&
+                    booking.StartTime < m.EndTime &&
+                    booking.EndTime > m.StartTime);
+                if (conflict || maintenanceConflict)
+                {
+                    throw new InvalidOperationException(
+                        conflict
+                            ? "Booking for the room overlaps with an existing booking."
+                            : "Booking overlaps with a maintenance period.");
                 }
             }
         }
