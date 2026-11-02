@@ -38,7 +38,7 @@ PowerShell alatt:
 Copy-Item .env.example .env
 ```
 
-A Docker indítása előtt állíts be egyedi, az MSSQL jelszókövetelményeinek megfelelő `MSSQL_SA_PASSWORD` értéket. Generálj egy legalább 32 bájtos JWT-aláíró kulcsot, például `openssl rand -base64 48` paranccsal, és másold a `JWT_SIGNING_KEY` változóba. A `JWT_ISSUER`, `JWT_AUDIENCE` és opcionálisan a `JWT_EXPIRES_IN_HOURS` értékei is konfigurálhatók. A `.env.example` nem tartalmaz használható JWT-kulcsot; a Compose indítása ezek kitöltése nélkül hibát jelez. A `.env` fájlt és valódi hitelesítő adatokat ne commitolj.
+A Docker indítása előtt állíts be egyedi, az MSSQL jelszókövetelményeinek megfelelő `MSSQL_SA_PASSWORD` értéket. Generálj egy legalább 32 bájtos JWT-aláíró kulcsot, például `openssl rand -base64 48` paranccsal, és másold a `JWT_SIGNING_KEY` változóba. A `JWT_ISSUER`, `JWT_AUDIENCE` és opcionálisan a `JWT_EXPIRES_IN_HOURS` értékei is konfigurálhatók. A `.env.example` nem tartalmaz használható JWT-kulcsot: a Compose konfiguráció ellenőrzése üres kulccsal is lefut, de a backend induláskor elutasítja azt, amíg nincs beállítva érvényes, legalább 32 bájtos kulcs. A `.env` fájlt és valódi hitelesítő adatokat ne commitolj.
 
 A backend JWT-alapú hitelesítést és szerepkör-alapú jogosultságkezelést használ. A token `sub` claimje a felhasználó adatbázisbeli azonosítóját, `role` claimje pedig a szerepkört tartalmazza; az írási műveletekhez szükséges szerepköröket az egyes végpontok RBAC-szabályai határozzák meg.
 
