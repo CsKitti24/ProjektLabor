@@ -47,6 +47,8 @@ namespace ProjektLabor.Models
         [Required]
         public int Pont { get; set; }
 
+        public bool Automatikus { get; set; }
+
         public DateTime EsemenyIdopontja { get; set; } = DateTime.UtcNow;
 
         [Required, MaxLength(20)]
