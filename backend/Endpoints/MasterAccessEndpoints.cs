@@ -4,19 +4,18 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 
 namespace ProjektLabor.Endpoints;
 
 public static class MasterAccessEndpoints
 {
-    private const string AdministratorRole = "Adminisztrátor";
-    private const string InstructorRole = "Oktató / Igénylő";
     private const string MasterKeyType = "Mesterkulcs";
 
     public static IEndpointRouteBuilder MapMasterAccessEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var masterAccess = endpoints.MapGroup("/api/keys/{id:int}/master-access")
-            .RequireAuthorization();
+            .RequireAuthorization(RolePolicies.Administrator);
 
         masterAccess.MapGet("/", GetAsync)
             .WithName("GetMasterKeyAccess");
@@ -82,7 +81,7 @@ public static class MasterAccessEndpoints
 
         var instructor = await db.Felhasznalok
             .AsNoTracking()
-            .Where(account => account.Id == request.UserId && account.Role == InstructorRole)
+            .Where(account => account.Id == request.UserId && account.Role == RoleNames.Oktato)
             .Select(account => new InstructorResponse(account.Id, account.Nev))
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -150,7 +149,7 @@ public static class MasterAccessEndpoints
         AppDbContext db,
         CancellationToken cancellationToken)
     {
-        if (!principal.IsInRole(AdministratorRole) ||
+        if (!principal.IsInRole(RoleNames.Adminisztrator) ||
             !int.TryParse(
                 principal.FindFirstValue("sub"),
                 NumberStyles.None,
@@ -161,7 +160,7 @@ public static class MasterAccessEndpoints
         }
 
         return await db.Felhasznalok
-            .Where(account => account.Id == userId && account.Role == AdministratorRole)
+            .Where(account => account.Id == userId && account.Role == RoleNames.Adminisztrator)
             .Select(account => (int?)account.Id)
             .SingleOrDefaultAsync(cancellationToken);
     }

@@ -1,6 +1,6 @@
 using System.Text;
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -8,13 +8,14 @@ using ProjektLabor.Data;
 using ProjektLabor.DTOs;
 using ProjektLabor.DTOs.Auth;
 using ProjektLabor.Endpoints;
+using ProjektLabor.Security;
 using ProjektLabor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var jwtKey = builder.Configuration["Jwt:Key"] ?? builder.Configuration["Authentication:Jwt:SigningKey"];
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? builder.Configuration["Authentication:Jwt:Issuer"];
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? builder.Configuration["Authentication:Jwt:Audience"];
+var jwtKey = builder.Configuration["Authentication:Jwt:SigningKey"] ?? builder.Configuration["Jwt:Key"];
+var jwtIssuer = builder.Configuration["Authentication:Jwt:Issuer"] ?? builder.Configuration["Jwt:Issuer"];
+var jwtAudience = builder.Configuration["Authentication:Jwt:Audience"] ?? builder.Configuration["Jwt:Audience"];
 
 if (string.IsNullOrWhiteSpace(jwtKey) ||
     string.IsNullOrWhiteSpace(jwtIssuer) ||
@@ -43,7 +44,7 @@ builder.Services
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-            RoleClaimType = ClaimTypes.Role,
+            RoleClaimType = "role",
             NameClaimType = "sub",
             ClockSkew = TimeSpan.FromSeconds(30)
         };
@@ -51,6 +52,7 @@ builder.Services
 
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy("Administrator", policy => policy.RequireRole("Adminisztrator"));
     options.AddPolicy("Adminisztrator", policy => policy.RequireRole("Adminisztrator"));
     options.AddPolicy("Portas", policy => policy.RequireRole("Portas"));
     options.AddPolicy("Oktato", policy => policy.RequireRole("Oktato"));
@@ -93,6 +95,16 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+var databasePassword = builder.Configuration["Database:Password"];
+if (!string.IsNullOrWhiteSpace(connectionString) && !string.IsNullOrWhiteSpace(databasePassword))
+{
+    var sqlConnectionString = new SqlConnectionStringBuilder(connectionString)
+    {
+        Password = databasePassword
+    };
+    connectionString = sqlConnectionString.ConnectionString;
+}
+
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     var startupLogger = LoggerFactory.Create(logging => logging.AddConsole()).CreateLogger("Startup");
@@ -205,9 +217,14 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
             else
             {
                 logger.LogError(ex, "Database migrations could not be applied after {MaxRetries} attempts.", maxRetries);
+                throw new InvalidOperationException(
+                    "Database migrations could not be applied; the backend cannot start securely.",
+                    ex);
             }
         }
     }
+
+    await AdminBootstrapper.InitializeAsync(dbContext, app.Configuration, logger);
 }
 
 app.MapPost("/api/auth/login", async (

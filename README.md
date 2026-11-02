@@ -1,15 +1,15 @@
 # Egyetemi Kulcs- és Teremnyilvántartó Rendszer
 
-Az alkalmazás egyetemi teremfoglalások, teremkulcsok, karbantartási idősávok és a kapcsolódó események digitális kezelésére szolgál.
+Az alkalmazás célja az egyetemi teremfoglalások, a teremkulcsok kiadásának és visszavételének, valamint az ezekhez kapcsolódó eseményeknek a digitális kezelése.
 
 ## Technológiai stack
 
-- **Frontend:** React, TypeScript, Vite
-- **Backend:** ASP.NET Core Web API (.NET 8)
+- **Frontend:** React + TypeScript + Vite
+- **Backend:** ASP.NET Core Web API
 - **Adatbázis:** Microsoft SQL Server
 - **Adatelérés és migrációk:** Entity Framework Core
-- **Hitelesítés:** JWT, szerepkör-alapú hozzáférés-vezérlés (RBAC)
-- **Futtatás:** Docker Compose
+- **Futtatás:** Docker és Docker Compose
+- **Verziókezelés és CI:** GitHub, GitHub Actions
 
 ## Rendszerarchitektúra
 
@@ -18,43 +18,73 @@ flowchart TD
     U[Felhasználó böngészője] --> FE[React + TypeScript frontend]
     FE -->|REST / HTTP| API[ASP.NET Core Web API]
     API -->|Entity Framework Core| DB[(Microsoft SQL Server)]
+    CI[GitHub Actions CI] -. build és tesztek .-> FE
+    CI -. build és tesztek .-> API
 ```
 
-Az adatbázis közvetlenül nem érhető el a böngészőből; a frontend a backend API-n keresztül kommunikál vele.
+A frontend az API-n keresztül kommunikál a backenddel. Az adatbázis közvetlenül nem érhető el a böngészőből.
 
-## Előfeltételek és konfiguráció
+## Előfeltételek
 
-Docker Desktop vagy Docker Engine Docker Compose támogatással szükséges. Helyi, konténer nélküli fejlesztéshez Node.js/npm és .NET 8 SDK is kellhet.
+- Git
+- Docker Desktop vagy Docker Engine, működő Docker Compose támogatással
+- A GitHub repositoryhoz való hozzáférés
 
-Készíts helyi `.env` fájlt a példából:
+A frontend és a backend helyi, konténeren kívüli fejlesztéséhez Node.js/npm, illetve a projektben használt .NET SDK is szükséges lehet. A Dockeres indításhoz ezeket nem feltétlenül kell külön a gazdagépre telepíteni.
+
+## Környezeti változók
+
+A repository gyökerében található `.env.example` fájlból készíts helyi `.env` fájlt, majd töltsd ki a szükséges értékeket:
 
 ```bash
 cp .env.example .env
 ```
 
-PowerShell alatt:
+Windows PowerShell alatt:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-A Docker indítása előtt állíts be egyedi, az MSSQL jelszókövetelményeinek megfelelő `MSSQL_SA_PASSWORD` értéket. Generálj egy legalább 32 bájtos JWT-aláíró kulcsot, például `openssl rand -base64 48` paranccsal, és másold a `JWT_SIGNING_KEY` változóba. A `JWT_ISSUER`, `JWT_AUDIENCE` és opcionálisan a `JWT_EXPIRES_IN_HOURS` értékei is konfigurálhatók. A `.env.example` nem tartalmaz használható JWT-kulcsot: a Compose konfiguráció ellenőrzése üres kulccsal is lefut, de a backend induláskor elutasítja azt, amíg nincs beállítva érvényes, legalább 32 bájtos kulcs. A `.env` fájlt és valódi hitelesítő adatokat ne commitolj.
+A tényleges változóneveket és a kötelező értékeket a `.env.example` és a `docker-compose.yml` határozza meg. A `.env` fájlt ne töltsd fel a Git repositoryba, és valódi jelszót, tokent vagy egyéb titkot ne commitolj.
 
-A backend JWT-alapú hitelesítést és szerepkör-alapú jogosultságkezelést használ. A token `sub` claimje a felhasználó adatbázisbeli azonosítóját, `role` claimje pedig a szerepkört tartalmazza; az írási műveletekhez szükséges szerepköröket az egyes végpontok RBAC-szabályai határozzák meg.
+A Docker Compose az `ASPNETCORE_ENVIRONMENT` változó hiányában `Production` környezetben indítja a backendet. Cseréld le az `.env.example` helyőrzőit az `.env` fájlban egyedi `MSSQL_SA_PASSWORD`, `JWT_ISSUER`, `JWT_AUDIENCE` és `JWT_SIGNING_KEY` értékekre. A JWT-aláírókulcs legalább 32 bájt legyen; például `openssl rand -base64 48` paranccsal állíthatsz elő véletlen értéket. A példafájlban lévő értékek csak helyőrzők, éles környezetben nem használhatók; hiányzó vagy rövid kulccsal az alkalmazás nem indul el.
+
+Helyi fejlesztéshez `ASPNETCORE_ENVIRONMENT=Development` használható. Ebben a környezetben a [backend/appsettings.Development.json](./backend/appsettings.Development.json) tartalmaz egy kizárólag fejlesztéshez használható JWT-kulcsot; ezt az értéket éles környezetben tilos használni. Az `appsettings.json` nem tartalmaz aláírókulcsot.
+
+### Első indítás: adminisztrátor inicializálása
+
+Üres adatbázis esetén a migrációk után a backend egyetlen adminisztrátori fiókot hoz létre a `BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD` változók alapján. A felhasználónév 3–50 ASCII betű, szám, pont, aláhúzás vagy kötőjel lehet; a jelszó legalább 12, legfeljebb 72 UTF-8 bájt legyen. A jelszó BCrypt hash-ként kerül mentésre. Hiányos vagy érvénytelen inicializáló adatokkal az üres adatbázisú alkalmazás egyértelmű hibával leáll.
+
+Az inicializálás csak akkor történik meg, ha az adatbázisban még nincs felhasználó. Az első sikeres indulás után vedd ki a bootstrap felhasználónevet és jelszót a `.env` fájlból, és ne tárold őket forráskódban vagy más nem biztonságos helyen. Nincs nyilvános admin-létrehozó API. Megjegyzés: ebben a repository-verzióban nincs felhasználói bejelentkezési vagy felhasználókezelési HTTP-végpont; a bootstrap az admin fiókot készíti elő az alkalmazáson kívüli, biztonságos hitelesítési folyamathoz.
+
+A JWT `sub` claimje az adatbázisbeli felhasználóazonosító, a `role` claim pedig az alábbi kanonikus értékek egyike legyen: `Oktato`, `Portas`, `Adminisztrator`, `UzemeltetesiIgazgato`.
+
+A következő adatbázis-migráció a korábban eltárolt ékezetes szerepkörértékeket ezekre a kanonikus ASCII értékekre alakítja át; a fiókok egyéb adatait nem módosítja.
 
 ## Indítás Docker Compose segítségével
 
-A repository gyökerében:
+A repository gyökérkönyvtárában futtasd:
 
 ```bash
 docker compose up --build -d
+```
+
+A szolgáltatások állapotának ellenőrzése:
+
+```bash
 docker compose ps
 ```
 
-Naplók:
+A naplók megtekintése:
 
 ```bash
 docker compose logs -f
+```
+
+Egy szolgáltatás naplója külön is lekérhető, például:
+
+```bash
 docker compose logs -f backend
 docker compose logs -f frontend
 docker compose logs -f mssql
@@ -66,57 +96,76 @@ Leállítás:
 docker compose down
 ```
 
-A normál leállítás megtartja az adatbázis volume-ját. Ne használd a `docker compose down -v` parancsot, ha meg szeretnéd őrizni az adatokat.
+A konténerek és az adatbázis tartós adatait tároló volume-ok törlése nem része a szokásos leállításnak. **Ne használd a `docker compose down -v` parancsot, ha meg akarod tartani az adatbázis adatait.**
 
-| Szolgáltatás | Gazdagép | Konténer | Elérés |
+## Szolgáltatások és portok
+
+A jelenlegi fejlesztői Compose-beállításban rögzített portkiosztás:
+
+| Szolgáltatás | Gazdagépen elérhető port | Konténerport | Megjegyzés |
 |---|---:|---:|---|
-| Frontend | `3000` | `3000` | `http://localhost:3000` |
-| Backend API | `5000` | `5000` | `http://localhost:5000` |
-| MSSQL | `1433` | `1433` | SQL-kliensből, a `.env` hitelesítő adataival |
+| Frontend | `3000` | `3000` | Böngészőből: `http://localhost:3000` |
+| Backend API | `5000` | `5000` | Az API gazdagépről: `http://localhost:5000` |
+| Microsoft SQL Server | `1433` | `1433` | Adatbázis-kapcsolathoz; a hitelesítési adatokat a `.env` tartalmazza |
 
-A frontend a backend egészségellenőrzésének sikeréig nem indul el; a backend pedig megvárja az adatbázis egészséges állapotát. A backend konténer az `APPLY_MIGRATIONS=true` beállítással indul, és alkalmazza a függő EF Core migrációkat.
+A portok a `docker-compose.yml` fájlban ellenőrizhetők. Ha ott változnak, ezt a táblázatot is frissíteni kell.
 
-## API és hitelesítés
+## API-ellenőrzés
 
-Fejlesztési környezetben a Swagger UI címe `http://localhost:5000/swagger`; az OpenAPI leírás a `http://localhost:5000/swagger/v1/swagger.json` útvonalon érhető el. A Swagger felületen a bejelentkezés után a JWT `Authorize` funkcióval használható.
+A backend az alábbi ellenőrző és adatlekérdező végpontokat biztosítja:
 
-- `GET /api/health` – adatbázis-kapcsolatot is ellenőrző health check; nem igényel hitelesítést.
-- `POST /api/auth/login` – felhasználónév és jelszó alapján JWT-t ad vissza.
-- `GET /api/auth/me`, `POST /api/auth/logout` – a hitelesített felhasználó adatai, illetve kliensoldali kijelentkezés.
-- `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets` – felhasználó-, terem-, kulcs-, kulcsmozgás-, foglalás- és hibajegy-végpontok; a részletes jogosultságokat az endpointok RBAC-szabályai határozzák meg.
-- `/api/maintenance` – karbantartási idősávok listázása és kezelése.
-- `/api/keys/{id}/master-access` – mesterkulcs-hozzáférések kezelése.
-- `/api/reliability` – oktatói megbízhatósági pontszámok és események.
-- `/api/parameters` – rendszerparaméterek lekérdezése és adminisztrátori módosítása.
-- `/api/audit` – adminisztrátori auditnapló-lekérdezés és szűrés.
-- `/api/reports` – napi, heti, teremkihasználtsági, kulcsforgalmi és megbízhatósági riportok.
-- `/weatherforecast` – a `main` ágról megőrzött, nyilvános ASP.NET minta-végpont.
+### 1. Egészségellenőrzés (Health Check)
 
-A karbantartási, mesterkulcs-, rendszerparaméter-, audit-, riport- és megbízhatósági műveletek hitelesített JWT-t igényelnek; a szerepkör-korlátozott műveleteket a backend ellenőrzi. Az értesítési entitás szerepel az adatmodellben, de az értesítési végpontok és szolgáltatás még nincsenek implementálva. Az egyes végpontok és DTO-k részletei a Swagger dokumentációban és a `docs/API_DESIGN.md` fájlban találhatók.
-
-### Karbantartás, mesterkulcsok és megbízhatóság
-
-- Karbantartás: `GET /api/maintenance` (opcionális terem- és időtartomány-szűrőkkel), `GET /api/maintenance/{id}`, valamint `POST`, `PUT` és `DELETE` műveletek. Az írási műveletek adminisztrátori jogosultságot igényelnek; foglalással ütköző idősáv `409 Conflict` választ ad.
-- Mesterkulcs: `GET` és `POST /api/keys/{id}/master-access`, illetve `DELETE /api/keys/{id}/master-access/{userId}`. A jogosultságkezelést adminisztrátor végezheti; csak mesterkulcshoz adható hozzáférés.
-- Megbízhatóság: `GET /api/reliability/users/{userId}`, `GET /api/reliability/users/{userId}/events`, `GET /api/reliability/my`, és adminisztrátori `POST /api/reliability/correction`. A pontszám eseményekből számítódik, és 0–100 közé korlátozott.
-
-Példa health check és teremlekérdezés:
-
-```http
+```text
 GET http://localhost:5000/api/health
+```
+
+- **Sikeres válasz (HTTP 200 OK):**
+```json
+{
+  "status": "ok",
+  "database": "connected"
+}
+```
+- **Hiba esetén (HTTP 503 Service Unavailable):**
+```json
+{
+  "status": "unhealthy",
+  "database": "disconnected"
+}
+```
+
+### 2. Termek listázása (Rooms Query)
+
+```text
 GET http://localhost:5000/api/rooms
 ```
 
-A teremlista és az egy terem adatait visszaadó `GET /api/rooms` és `GET /api/rooms/{id}` végpont nyilvános, ahogy a főágbeli API is működött. A módosító terem-végpontok hitelesítést és megfelelő RBAC-szerepkört igényelnek.
+- **Válasz (HTTP 200 OK):** Termek listája DTO formátumban (üres lista, ha még nincs rögzített terem):
+```json
+[
+  {
+    "id": 1,
+    "nev": "I. előadó",
+    "kapacitas": 120,
+    "leiras": "Főépület 1. emelet",
+    "aktivalva": true
+  }
+]
+```
 
-## API részletek
+### 3. Egy adott terem lekérdezése
+
+```text
+GET http://localhost:5000/api/rooms/{id}
+```
 
 - **Sikeres válasz (HTTP 200 OK):** A kiválasztott terem DTO adatai.
 - **Ha nem található (HTTP 404 Not Found):** `{"message": "A(z) {id} azonosítójú terem nem található."}`
 
 ### Mesterkulcs-jogosultságok
 
-A jogosultságok kezeléséhez hitelesített, `Adminisztrátor` szerepkörű felhasználó szükséges. A POST-kérés JSON-törzse:
+A jogosultságok kezeléséhez hitelesített, `Adminisztrator` szerepkörű felhasználó szükséges. A POST-kérés JSON-törzse:
 
 ```json
 { "userId": 123 }
@@ -128,7 +177,7 @@ A jogosultságok kezeléséhez hitelesített, `Adminisztrátor` szerepkörű fel
 | `POST` | `/api/keys/{id}/master-access` | Jogosultság adása egy oktatónak |
 | `DELETE` | `/api/keys/{id}/master-access/{userId}` | Jogosultság visszavonása |
 
-A végpontok csak `Mesterkulcs` típusú kulcsot fogadnak el; hozzárendeléskor a megadott felhasználónak `Oktató / Igénylő` szerepkörűnek kell lennie.
+A végpontok csak `Mesterkulcs` típusú kulcsot fogadnak el; hozzárendeléskor a megadott felhasználónak `Oktato` szerepkörűnek kell lennie.
 
 ## Karbantartási idősávok API
 
@@ -138,7 +187,7 @@ A végpontok csak `Mesterkulcs` típusú kulcsot fogadnak el; hozzárendeléskor
 - `PUT /api/maintenance/{id}` – idősáv módosítása.
 - `DELETE /api/maintenance/{id}` – idősáv törlése.
 
-A létrehozási és módosítási kérések törzse: `teremId`, `startTime`, `endTime`, valamint opcionálisan `leiras`. Az írási végpontok csak adatbázisban is adminisztrátori szerepkörű, megfelelő JWT-vel hitelesített felhasználó számára érhetők el. A foglalással ütköző idősáv `409 Conflict` választ eredményez; a megszüntetett foglalások nem blokkolják a karbantartást.
+A karbantartási listázás és részletezés hitelesítést igényel, a létrehozás, módosítás és törlés pedig kizárólag `Adminisztrator` jogosultságú, adatbázisban is megfelelő szerepkörrel rendelkező felhasználónak engedélyezett. A létrehozási és módosítási kérések törzse: `teremId`, `startTime`, `endTime`, valamint opcionálisan `leiras`. A foglalással ütköző idősáv `409 Conflict` választ eredményez; a megszüntetett foglalások nem blokkolják a karbantartást.
 
 ## Megbízhatósági pontozás API
 
@@ -149,26 +198,30 @@ A létrehozási és módosítási kérések törzse: `teremId`, `startTime`, `en
 
 A pontszámot a backend az eseményekből, időrendi sorrendben számítja, és minden esemény után 0–100 közé korlátozza. A tanév szeptember 1-jén kezdődik; a korábbi tanévek eseményei és auditbejegyzései megmaradnak. A 10–19 pontos érték figyelmeztetést, a 20–29 pontos kötelező elbeszélgetést, a 30 vagy több pont elbeszélgetést és kulcskezelési/biztonsági tréninget jelent. Az oktató csak a saját adatait kérheti le, az adminisztrátor és az üzemeltetési igazgató más oktató adatait is megtekintheti. A korrekció csak adatbázisban is adminisztrátori szerepkörű felhasználónak engedélyezett; a pontozási esemény és az auditbejegyzés egy tranzakcióban kerül mentésre.
 
-## Adatbázis, build és tesztek
+## Adatbázis és migrációk
 
-Az adatbázis sémáját az `backend/Migrations` alatti EF Core migrációk verziózzák. A kezdeti migráció neve: `InitialCreate`.
+Az adatbázis sémáját Entity Framework Core migrációk verziózzák (`backend/Migrations`).
+A kezdeti migráció neve: `InitialCreate`.
 
-Migrációk futtatása fejlesztői parancssorból:
-
+- **Migrációk futtatása fejlesztői parancssorból:**
 ```bash
-dotnet tool restore
 dotnet tool run dotnet-ef database update --project backend
 ```
 
-Backend build és tesztek:
+- **Automatikus migráció konténer indulásakor:**
+A `docker-compose.yml`-ben a `backend` konténer számára az `APPLY_MIGRATIONS=true` környezeti változó van beállítva, így a backend indításakor automatikusan és biztonságosan lefut a `Database.Migrate()` parancs.
 
+## Tesztek és ellenőrzések futtatása
+
+A fejlesztés során és Pull Request benyújtása előtt helyileg is lefuttathatók az ellenőrzések:
+
+### Backend build és tesztek
 ```bash
 dotnet build ProjektLabor.sln
 dotnet test ProjektLabor.sln
 ```
 
-Frontend lint és build:
-
+### Frontend lint és build
 ```bash
 cd frontend
 npm ci
@@ -176,18 +229,50 @@ npm run lint
 npm run build
 ```
 
-Compose konfiguráció ellenőrzése:
-
+### Docker konfiguráció és konténer-buildek ellenőrzése
 ```bash
-docker compose --env-file .env config
+docker compose --env-file .env.example config
+docker compose --env-file .env.example build
 ```
 
-## CI és fejlesztési folyamat
+## CI – GitHub Actions
 
-A GitHub Actions ellenőrzi a backend restore/build és teszt lépéseit, valamint a frontend telepítését, lintelését és buildjét. Pull Request nyitásakor és frissítésekor ellenőrizd a CI eredményét is; a sikeres helyi futás nem helyettesíti a GitHub Actions ellenőrzését.
+A CI-folyamatnak Pull Request nyitásakor és frissítésekor, valamint a `main` ágra történő push/merge után kell lefutnia. Legalább az alábbi lépéseket kell végrehajtania:
 
-A fő tervezett modulok a terem- és kulcsnyilvántartás, 45 perces időszeletekkel működő foglalás és ütközésvizsgálat, kulcskiadás és -visszavétel, hibajegyek, RBAC, auditnapló, értesítések, megbízhatósági pontozás és riportok. A működő végpontok és az aktuális implementáció a Swagger dokumentációban, illetve a `docs/API_DESIGN.md` fájlban található.
+1. Repository checkout.
+2. Backend restore és build.
+3. Backend unit tesztek futtatása.
+4. Frontend függőségek telepítése és build.
+5. Linter futtatása, amennyiben a projektben konfigurálva van.
+
+A CI állapotát a Pull Requesten kell ellenőrizni. A sikeres helyi futás önmagában nem helyettesíti a GitHub Actions futás ellenőrzését.
 
 ## Fejlesztési konvenciók
 
-A módosításokat külön brancheken készítsétek, és Pull Requesten keresztül integráljátok. Használt commitprefixek: `feat:`, `fix:`, `refactor:`, `test:` és `docs:`. A Pull Request írja le a módosítás célját, az ellenőrzések eredményét és az ismert korlátokat.
+A módosításokat külön brancheken készítsétek, majd Pull Requesten keresztül integráljátok a `main` ágba. A projektben használt commitprefixek:
+
+- `feat:` – új funkció
+- `fix:` – hibajavítás
+- `refactor:` – belső átszervezés
+- `test:` – tesztek hozzáadása vagy módosítása
+- `docs:` – dokumentáció
+
+A változtatás legyen kicsi, célzott, és a Pull Request írja le a módosítás célját, a tesztelés eredményét, illetve az esetleges ismert korlátokat.
+
+## A rendszer tervezett fő moduljai
+
+- Terem- és kulcsnyilvántartás
+- Teremfoglalás 45 perces időszeletekkel és ütközésvizsgálattal
+- Kulcskiadás és -visszavétel rögzítése
+- Hibajegykezelés és karbantartási idősávok
+- Felhasználói szerepkörök és jogosultságok (RBAC)
+- Auditnapló
+- Foglalás vége előtti értesítés
+- Oktatói megbízhatósági pontozás
+- Napi/heti riportok
+
+Ezek közül a második bemutatóra az infrastruktúra, az első adatbázisséma, a backend–adatbázis kapcsolat, az egészségellenőrző végpont, egy adatlekérdező végpont és legalább egy CI-ban futó unit teszt a prioritás.
+
+## Ismert korlátok / frissítendő adatok
+
+A README-t a repository tényleges állapotával együtt kell karbantartani. Az API pontos adatlekérdező útvonalát, az alkalmazott .NET-verziót, az EF Core provider/verziót, a migrációk futtatásának pontos módját és a CI workflow fájlnevét csak akkor szabad konkrét értékként feltüntetni, ha azokat a kódbázisban ellenőriztük.
