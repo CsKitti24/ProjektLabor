@@ -1,5 +1,48 @@
 @backend_HostAddress = http://localhost:5000
+@jwtToken = paste-token-here
 
+### Health check (public)
+GET {{backend_HostAddress}}/api/health
+Accept: application/json
+
+### Login to obtain a JWT
+POST {{backend_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "your-username",
+  "jelszo": "your-password"
+}
+
+### Get current user (replace jwtToken after login)
+GET {{backend_HostAddress}}/api/auth/me
+Authorization: Bearer {{jwtToken}}
+Accept: application/json
+
+### Get all rooms (requires JWT)
+GET {{backend_HostAddress}}/api/rooms
+Authorization: Bearer {{jwtToken}}
+Accept: application/json
+
+### Get room by id (requires JWT)
+GET {{backend_HostAddress}}/api/rooms/1
+Authorization: Bearer {{jwtToken}}
+Accept: application/json
+
+### List maintenance windows (requires JWT for write operations)
+GET {{backend_HostAddress}}/api/maintenance
+Authorization: Bearer {{jwtToken}}
+Accept: application/json
+
+### Get reliability score (requires JWT)
+GET {{backend_HostAddress}}/api/reliability/users/1
+Authorization: Bearer {{jwtToken}}
+Accept: application/json
+
+### List master-key access (requires JWT)
+GET {{backend_HostAddress}}/api/keys/1/master-access
+Authorization: Bearer {{jwtToken}}
+Accept: application/json
 ### Health check
 GET {{backend_HostAddress}}/api/health
 Accept: application/json
