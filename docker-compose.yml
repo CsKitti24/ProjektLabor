@@ -24,6 +24,15 @@ services:
       - Authentication__Jwt__SigningKey=${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
       - BootstrapAdmin__Username=${BOOTSTRAP_ADMIN_USERNAME:-}
       - BootstrapAdmin__Password=${BOOTSTRAP_ADMIN_PASSWORD:-}
+      - BootstrapDemoUsers__Enabled=${BOOTSTRAP_DEMO_USERS_ENABLED:-false}
+      - BootstrapDemoUsers__Oktato__Username=${DEMO_OKTATO_USERNAME:-}
+      - BootstrapDemoUsers__Oktato__Password=${DEMO_OKTATO_PASSWORD:-}
+      - BootstrapDemoUsers__Portas__Username=${DEMO_PORTAS_USERNAME:-}
+      - BootstrapDemoUsers__Portas__Password=${DEMO_PORTAS_PASSWORD:-}
+      - BootstrapDemoUsers__Adminisztrator__Username=${DEMO_ADMIN_USERNAME:-}
+      - BootstrapDemoUsers__Adminisztrator__Password=${DEMO_ADMIN_PASSWORD:-}
+      - BootstrapDemoUsers__UzemeltetesiIgazgato__Username=${DEMO_IGAZGATO_USERNAME:-}
+      - BootstrapDemoUsers__UzemeltetesiIgazgato__Password=${DEMO_IGAZGATO_PASSWORD:-}
       - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=sa;TrustServerCertificate=True;
       - Database__Password=${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}
       - APPLY_MIGRATIONS=true

@@ -13,22 +13,8 @@ using ProjektLabor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var jwtKey = builder.Configuration["Authentication:Jwt:SigningKey"] ?? builder.Configuration["Jwt:Key"];
-var jwtIssuer = builder.Configuration["Authentication:Jwt:Issuer"] ?? builder.Configuration["Jwt:Issuer"];
-var jwtAudience = builder.Configuration["Authentication:Jwt:Audience"] ?? builder.Configuration["Jwt:Audience"];
-
-if (string.IsNullOrWhiteSpace(jwtKey) ||
-    string.IsNullOrWhiteSpace(jwtIssuer) ||
-    string.IsNullOrWhiteSpace(jwtAudience) ||
-    Encoding.UTF8.GetByteCount(jwtKey) < 32)
-{
-    throw new InvalidOperationException(
-        "Configure Jwt:Key, Jwt:Issuer, and Jwt:Audience; the signing key must be at least 32 bytes.");
-}
-
-builder.Configuration["Jwt:Key"] = jwtKey;
-builder.Configuration["Jwt:Issuer"] = jwtIssuer;
-builder.Configuration["Jwt:Audience"] = jwtAudience;
+var jwtSettings = JwtSettings.FromConfiguration(builder.Configuration, builder.Environment);
+var jwtSigningKey = jwtSettings.GetSymmetricSecurityKey();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -38,30 +24,50 @@ builder.Services
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidIssuer = jwtIssuer,
+            ValidIssuer = jwtSettings.Issuer,
             ValidateAudience = true,
-            ValidAudience = jwtAudience,
+            ValidAudience = jwtSettings.Audience,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            IssuerSigningKey = jwtSigningKey,
             RoleClaimType = "role",
             NameClaimType = "sub",
             ClockSkew = TimeSpan.FromSeconds(30)
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                var subject = context.Principal?.FindFirst("sub")?.Value;
+                var role = context.Principal?.FindFirst("role")?.Value;
+                if (!int.TryParse(subject, out var userId) ||
+                    userId <= 0 ||
+                    !RoleNames.All.Contains(role, StringComparer.Ordinal))
+                {
+                    context.Fail("The token must contain a valid user ID and role.");
+                }
+
+                return Task.CompletedTask;
+            }
         };
     });
 
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("Administrator", policy => policy.RequireRole("Adminisztrator"));
-    options.AddPolicy("Adminisztrator", policy => policy.RequireRole("Adminisztrator"));
-    options.AddPolicy("Portas", policy => policy.RequireRole("Portas"));
-    options.AddPolicy("Oktato", policy => policy.RequireRole("Oktato"));
-    options.AddPolicy("UzemeltetesiIgazgato", policy => policy.RequireRole("UzemeltetesiIgazgato"));
-    options.AddPolicy("AdminOrIgazgato", policy => policy.RequireRole("Adminisztrator", "UzemeltetesiIgazgato"));
-    options.AddPolicy("AdminOrPortas", policy => policy.RequireRole("Adminisztrator", "Portas"));
+    options.AddPolicy("Administrator", policy => policy.RequireRole(RoleNames.Adminisztrator));
+    options.AddPolicy("Adminisztrator", policy => policy.RequireRole(RoleNames.Adminisztrator));
+    options.AddPolicy("Portas", policy => policy.RequireRole(RoleNames.Portas));
+    options.AddPolicy("Oktato", policy => policy.RequireRole(RoleNames.Oktato));
+    options.AddPolicy("UzemeltetesiIgazgato", policy => policy.RequireRole(RoleNames.UzemeltetesiIgazgato));
+    options.AddPolicy("AdminOrIgazgato", policy => policy.RequireRole(RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato));
+    options.AddPolicy("AdminOrPortas", policy => policy.RequireRole(RoleNames.Adminisztrator, RoleNames.Portas));
+    options.AddPolicy("AdminOrOktato", policy => policy.RequireRole(RoleNames.Adminisztrator, RoleNames.Oktato));
+    options.AddPolicy("AdminOrPortasOrIgazgato", policy =>
+        policy.RequireRole(RoleNames.Adminisztrator, RoleNames.Portas, RoleNames.UzemeltetesiIgazgato));
     options.AddPolicy("Authenticated", policy => policy.RequireAuthenticatedUser());
 });
 
+builder.Services.AddSingleton(jwtSettings);
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AuditService>();
 builder.Services.AddEndpointsApiExplorer();
@@ -224,6 +230,7 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
         }
     }
 
+    await DemoUserBootstrapper.InitializeAsync(dbContext, app.Configuration, logger);
     await AdminBootstrapper.InitializeAsync(dbContext, app.Configuration, logger);
 }
 
@@ -338,6 +345,7 @@ app.MapGet("/weatherforecast", () =>
     return forecast;
 })
 .WithName("GetWeatherForecast")
+.RequireAuthorization("Authenticated")
 .WithOpenApi();
 
 app.Run();

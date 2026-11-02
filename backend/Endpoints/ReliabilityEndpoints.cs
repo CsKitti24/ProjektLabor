@@ -36,7 +36,7 @@ public static class ReliabilityEndpoints
         [FromServices] AppDbContext db,
         CancellationToken cancellationToken)
     {
-        var access = await GetReadAccessAsync(userId, principal, db, cancellationToken);
+        var access = await GetReadAccessAsync(principal, db, cancellationToken);
         if (access is null)
         {
             return Results.Forbid();
@@ -60,7 +60,7 @@ public static class ReliabilityEndpoints
         [FromServices] AppDbContext db,
         CancellationToken cancellationToken)
     {
-        var access = await GetReadAccessAsync(userId, principal, db, cancellationToken);
+        var access = await GetReadAccessAsync(principal, db, cancellationToken);
         if (access is null)
         {
             return Results.Forbid();
@@ -189,7 +189,6 @@ public static class ReliabilityEndpoints
     }
 
     private static async Task<int?> GetReadAccessAsync(
-        int requestedUserId,
         ClaimsPrincipal principal,
         AppDbContext db,
         CancellationToken cancellationToken)
@@ -205,12 +204,9 @@ public static class ReliabilityEndpoints
             .Select(account => account.Role)
             .SingleAsync(cancellationToken);
 
-        return role == RoleNames.Oktato && callerId.Value != requestedUserId ||
-               role != RoleNames.Oktato &&
-               role != RoleNames.Adminisztrator &&
-               role != RoleNames.UzemeltetesiIgazgato
-            ? null
-            : callerId;
+        return role is RoleNames.Adminisztrator or RoleNames.UzemeltetesiIgazgato
+            ? callerId
+            : null;
     }
 
     private static Task<int?> GetAuthenticatedUserIdAsync(

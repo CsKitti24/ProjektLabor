@@ -69,7 +69,8 @@ namespace backend.Tests
         public async Task CreateAndResolveTicket_WorksCorrectly()
         {
             // Arrange
-            var oktatoClient = await CreateClientWithRoleAsync("Oktato");
+            _ = await CreateClientWithRoleAsync("Oktato");
+            var portasClient = await CreateClientWithRoleAsync("Portas");
             var adminClient = await CreateClientWithRoleAsync("Adminisztrator");
 
             int roomId;
@@ -82,9 +83,10 @@ namespace backend.Tests
                 roomId = room.Id;
             }
 
-            // 1. Oktato creates ticket
-            var createRes = await oktatoClient.PostAsJsonAsync("/api/tickets", new CreateTicketRequestDto
+            // 1. Portas creates a ticket; a forged requester ID is ignored.
+            var createRes = await portasClient.PostAsJsonAsync("/api/tickets", new
             {
+                felhasznaloId = 1,
                 TeremId = roomId,
                 Kategoria = "Projektor",
                 Leiras = "Nem kapcsol be a kivetítő"
@@ -94,6 +96,14 @@ namespace backend.Tests
             var created = await createRes.Content.ReadFromJsonAsync<TicketDto>();
             Assert.NotNull(created);
             Assert.Equal("Nyitva", created.Statusz);
+            Assert.NotEqual(1, created.FelhasznaloId);
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var owner = await db.Felhasznalok.FindAsync(created.FelhasznaloId);
+                Assert.NotNull(owner);
+                Assert.Equal("Portas", owner.Role);
+            }
 
             // 2. Admin updates ticket status
             var updateRes = await adminClient.PutAsJsonAsync($"/api/tickets/{created.Id}/status", new UpdateTicketStatusRequestDto

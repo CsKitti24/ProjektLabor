@@ -428,7 +428,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetRoomKeys")
             .WithSummary("Teremhez tartozó kulcsok listázása")
-            .RequireAuthorization("Authenticated")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<RoomKeyDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)

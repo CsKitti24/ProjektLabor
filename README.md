@@ -2,6 +2,10 @@
 
 Az alkalmazás célja az egyetemi teremfoglalások, a teremkulcsok kiadásának és visszavételének, valamint az ezekhez kapcsolódó eseményeknek a digitális kezelése.
 
+A backend jelenlegi állapota JWT-hitelesítést, szerepkör-alapú jogosultságkezelést,
+üzleti végpontokat és SQL Server-adatbázis-integrációt tartalmaz. A frontend
+jelenleg a Vite kezdőfelülete.
+
 ## Technológiai stack
 
 - **Frontend:** React + TypeScript + Vite
@@ -56,11 +60,11 @@ Helyi fejlesztéshez `ASPNETCORE_ENVIRONMENT=Development` használható. Ebben a
 
 Üres adatbázis esetén a migrációk után a backend egyetlen adminisztrátori fiókot hoz létre a `BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD` változók alapján. A felhasználónév 3–50 ASCII betű, szám, pont, aláhúzás vagy kötőjel lehet; a jelszó legalább 12, legfeljebb 72 UTF-8 bájt legyen. A jelszó BCrypt hash-ként kerül mentésre. Hiányos vagy érvénytelen inicializáló adatokkal az üres adatbázisú alkalmazás egyértelmű hibával leáll.
 
-Az inicializálás csak akkor történik meg, ha az adatbázisban még nincs felhasználó. Az első sikeres indulás után vedd ki a bootstrap felhasználónevet és jelszót a `.env` fájlból, és ne tárold őket forráskódban vagy más nem biztonságos helyen. Nincs nyilvános admin-létrehozó API. Megjegyzés: ebben a repository-verzióban nincs felhasználói bejelentkezési vagy felhasználókezelési HTTP-végpont; a bootstrap az admin fiókot készíti elő az alkalmazáson kívüli, biztonságos hitelesítési folyamathoz.
+Az inicializálás csak akkor történik meg, ha az adatbázisban még nincs felhasználó. Az első sikeres indulás után vedd ki a bootstrap felhasználónevet és jelszót a `.env` fájlból, és ne tárold őket forráskódban vagy más nem biztonságos helyen. Nincs nyilvános admin-létrehozó API; a bejelentkezés a `POST /api/auth/login` végponton történik.
 
 A JWT `sub` claimje az adatbázisbeli felhasználóazonosító, a `role` claim pedig az alábbi kanonikus értékek egyike legyen: `Oktato`, `Portas`, `Adminisztrator`, `UzemeltetesiIgazgato`.
 
-A következő adatbázis-migráció a korábban eltárolt ékezetes szerepkörértékeket ezekre a kanonikus ASCII értékekre alakítja át; a fiókok egyéb adatait nem módosítja.
+A szerepkörneveket normalizáló migráció a korábban eltárolt értékeket ezekre a kanonikus ASCII értékekre alakítja át; a fiókok egyéb adatait nem módosítja.
 
 ## Indítás Docker Compose segítségével
 
@@ -99,6 +103,30 @@ docker compose down
 A konténerek és az adatbázis tartós adatait tároló volume-ok törlése nem része a szokásos leállításnak. **Ne használd a `docker compose down -v` parancsot, ha meg akarod tartani az adatbázis adatait.**
 
 ## Szolgáltatások és portok
+
+#### Demo-fiókok a bemutatóhoz
+
+Az `.env` fájlban állíts be négy külön, erős jelszót, majd kifejezetten
+kapcsold be a demo-fiókok létrehozását:
+
+```dotenv
+BOOTSTRAP_DEMO_USERS_ENABLED=true
+DEMO_OKTATO_USERNAME=demo.oktato
+DEMO_OKTATO_PASSWORD=<egyedi, legalább 12 karakteres jelszó>
+DEMO_PORTAS_USERNAME=demo.portas
+DEMO_PORTAS_PASSWORD=<egyedi, legalább 12 karakteres jelszó>
+DEMO_ADMIN_USERNAME=demo.admin
+DEMO_ADMIN_PASSWORD=<egyedi, legalább 12 karakteres jelszó>
+DEMO_IGAZGATO_USERNAME=demo.igazgato
+DEMO_IGAZGATO_PASSWORD=<egyedi, legalább 12 karakteres jelszó>
+```
+
+Ezután indítsd újra a backendet (például `docker compose up --build -d
+backend`). A bootstrap kizárólag engedélyezéskor fut, mind a négy fiók
+konfigurációját megköveteli, a jelszavakat BCrypt hash-ként tárolja, és
+felhasználónévütközés esetén a meglévő fiókot változatlanul hagyja. A
+bootstrap nem ír jelszót a naplóba vagy a forráskódba. A jelszavak legfeljebb
+72 UTF-8 bájtosak legyenek. A jelszavakat ne használd újra valódi fiókoknál.
 
 A jelenlegi fejlesztői Compose-beállításban rögzített portkiosztás:
 
@@ -235,6 +263,20 @@ docker compose --env-file .env.example config
 docker compose --env-file .env.example build
 ```
 
+Az SQL Server-integrációs tesztet csak külön, eldobható tesztadatbázissal
+futtasd a `SQLSERVER_TEST_CONNECTION` változó megadásával; a teszt a megadott
+adatbázisra futtatja a migrációkat, majd a demo-bootstrapot, BCrypt-hasheket
+és mind a négy szerepkör hitelesítését ellenőrzi. Példa:
+
+```bash
+SQLSERVER_TEST_CONNECTION='Server=localhost,1433;Database=DisposableProjektLaborTest;User Id=sa;Password=<tesztjelszó>;TrustServerCertificate=True' \
+  dotnet test backend.Tests/backend.Tests.csproj --configuration Release \
+  --filter "FullyQualifiedName~SqlServerIntegrationTests"
+```
+
+Az adatbázis legyen külön erre a célra létrehozott és eldobható; a teszt nem
+törli az adatbázist. A normál CI ezt a tesztet szándékosan kihagyja.
+
 ## CI – GitHub Actions
 
 A CI-folyamatnak Pull Request nyitásakor és frissítésekor, valamint a `main` ágra történő push/merge után kell lefutnia. Legalább az alábbi lépéseket kell végrehajtania:
@@ -259,19 +301,18 @@ A módosításokat külön brancheken készítsétek, majd Pull Requesten keresz
 
 A változtatás legyen kicsi, célzott, és a Pull Request írja le a módosítás célját, a tesztelés eredményét, illetve az esetleges ismert korlátokat.
 
-## A rendszer tervezett fő moduljai
+## Megvalósított funkciók és további terv
 
-- Terem- és kulcsnyilvántartás
-- Teremfoglalás 45 perces időszeletekkel és ütközésvizsgálattal
-- Kulcskiadás és -visszavétel rögzítése
-- Hibajegykezelés és karbantartási idősávok
-- Felhasználói szerepkörök és jogosultságok (RBAC)
-- Auditnapló
-- Foglalás vége előtti értesítés
-- Oktatói megbízhatósági pontozás
-- Napi/heti riportok
-
-Ezek közül a második bemutatóra az infrastruktúra, az első adatbázisséma, a backend–adatbázis kapcsolat, az egészségellenőrző végpont, egy adatlekérdező végpont és legalább egy CI-ban futó unit teszt a prioritás.
+- A backend megvalósítja a terem-, kulcs-, foglalás-, kulcsmozgás-, hibajegy-,
+  karbantartási, megbízhatósági, rendszeradminisztrációs és riport-végpontokat.
+- JWT-hitelesítés, kanonikus szerepkörök és endpoint-szintű RBAC-policyk
+  védik a backend műveleteit.
+- A foglalási végpontok ellenőrzik az időintervallumot, a terem állapotát,
+  valamint a foglalási és karbantartási ütközéseket.
+- A kulcsmozgásokhoz auditnaplózás és az adatbázisban tranzakciós zárolás
+  tartozik.
+- A frontend jelenleg Vite kezdőfelület; a domain felhasználói felület és az
+  automatikus értesítési háttérfolyamat további fejlesztési terület.
 
 ## Ismert korlátok / frissítendő adatok
 

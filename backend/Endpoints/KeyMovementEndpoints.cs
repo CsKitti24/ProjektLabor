@@ -1,9 +1,11 @@
+using System.Data;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.KeyMovements;
 using ProjektLabor.DTOs.Keys;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints
@@ -13,7 +15,8 @@ namespace ProjektLabor.Endpoints
         public static RouteGroupBuilder MapKeyMovementEndpoints(this IEndpointRouteBuilder routes)
         {
             var group = routes.MapGroup("/api/key-movements")
-                .WithTags("KeyMovements");
+                .WithTags("KeyMovements")
+                .RequireAuthorization("Authenticated");
 
             // KM1 – POST /api/key-movements/issue
             group.MapPost("/issue", async (
@@ -22,7 +25,17 @@ namespace ProjektLabor.Endpoints
                 AuditService auditService,
                 ClaimsPrincipal caller) =>
             {
+                var operatorId = GetCallerId(caller);
+                if (operatorId is null)
+                {
+                    return Results.Unauthorized();
+                }
+
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
                 var key = await db.Kulcsok
+                    .Include(k => k.Terem)
                     .Include(k => k.Kulcsmozgasok)
                     .FirstOrDefaultAsync(k => k.Id == request.KulcsId);
 
@@ -49,7 +62,9 @@ namespace ProjektLabor.Endpoints
                 // Check booking if provided
                 if (request.FoglalasId.HasValue)
                 {
-                    var booking = await db.Foglalasok.FindAsync(request.FoglalasId.Value);
+                    var booking = await db.Foglalasok
+                        .Include(f => f.Felhasznalo)
+                        .FirstOrDefaultAsync(f => f.Id == request.FoglalasId.Value);
                     if (booking is null)
                     {
                         return Results.NotFound(new { message = $"A(z) {request.FoglalasId.Value} azonosítójú foglalás nem található." });
@@ -58,13 +73,21 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.BadRequest(new { message = $"A foglalás nem aktív (jelenlegi státusz: {booking.Status})." });
                     }
-                }
 
-                int operatorId = 1;
-                var subClaim = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? caller.FindFirst("sub")?.Value;
-                if (int.TryParse(subClaim, out int parsedId))
-                {
-                    operatorId = parsedId;
+                    if (booking.TeremId != key.TeremId)
+                    {
+                        return Results.BadRequest(new { message = "A foglalás nem ehhez a kulcshoz tartozó teremre szól." });
+                    }
+
+                    var isAuthorizedRecipient =
+                        booking.Felhasznalo?.Role == RoleNames.Oktato &&
+                        (key.Tipus != "Mesterkulcs" ||
+                         await db.MesterkulcsJogosultsagok.AnyAsync(access =>
+                             access.KulcsId == key.Id && access.FelhasznaloId == booking.FelhasznaloId));
+                    if (!isAuthorizedRecipient)
+                    {
+                        return Results.Forbid();
+                    }
                 }
 
                 var movement = new Kulcsmozgas
@@ -73,7 +96,7 @@ namespace ProjektLabor.Endpoints
                     FoglalasId = request.FoglalasId,
                     MozgasTipus = "Kiadás",
                     Idopont = DateTime.UtcNow,
-                    OperátorId = operatorId,
+                    OperátorId = operatorId.Value,
                     Megjegyzes = request.Megjegyzes ?? string.Empty,
                     CreatedAt = DateTime.UtcNow
                 };
@@ -87,8 +110,12 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Kulcsmozgas",
                     entitasId: movement.Id.ToString(),
                     ujErtek: $"KulcsId: {key.Id}, FoglalasId: {request.FoglalasId}");
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
 
-                var opUser = await db.Felhasznalok.FindAsync(operatorId);
+                var opUser = await db.Felhasznalok.FindAsync(operatorId.Value);
                 var bookingUser = request.FoglalasId.HasValue
                     ? (await db.Foglalasok.Include(f => f.Felhasznalo).FirstOrDefaultAsync(f => f.Id == request.FoglalasId.Value))?.Felhasznalo?.Nev
                     : null;
@@ -102,7 +129,7 @@ namespace ProjektLabor.Endpoints
                     Idopont = movement.Idopont,
                     FoglalasId = movement.FoglalasId,
                     FoglalasFelhasznaloNev = bookingUser,
-                    OperatorId = operatorId,
+                    OperatorId = operatorId.Value,
                     OperatorNev = opUser?.Nev ?? string.Empty,
                     Megjegyzes = movement.Megjegyzes
                 };
@@ -111,7 +138,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("IssueKey")
             .WithSummary("Kulcs kiadásának rögzítése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("Portas")
             .Produces<KeyMovementItemDto>(StatusCodes.Status201Created)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
@@ -127,6 +154,15 @@ namespace ProjektLabor.Endpoints
                 AuditService auditService,
                 ClaimsPrincipal caller) =>
             {
+                var operatorId = GetCallerId(caller);
+                if (operatorId is null)
+                {
+                    return Results.Unauthorized();
+                }
+
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
                 var key = await db.Kulcsok
                     .Include(k => k.Kulcsmozgasok)
                     .FirstOrDefaultAsync(k => k.Id == request.KulcsId);
@@ -145,20 +181,13 @@ namespace ProjektLabor.Endpoints
                     return Results.Conflict(new { message = "A kulcs jelenleg nincs kiadva, nem lehet visszavenni." });
                 }
 
-                int operatorId = 1;
-                var subClaim = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? caller.FindFirst("sub")?.Value;
-                if (int.TryParse(subClaim, out int parsedId))
-                {
-                    operatorId = parsedId;
-                }
-
                 var returnMovement = new Kulcsmozgas
                 {
                     KulcsId = key.Id,
                     FoglalasId = lastMovement.FoglalasId,
                     MozgasTipus = "Visszavétel",
                     Idopont = DateTime.UtcNow,
-                    OperátorId = operatorId,
+                    OperátorId = operatorId.Value,
                     Megjegyzes = request.Megjegyzes ?? string.Empty,
                     CreatedAt = DateTime.UtcNow
                 };
@@ -172,8 +201,12 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Kulcsmozgas",
                     entitasId: returnMovement.Id.ToString(),
                     ujErtek: $"KulcsId: {key.Id}");
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
 
-                var opUser = await db.Felhasznalok.FindAsync(operatorId);
+                var opUser = await db.Felhasznalok.FindAsync(operatorId.Value);
 
                 var result = new KeyMovementItemDto
                 {
@@ -183,7 +216,7 @@ namespace ProjektLabor.Endpoints
                     MozgasTipus = returnMovement.MozgasTipus,
                     Idopont = returnMovement.Idopont,
                     FoglalasId = returnMovement.FoglalasId,
-                    OperatorId = operatorId,
+                    OperatorId = operatorId.Value,
                     OperatorNev = opUser?.Nev ?? string.Empty,
                     Megjegyzes = returnMovement.Megjegyzes
                 };
@@ -192,7 +225,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("ReturnKey")
             .WithSummary("Kulcs visszavételének rögzítése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("Portas")
             .Produces<KeyMovementItemDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
@@ -274,7 +307,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyMovementsList")
             .WithSummary("Kulcsmozgások listázása szűrőkkel és lapozással")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyMovementListDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
@@ -316,7 +349,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyMovementById")
             .WithSummary("Egy kulcsmozgás részleteinek lekérdezése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyMovementItemDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -391,13 +424,20 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetOverdueKeys")
             .WithSummary("Lejárt vagy le nem adott kulcsok listázása")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<OverdueKeyDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
             .WithOpenApi();
 
             return group;
+        }
+
+        private static int? GetCallerId(ClaimsPrincipal caller)
+        {
+            var subject = caller.FindFirst("sub")?.Value
+                ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return int.TryParse(subject, out var userId) && userId > 0 ? userId : null;
         }
     }
 }
