@@ -48,7 +48,19 @@ Copy-Item .env.example .env
 
 A tényleges változóneveket és a kötelező értékeket a `.env.example` és a `docker-compose.yml` határozza meg. A `.env` fájlt ne töltsd fel a Git repositoryba, és valódi jelszót, tokent vagy egyéb titkot ne commitolj.
 
-A backend JWT-alapú hitelesítést használ a karbantartási idősávok módosításához. Állítsd be a `JWT_ISSUER`, `JWT_AUDIENCE` és `JWT_SIGNING_KEY` értékeket a `.env` fájlban; a kulcs legalább 32 bájt legyen, és egyezzen a tokeneket aláíró hitelesítő kulccsal. A token `sub` claimjének a felhasználó adatbázisbeli azonosítóját, `role` claimjének pedig az `Adminisztrátor` szerepkört kell tartalmaznia az írási műveletekhez.
+A Docker Compose az `ASPNETCORE_ENVIRONMENT` változó hiányában `Production` környezetben indítja a backendet. Töltsd ki a `.env` fájlban az egyedi `MSSQL_SA_PASSWORD`, `JWT_ISSUER`, `JWT_AUDIENCE` és `JWT_SIGNING_KEY` értékeket. A JWT-aláírókulcs legalább 32 bájt legyen; például `openssl rand -base64 48` paranccsal állíthatsz elő véletlen értéket. Éles környezetben hiányzó vagy rövid kulccsal az alkalmazás nem indul el.
+
+Helyi fejlesztéshez `ASPNETCORE_ENVIRONMENT=Development` használható. Ebben a környezetben a [backend/appsettings.Development.json](./backend/appsettings.Development.json) tartalmaz egy kizárólag fejlesztéshez használható JWT-kulcsot; ezt az értéket éles környezetben tilos használni. Az `appsettings.json` nem tartalmaz aláírókulcsot.
+
+### Első indítás: adminisztrátor inicializálása
+
+Üres adatbázis esetén a migrációk után a backend egyetlen adminisztrátori fiókot hoz létre a `BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD` változók alapján. A felhasználónév 3–50 ASCII betű, szám, pont, aláhúzás vagy kötőjel lehet; a jelszó legalább 12, legfeljebb 72 UTF-8 bájt legyen. A jelszó BCrypt hash-ként kerül mentésre. Hiányos vagy érvénytelen inicializáló adatokkal az üres adatbázisú alkalmazás egyértelmű hibával leáll.
+
+Az inicializálás csak akkor történik meg, ha az adatbázisban még nincs felhasználó. Az első sikeres indulás után vedd ki a bootstrap felhasználónevet és jelszót a `.env` fájlból, és ne tárold őket forráskódban vagy más nem biztonságos helyen. Nincs nyilvános admin-létrehozó API. Megjegyzés: ebben a repository-verzióban nincs felhasználói bejelentkezési vagy felhasználókezelési HTTP-végpont; a bootstrap az admin fiókot készíti elő az alkalmazáson kívüli, biztonságos hitelesítési folyamathoz.
+
+A JWT `sub` claimje az adatbázisbeli felhasználóazonosító, a `role` claim pedig az alábbi kanonikus értékek egyike legyen: `Oktato`, `Portas`, `Adminisztrator`, `UzemeltetesiIgazgato`.
+
+A következő adatbázis-migráció a korábban eltárolt ékezetes szerepkörértékeket ezekre a kanonikus ASCII értékekre alakítja át; a fiókok egyéb adatait nem módosítja.
 
 ## Indítás Docker Compose segítségével
 
@@ -153,7 +165,7 @@ GET http://localhost:5000/api/rooms/{id}
 
 ### Mesterkulcs-jogosultságok
 
-A jogosultságok kezeléséhez hitelesített, `Adminisztrátor` szerepkörű felhasználó szükséges. A POST-kérés JSON-törzse:
+A jogosultságok kezeléséhez hitelesített, `Adminisztrator` szerepkörű felhasználó szükséges. A POST-kérés JSON-törzse:
 
 ```json
 { "userId": 123 }
@@ -165,7 +177,7 @@ A jogosultságok kezeléséhez hitelesített, `Adminisztrátor` szerepkörű fel
 | `POST` | `/api/keys/{id}/master-access` | Jogosultság adása egy oktatónak |
 | `DELETE` | `/api/keys/{id}/master-access/{userId}` | Jogosultság visszavonása |
 
-A végpontok csak `Mesterkulcs` típusú kulcsot fogadnak el; hozzárendeléskor a megadott felhasználónak `Oktató / Igénylő` szerepkörűnek kell lennie.
+A végpontok csak `Mesterkulcs` típusú kulcsot fogadnak el; hozzárendeléskor a megadott felhasználónak `Oktato` szerepkörűnek kell lennie.
 
 ## Karbantartási idősávok API
 
@@ -175,7 +187,7 @@ A végpontok csak `Mesterkulcs` típusú kulcsot fogadnak el; hozzárendeléskor
 - `PUT /api/maintenance/{id}` – idősáv módosítása.
 - `DELETE /api/maintenance/{id}` – idősáv törlése.
 
-A létrehozási és módosítási kérések törzse: `teremId`, `startTime`, `endTime`, valamint opcionálisan `leiras`. Az írási végpontok csak adatbázisban is adminisztrátori szerepkörű, megfelelő JWT-vel hitelesített felhasználó számára érhetők el. A foglalással ütköző idősáv `409 Conflict` választ eredményez; a megszüntetett foglalások nem blokkolják a karbantartást.
+A karbantartási listázás és részletezés hitelesítést igényel, a létrehozás, módosítás és törlés pedig kizárólag `Adminisztrator` jogosultságú, adatbázisban is megfelelő szerepkörrel rendelkező felhasználónak engedélyezett. A létrehozási és módosítási kérések törzse: `teremId`, `startTime`, `endTime`, valamint opcionálisan `leiras`. A foglalással ütköző idősáv `409 Conflict` választ eredményez; a megszüntetett foglalások nem blokkolják a karbantartást.
 
 ## Megbízhatósági pontozás API
 

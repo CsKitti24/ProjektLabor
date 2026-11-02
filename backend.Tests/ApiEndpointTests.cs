@@ -16,6 +16,7 @@ namespace backend.Tests
 
         public ApiEndpointTests(WebApplicationFactory<Program> factory)
         {
+            TestJwtConfiguration.ConfigureEnvironment();
             var dbName = "TestDb_" + Guid.NewGuid();
             _factory = factory.WithWebHostBuilder(builder =>
             {

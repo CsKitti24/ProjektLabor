@@ -1,10 +1,11 @@
-using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Data.SqlClient;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Endpoints;
 using ProjektLabor.DTOs;
+using ProjektLabor.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,27 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-var jwtIssuer = builder.Configuration["Authentication:Jwt:Issuer"];
-var jwtAudience = builder.Configuration["Authentication:Jwt:Audience"];
-var jwtSigningKey = builder.Configuration["Authentication:Jwt:SigningKey"];
-
-if (string.IsNullOrWhiteSpace(jwtIssuer) ||
-    string.IsNullOrWhiteSpace(jwtAudience) ||
-    string.IsNullOrWhiteSpace(jwtSigningKey) ||
-    Encoding.UTF8.GetByteCount(jwtSigningKey) < 32)
-{
-    if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing"))
-    {
-        jwtIssuer = "projektlabor-dev";
-        jwtAudience = "projektlabor-dev";
-        jwtSigningKey = "projektlabor-dev-signing-key-32-bytes";
-    }
-    else
-    {
-        throw new InvalidOperationException(
-            "Configure Authentication:Jwt:Issuer, Authentication:Jwt:Audience, and an Authentication:Jwt:SigningKey of at least 32 bytes.");
-    }
-}
+var jwtSettings = JwtSettings.FromConfiguration(builder.Configuration, builder.Environment);
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -42,21 +23,31 @@ builder.Services
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidIssuer = jwtIssuer,
+            ValidIssuer = jwtSettings.Issuer,
             ValidateAudience = true,
-            ValidAudience = jwtAudience,
+            ValidAudience = jwtSettings.Audience,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSigningKey)),
+            IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(jwtSettings.SigningKey)),
             RoleClaimType = "role",
             NameClaimType = "sub",
             ClockSkew = TimeSpan.FromMinutes(1)
         };
     });
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(RolePolicies.AddAuthorizationPolicies);
 
 // Register DbContext with connection string from configuration
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+var databasePassword = builder.Configuration["Database:Password"];
+if (!string.IsNullOrWhiteSpace(connectionString) && !string.IsNullOrWhiteSpace(databasePassword))
+{
+    var sqlConnectionString = new SqlConnectionStringBuilder(connectionString)
+    {
+        Password = databasePassword
+    };
+    connectionString = sqlConnectionString.ConnectionString;
+}
+
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     var startupLogger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger("Startup");
@@ -123,7 +114,7 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
         try
         {
             logger.LogInformation("Checking and applying pending database migrations (Attempt {Attempt}/{MaxRetries})...", attempt, maxRetries);
-            dbContext.Database.Migrate();
+            await dbContext.Database.MigrateAsync();
             logger.LogInformation("Database migrations applied successfully.");
             break;
         }
@@ -137,9 +128,17 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
             else
             {
                 logger.LogError(ex, "Database migrations could not be applied after {MaxRetries} attempts.", maxRetries);
+                throw new InvalidOperationException(
+                    "Database migrations could not be applied; the backend cannot start securely.",
+                    ex);
             }
         }
     }
+
+    await AdminBootstrapper.InitializeAsync(
+        dbContext,
+        app.Configuration,
+        logger);
 }
 
 // -----------------------------------------------------------------------------------------

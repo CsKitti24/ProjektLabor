@@ -18,10 +18,14 @@ services:
     ports:
       - "5000:5000"
     environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - Authentication__Jwt__Issuer=${JWT_ISSUER:?Set JWT_ISSUER in .env}
       - Authentication__Jwt__Audience=${JWT_AUDIENCE:?Set JWT_AUDIENCE in .env}
       - Authentication__Jwt__SigningKey=${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
-      - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;
+      - BootstrapAdmin__Username=${BOOTSTRAP_ADMIN_USERNAME:-}
+      - BootstrapAdmin__Password=${BOOTSTRAP_ADMIN_PASSWORD:-}
+      - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=sa;TrustServerCertificate=True;
+      - Database__Password=${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}
       - APPLY_MIGRATIONS=true
       - ASPNETCORE_URLS=http://+:5000
     networks:
@@ -42,7 +46,7 @@ services:
       - "1433:1433"
     environment:
       - ACCEPT_EULA=${ACCEPT_EULA:-Y}
-      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD}
+      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}
     networks:
       - app-network
     volumes:

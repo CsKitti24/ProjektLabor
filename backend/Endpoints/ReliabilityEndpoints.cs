@@ -5,14 +5,12 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 
 namespace ProjektLabor.Endpoints;
 
 public static class ReliabilityEndpoints
 {
-    private const string InstructorRole = "Oktató / Igénylő";
-    private const string AdministratorRole = "Adminisztrátor";
-    private const string OperationsDirectorRole = "Üzemeltetési Igazgató";
     private const int MaximumScore = 100;
 
     public static IEndpointRouteBuilder MapReliabilityEndpoints(this IEndpointRouteBuilder endpoints)
@@ -103,7 +101,7 @@ public static class ReliabilityEndpoints
         [FromServices] AppDbContext db,
         CancellationToken cancellationToken)
     {
-        var instructorId = await GetAuthenticatedUserIdAsync(principal, db, InstructorRole, cancellationToken);
+        var instructorId = await GetAuthenticatedUserIdAsync(principal, db, RoleNames.Oktato, cancellationToken);
         if (instructorId is null)
         {
             return Results.Forbid();
@@ -139,7 +137,7 @@ public static class ReliabilityEndpoints
         }
 
         var administratorId = await GetAuthenticatedUserIdAsync(
-            principal, db, AdministratorRole, cancellationToken);
+            principal, db, RoleNames.Adminisztrator, cancellationToken);
         if (administratorId is null)
         {
             return Results.Forbid();
@@ -207,10 +205,10 @@ public static class ReliabilityEndpoints
             .Select(account => account.Role)
             .SingleAsync(cancellationToken);
 
-        return role == InstructorRole && callerId.Value != requestedUserId ||
-               role != InstructorRole &&
-               role != AdministratorRole &&
-               role != OperationsDirectorRole
+        return role == RoleNames.Oktato && callerId.Value != requestedUserId ||
+               role != RoleNames.Oktato &&
+               role != RoleNames.Adminisztrator &&
+               role != RoleNames.UzemeltetesiIgazgato
             ? null
             : callerId;
     }
@@ -240,7 +238,7 @@ public static class ReliabilityEndpoints
         CancellationToken cancellationToken) =>
         db.Felhasznalok
             .AsNoTracking()
-            .Where(account => account.Id == userId && account.Role == InstructorRole)
+            .Where(account => account.Id == userId && account.Role == RoleNames.Oktato)
             .Select(account => new InstructorResponse(account.Id, account.Nev))
             .SingleOrDefaultAsync(cancellationToken);
 
