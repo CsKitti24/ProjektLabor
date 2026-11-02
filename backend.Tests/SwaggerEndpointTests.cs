@@ -50,9 +50,30 @@ namespace backend.Tests
             Assert.Contains("\"openapi\": \"3.0.1\"", content);
             Assert.DoesNotContain("\"openapi\": \"3.0.4\"", content);
             Assert.Contains("\"ProjektLabor API\"", content);
-            Assert.Contains("/api/health", content);
-            Assert.Contains("/api/rooms", content);
-            Assert.Contains("/api/rooms/{id}", content);
+            foreach (var endpoint in new[]
+            {
+                "/api/health",
+                "/api/auth/login",
+                "/api/auth/logout",
+                "/api/auth/me",
+                "/api/users",
+                "/api/rooms",
+                "/api/rooms/{id}",
+                "/api/keys",
+                "/api/key-movements",
+                "/api/bookings",
+                "/api/tickets",
+                "/api/maintenance",
+                "/api/keys/{id}/master-access",
+                "/api/reliability/my",
+                "/api/parameters",
+                "/api/audit",
+                "/api/reports/daily",
+                "/weatherforecast"
+            })
+            {
+                Assert.Contains(endpoint, content);
+            }
         }
 
         [Fact]

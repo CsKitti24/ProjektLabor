@@ -85,7 +85,7 @@ namespace backend.Tests
         }
 
         [Fact]
-        public async Task GetRooms_ReturnsUnauthorized_WhenNoTokenProvided()
+        public async Task GetRooms_ReturnsOk_WhenNoTokenProvided()
         {
             // Arrange
             var client = _factory.CreateClient();
@@ -94,7 +94,7 @@ namespace backend.Tests
             var response = await client.GetAsync("/api/rooms");
 
             // Assert
-            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
 
         [Fact]
@@ -148,7 +148,7 @@ namespace backend.Tests
         }
 
         [Fact]
-        public async Task GetRoomById_ReturnsUnauthorized_WhenNoTokenProvided()
+        public async Task GetRoomById_ReturnsNotFound_WhenNoTokenProvided_AndRoomDoesNotExist()
         {
             // Arrange
             var client = _factory.CreateClient();
@@ -157,7 +157,7 @@ namespace backend.Tests
             var response = await client.GetAsync("/api/rooms/9999");
 
             // Assert
-            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
         [Fact]

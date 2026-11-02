@@ -11,6 +11,17 @@ Az alkalmazás egyetemi teremfoglalások, teremkulcsok, karbantartási idősávo
 - **Hitelesítés:** JWT, szerepkör-alapú hozzáférés-vezérlés (RBAC)
 - **Futtatás:** Docker Compose
 
+## Rendszerarchitektúra
+
+```mermaid
+flowchart TD
+    U[Felhasználó böngészője] --> FE[React + TypeScript frontend]
+    FE -->|REST / HTTP| API[ASP.NET Core Web API]
+    API -->|Entity Framework Core| DB[(Microsoft SQL Server)]
+```
+
+Az adatbázis közvetlenül nem érhető el a böngészőből; a frontend a backend API-n keresztül kommunikál vele.
+
 ## Előfeltételek és konfiguráció
 
 Docker Desktop vagy Docker Engine Docker Compose támogatással szükséges. Helyi, konténer nélküli fejlesztéshez Node.js/npm és .NET 8 SDK is kellhet.
@@ -27,7 +38,9 @@ PowerShell alatt:
 Copy-Item .env.example .env
 ```
 
-A Docker indítása előtt cseréld le az `.env` fájlban az `MSSQL_SA_PASSWORD` helyőrző értékét egyedi, az MSSQL jelszókövetelményeinek megfelelő jelszóra. A fájl a `JWT_SIGNING_KEY`, `JWT_ISSUER`, `JWT_AUDIENCE` és opcionálisan a `JWT_EXPIRES_IN_HOURS` értékeit is beállíthatja. A példában szereplő JWT-kulcs csak helyi fejlesztésre való; éles környezetben adj meg legalább 32 bájtos, titkos kulcsot, és ne commitold a `.env` fájlt vagy valódi hitelesítő adatot.
+A Docker indítása előtt állíts be egyedi, az MSSQL jelszókövetelményeinek megfelelő `MSSQL_SA_PASSWORD` értéket. Generálj egy legalább 32 bájtos JWT-aláíró kulcsot, például `openssl rand -base64 48` paranccsal, és másold a `JWT_SIGNING_KEY` változóba. A `JWT_ISSUER`, `JWT_AUDIENCE` és opcionálisan a `JWT_EXPIRES_IN_HOURS` értékei is konfigurálhatók. A `.env.example` nem tartalmaz használható JWT-kulcsot; a Compose indítása ezek kitöltése nélkül hibát jelez. A `.env` fájlt és valódi hitelesítő adatokat ne commitolj.
+
+A backend JWT-alapú hitelesítést és szerepkör-alapú jogosultságkezelést használ. A token `sub` claimje a felhasználó adatbázisbeli azonosítóját, `role` claimje pedig a szerepkört tartalmazza; az írási műveletekhez szükséges szerepköröket az egyes végpontok RBAC-szabályai határozzák meg.
 
 ## Indítás Docker Compose segítségével
 
@@ -94,11 +107,53 @@ GET http://localhost:5000/api/health
 GET http://localhost:5000/api/rooms
 ```
 
-A terem-végpontok hitelesítést igényelnek; a token a `POST /api/auth/login` válaszából szerezhető be.
+A teremlista és az egy terem adatait visszaadó `GET /api/rooms` és `GET /api/rooms/{id}` végpont nyilvános, ahogy a főágbeli API is működött. A módosító terem-végpontok hitelesítést és megfelelő RBAC-szerepkört igényelnek.
+
+## API részletek
+
+- **Sikeres válasz (HTTP 200 OK):** A kiválasztott terem DTO adatai.
+- **Ha nem található (HTTP 404 Not Found):** `{"message": "A(z) {id} azonosítójú terem nem található."}`
+
+### Mesterkulcs-jogosultságok
+
+A jogosultságok kezeléséhez hitelesített, `Adminisztrátor` szerepkörű felhasználó szükséges. A POST-kérés JSON-törzse:
+
+```json
+{ "userId": 123 }
+```
+
+| Metódus | Útvonal | Művelet |
+|---|---|---|
+| `GET` | `/api/keys/{id}/master-access` | A mesterkulcshoz jogosult oktatók listázása |
+| `POST` | `/api/keys/{id}/master-access` | Jogosultság adása egy oktatónak |
+| `DELETE` | `/api/keys/{id}/master-access/{userId}` | Jogosultság visszavonása |
+
+A végpontok csak `Mesterkulcs` típusú kulcsot fogadnak el; hozzárendeléskor a megadott felhasználónak `Oktató / Igénylő` szerepkörűnek kell lennie.
+
+## Karbantartási idősávok API
+
+- `GET /api/maintenance?teremId=1&startTime=2026-11-02T08:00:00Z&endTime=2026-11-02T18:00:00Z` – idősávok listázása; minden szűrő opcionális, az időtartomány az átfedő idősávokat adja vissza.
+- `GET /api/maintenance/{id}` – idősáv részletei.
+- `POST /api/maintenance` – új idősáv rögzítése.
+- `PUT /api/maintenance/{id}` – idősáv módosítása.
+- `DELETE /api/maintenance/{id}` – idősáv törlése.
+
+A létrehozási és módosítási kérések törzse: `teremId`, `startTime`, `endTime`, valamint opcionálisan `leiras`. Az írási végpontok csak adatbázisban is adminisztrátori szerepkörű, megfelelő JWT-vel hitelesített felhasználó számára érhetők el. A foglalással ütköző idősáv `409 Conflict` választ eredményez; a megszüntetett foglalások nem blokkolják a karbantartást.
+
+## Megbízhatósági pontozás API
+
+- `GET /api/reliability/users/{userId}` – az oktató aktuális tanévi pontszáma (0–100), valamint az aktuális következmény.
+- `GET /api/reliability/users/{userId}/events` – az oktató összes pontozási eseménye, beleértve a korábbi tanévek előzményeit.
+- `GET /api/reliability/my` – a bejelentkezett oktató saját aktuális tanévi pontszáma.
+- `POST /api/reliability/correction` – adminisztrátori pontkorrekció; törzse: `userId`, `pont` (nullától eltérő egész szám, negatív korrekció is lehetséges) és kötelező, legfeljebb 500 karakteres `indoklas`.
+
+A pontszámot a backend az eseményekből, időrendi sorrendben számítja, és minden esemény után 0–100 közé korlátozza. A tanév szeptember 1-jén kezdődik; a korábbi tanévek eseményei és auditbejegyzései megmaradnak. A 10–19 pontos érték figyelmeztetést, a 20–29 pontos kötelező elbeszélgetést, a 30 vagy több pont elbeszélgetést és kulcskezelési/biztonsági tréninget jelent. Az oktató csak a saját adatait kérheti le, az adminisztrátor és az üzemeltetési igazgató más oktató adatait is megtekintheti. A korrekció csak adatbázisban is adminisztrátori szerepkörű felhasználónak engedélyezett; a pontozási esemény és az auditbejegyzés egy tranzakcióban kerül mentésre.
 
 ## Adatbázis, build és tesztek
 
-Az adatbázis sémáját az `backend/Migrations` alatti EF Core migrációk verziózzák. Helyi migrációfuttatás:
+Az adatbázis sémáját az `backend/Migrations` alatti EF Core migrációk verziózzák. A kezdeti migráció neve: `InitialCreate`.
+
+Migrációk futtatása fejlesztői parancssorból:
 
 ```bash
 dotnet tool restore
@@ -124,7 +179,7 @@ npm run build
 Compose konfiguráció ellenőrzése:
 
 ```bash
-docker compose --env-file .env.example config
+docker compose --env-file .env config
 ```
 
 ## CI és fejlesztési folyamat

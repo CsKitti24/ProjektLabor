@@ -98,7 +98,6 @@ if (string.IsNullOrWhiteSpace(connectionString))
     var startupLogger = LoggerFactory.Create(logging => logging.AddConsole()).CreateLogger("Startup");
     startupLogger.LogWarning("The 'DefaultConnection' connection string is not configured.");
 }
-
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     if (!string.IsNullOrWhiteSpace(connectionString))
