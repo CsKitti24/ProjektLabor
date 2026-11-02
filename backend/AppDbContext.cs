@@ -30,6 +30,10 @@ namespace ProjektLabor.Data
             modelBuilder.Entity<Felhasznalo>()
                 .HasIndex(u => u.Email).IsUnique();
 
+            modelBuilder.Entity<MesterkulcsJogosultsag>()
+                .HasIndex(access => new { access.KulcsId, access.FelhasznaloId })
+                .IsUnique();
+
             // Many-to-many between Kulcs (master keys) and Terem (rooms) for access rights
             modelBuilder.Entity<KulcsTerem>()
                 .HasKey(kt => new { kt.KulcsId, kt.TeremId });
