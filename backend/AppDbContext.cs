@@ -93,12 +93,6 @@ namespace ProjektLabor.Data
                 .Select(e => e.Entity);
             foreach (var booking in changedBookings)
             {
-                var timeError = Services.BookingRules.ValidateTimeRange(booking.StartTime, booking.EndTime);
-                if (timeError is not null)
-                {
-                    throw new InvalidOperationException(timeError);
-                }
-
                 if (!Services.BookingRules.IsActive(booking.Status))
                 {
                     continue;
