@@ -93,12 +93,63 @@ A jelenlegi fejlesztői Compose-beállításban rögzített portkiosztás:
 | Szolgáltatás | Gazdagépen elérhető port | Konténerport | Megjegyzés |
 |---|---:|---:|---|
 | Frontend | `3000` | `3000` | Böngészőből: `http://localhost:3000` |
-| Backend API | `8000` | `8000` | Az API gazdagépről: `http://localhost:8000` |
+| Backend API | `5000` | `5000` | Az API gazdagépről: `http://localhost:5000` |
 | Microsoft SQL Server | `1433` | `1433` | Adatbázis-kapcsolathoz; a hitelesítési adatokat a `.env` tartalmazza |
 
 A portok a `docker-compose.yml` fájlban ellenőrizhetők. Ha ott változnak, ezt a táblázatot is frissíteni kell.
 
 ## API-ellenőrzés
+
+A backend az alábbi ellenőrző és adatlekérdező végpontokat biztosítja:
+
+### 1. Egészségellenőrzés (Health Check)
+
+```text
+GET http://localhost:5000/api/health
+```
+
+- **Sikeres válasz (HTTP 200 OK):**
+```json
+{
+  "status": "ok",
+  "database": "connected"
+}
+```
+- **Hiba esetén (HTTP 503 Service Unavailable):**
+```json
+{
+  "status": "unhealthy",
+  "database": "disconnected"
+}
+```
+
+### 2. Termek listázása (Rooms Query)
+
+```text
+GET http://localhost:5000/api/rooms
+```
+
+- **Válasz (HTTP 200 OK):** Termek listája DTO formátumban (üres lista, ha még nincs rögzített terem):
+```json
+[
+  {
+    "id": 1,
+    "nev": "I. előadó",
+    "kapacitas": 120,
+    "leiras": "Főépület 1. emelet",
+    "aktivalva": true
+  }
+]
+```
+
+### 3. Egy adott terem lekérdezése
+
+```text
+GET http://localhost:5000/api/rooms/{id}
+```
+
+- **Sikeres válasz (HTTP 200 OK):** A kiválasztott terem DTO adatai.
+- **Ha nem található (HTTP 404 Not Found):** `{"message": "A(z) {id} azonosítójú terem nem található."}`
 
 ### Mesterkulcs-jogosultságok
 
@@ -115,16 +166,6 @@ A jogosultságok kezeléséhez hitelesített, `Adminisztrátor` szerepkörű fel
 | `DELETE` | `/api/keys/{id}/master-access/{userId}` | Jogosultság visszavonása |
 
 A végpontok csak `Mesterkulcs` típusú kulcsot fogadnak el; hozzárendeléskor a megadott felhasználónak `Oktató / Igénylő` szerepkörűnek kell lennie.
-
-A második bemutató kötelező minimuma egy működő állapotjelző végpont:
-
-```text
-GET http://localhost:8000/api/health
-```
-
-A végpont elvárt viselkedése: sikeres HTTP-válasz, amely jelzi, hogy a backend fut. A végleges implementációban az adatbázis-kapcsolat állapotát is ellenőrizni kell, vagy külön kell jelezni, hogy a backend él-e és az adatbázis elérhető-e.
-
-Egy alapvető adatlekérdező végpontot is létre kell hozni. A pontos útvonalat és a visszaadott entitást a backend implementációja és az adatmodell alapján kell rögzíteni ebben a dokumentumban.
 
 ## Karbantartási idősávok API
 
@@ -147,9 +188,40 @@ A pontszámot a backend az eseményekből, időrendi sorrendben számítja, és 
 
 ## Adatbázis és migrációk
 
-Az adatbázis sémáját Entity Framework Core migrációkkal kell verziózni. A migrációk célja, hogy a táblák és a kulcsok megismételhetően, a fejlesztők gépein és a konténeres környezetben is létrehozhatók legyenek.
+Az adatbázis sémáját Entity Framework Core migrációk verziózzák (`backend/Migrations`).
+A kezdeti migráció neve: `InitialCreate`.
 
-A kezdeti sémának legalább az ER-diagram alapján kiválasztott fő entitásokat, elsődleges kulcsokat, idegen kulcsokat és kapcsolatokat kell tartalmaznia. A teljes üzleti logika ezen a mérföldkövön még nem követelmény.
+- **Migrációk futtatása fejlesztői parancssorból:**
+```bash
+dotnet tool run dotnet-ef database update --project backend
+```
+
+- **Automatikus migráció konténer indulásakor:**
+A `docker-compose.yml`-ben a `backend` konténer számára az `APPLY_MIGRATIONS=true` környezeti változó van beállítva, így a backend indításakor automatikusan és biztonságosan lefut a `Database.Migrate()` parancs.
+
+## Tesztek és ellenőrzések futtatása
+
+A fejlesztés során és Pull Request benyújtása előtt helyileg is lefuttathatók az ellenőrzések:
+
+### Backend build és tesztek
+```bash
+dotnet build ProjektLabor.sln
+dotnet test ProjektLabor.sln
+```
+
+### Frontend lint és build
+```bash
+cd frontend
+npm ci
+npm run lint
+npm run build
+```
+
+### Docker konfiguráció és konténer-buildek ellenőrzése
+```bash
+docker compose --env-file .env.example config
+docker compose --env-file .env.example build
+```
 
 ## CI – GitHub Actions
 
