@@ -182,26 +182,26 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| AL1 | GET | `/api/audit` | Audit log bejegyzések listázása (szűrőkkel) | 🔴 Hiányzik |
-| AL2 | GET | `/api/audit/{id}` | Egy audit bejegyzés részletei | 🔴 Hiányzik |
+| AL1 | GET | `/api/audit` | Audit log bejegyzések listázása (szűrőkkel) | ✅ Kész |
+| AL2 | GET | `/api/audit/{id}` | Egy audit bejegyzés részletei | ✅ Kész |
 
 ### Rendszerparaméterek
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| P1 | GET | `/api/parameters` | Összes rendszerparaméter listázása | 🔴 Hiányzik |
-| P2 | GET | `/api/parameters/{key}` | Egy rendszerparaméter lekérdezése | 🔴 Hiányzik |
-| P3 | PUT | `/api/parameters/{key}` | Rendszerparaméter módosítása | 🔴 Hiányzik |
+| P1 | GET | `/api/parameters` | Összes rendszerparaméter listázása | ✅ Kész |
+| P2 | GET | `/api/parameters/{key}` | Egy rendszerparaméter lekérdezése | ✅ Kész |
+| P3 | PUT | `/api/parameters/{key}` | Rendszerparaméter módosítása | ✅ Kész |
 
 ### Riportok
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| RP1 | GET | `/api/reports/daily` | Napi forgalmi kimutatás | 🔴 Hiányzik |
-| RP2 | GET | `/api/reports/weekly` | Heti forgalmi kimutatás | 🔴 Hiányzik |
-| RP3 | GET | `/api/reports/room-utilization` | Teremkihasználtsági statisztika | 🔴 Hiányzik |
-| RP4 | GET | `/api/reports/key-traffic` | Kulcsforgalmi statisztika | 🔴 Hiányzik |
-| RP5 | GET | `/api/reports/reliability` | Megbízhatósági statisztika (rendszerszintű) | 🔴 Hiányzik |
+| RP1 | GET | `/api/reports/daily` | Napi forgalmi kimutatás | ✅ Kész |
+| RP2 | GET | `/api/reports/weekly` | Heti forgalmi kimutatás | ✅ Kész |
+| RP3 | GET | `/api/reports/room-utilization` | Teremkihasználtsági statisztika | ✅ Kész |
+| RP4 | GET | `/api/reports/key-traffic` | Kulcsforgalmi statisztika | ✅ Kész |
+| RP5 | GET | `/api/reports/reliability` | Megbízhatósági statisztika (rendszerszintű) | ✅ Kész |
 
 ### Értesítések
 
@@ -913,9 +913,37 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 
 **HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`
 
+**Szűrés és lapozás:** `felhasznaloId`, `entitasTipus`, `muveletTipus`, `kezdet`, `veg`, `page`, `pageSize`. A dátumhatárok inkluzívak, az alapértelmezett lapméret 50, a maximális 100.
+
 > ⚠️ Az audit log bejegyzések **soha nem törölhetők és nem módosíthatók** – DELETE és PUT szándékosan nincs tervezve.
 
 ---
+
+### AL2 – GET `/api/audit/{id}`
+
+**Funkció:** Egy auditbejegyzés részleteinek lekérdezése.
+
+**Jogosultság:** `Adminisztrator`, `UzemeltetesiIgazgato`
+
+**Válasz:** Egy `AuditLogDto` bejegyzés.
+
+**HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`, `404 Not Found`
+
+### P1 – GET `/api/parameters`
+
+**Funkció:** Az összes rendszerparaméter listázása.
+
+**Jogosultság:** `Adminisztrator`, `UzemeltetesiIgazgato`
+
+**Válasz:** `RendszerparameterDto` objektumok listája.
+
+### P2 – GET `/api/parameters/{key}`
+
+**Funkció:** Egy rendszerparaméter lekérdezése.
+
+**Jogosultság:** `Adminisztrator`, `UzemeltetesiIgazgato`
+
+**HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`, `404 Not Found`
 
 ### P3 – PUT `/api/parameters/{key}`
 
@@ -939,6 +967,7 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 - `napi_kulcsleadasi_zarasi_idopont` → `HH:mm` formátumú időpont (pl. `"22:00"`)
 - `no_show_idokorlat_perc` → pozitív egész szám (percben)
 - Kötelező audit log bejegyzés a régi és új értékkel
+- Az auditbejegyzés és a paraméter módosítása egy adatbázis-mentésben történik
 
 **HTTP státuszkódok:** `200 OK`, `400 Bad Request`, `404 Not Found`, `401 Unauthorized`, `403 Forbidden`
 
@@ -946,7 +975,7 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 
 ### RP1 – GET `/api/reports/daily`
 
-**Funkció:** Napi forgalmi kimutatás.
+**Funkció:** Napi kulcs- és teremforgalmi kimutatás.
 
 **Jogosultság:** `UzemeltetesiIgazgato`, `Adminisztrator`
 
@@ -965,6 +994,48 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 **Kapcsolódó entitások:** `Kulcsmozgasok`, `Foglalasok`, `Termek`
 
 **HTTP státuszkódok:** `200 OK`, `400 Bad Request`, `401 Unauthorized`, `403 Forbidden`
+
+---
+
+### RP2 – GET `/api/reports/weekly`
+
+**Funkció:** Heti kulcs- és teremforgalmi összesítő hétfőtől vasárnapig.
+
+**Jogosultság:** `UzemeltetesiIgazgato`, `Adminisztrator`
+
+**Query paraméter:** `datum` (opcionális, `YYYY-MM-DD`; a dátumot tartalmazó hétre készül a riport, alapértelmezés a jelenlegi hét).
+
+**Válasz:** A hét kezdete/vége, kulcskiadások és -visszavételek, késedelmes leadások, no-show foglalások összesített száma, valamint termenként a foglalások és kulcskiadások száma.
+
+### RP3 – GET `/api/reports/room-utilization`
+
+**Funkció:** Aktív termek lefoglalt óráinak és kihasználtsági arányának lekérdezése.
+
+**Jogosultság:** `UzemeltetesiIgazgato`, `Adminisztrator`
+
+**Query paraméterek:** `kezdet` és `veg` (opcionálisan együtt, inkluzív `YYYY-MM-DD` dátumok; elhagyva az aktuális hónap kezdete és a mai nap). Legfeljebb 366 napos időszak kérhető.
+
+**Számítás:** A lemondott és no-show foglalások nem számítanak bele. A rendelkezésre álló idő aktív termenként napi 24 óra.
+
+### RP4 – GET `/api/reports/key-traffic`
+
+**Funkció:** Kulcsonkénti kiadás-, visszavétel- és összes mozgásszám lekérdezése.
+
+**Jogosultság:** `UzemeltetesiIgazgato`, `Adminisztrator`
+
+**Query paraméterek:** `kezdet` és `veg` (opcionálisan együtt, inkluzív `YYYY-MM-DD` dátumok; elhagyva az aktuális hónap kezdete és a mai nap). Legfeljebb 366 napos időszak kérhető.
+
+### RP5 – GET `/api/reports/reliability`
+
+**Funkció:** Az aktuális tanév oktatói megbízhatósági eseményeinek és pontszámainak rendszerszintű összesítése.
+
+**Jogosultság:** `UzemeltetesiIgazgato`, `Adminisztrator`
+
+**Válasz:** Tanév, események száma, érintett oktatók száma, átlagos (0–100 közé korlátozott) összpontszám, valamint eseménytípusonkénti darabszám és pontösszeg.
+
+**HTTP státuszkódok (RP2–RP4):** `200 OK`, `400 Bad Request`, `401 Unauthorized`, `403 Forbidden`
+
+**HTTP státuszkódok (RP5):** `200 OK`, `401 Unauthorized`, `403 Forbidden`
 
 ---
 
@@ -1352,6 +1423,8 @@ Minden végpontnál egységes hibakezelés szükséges:
 | GET `/api/health` | Teljes, tesztelt (ApiEndpointTests + SwaggerEndpointTests) |
 | GET `/api/rooms` | Teljes, tesztelt (auth nélkül) |
 | GET `/api/rooms/{id}` | Teljes, tesztelt (auth nélkül) |
+| GET `/api/audit`, GET `/api/audit/{id}` | Szerepkörhöz kötött auditnapló-lekérdezés és szűrés |
+| GET `/api/parameters`, GET `/api/parameters/{key}`, PUT `/api/parameters/{key}` | Szerepkörhöz kötött paraméterkezelés, validáció és auditálás |
 
 ### 🟡 Részben megvalósult (módosítás szükséges)
 
@@ -1363,7 +1436,7 @@ Minden végpontnál egységes hibakezelés szükséges:
 
 ### 🔴 Teljesen hiányzó (implementálásra vár)
 
-Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api/key-movements/*`, `/api/bookings/*`, `/api/tickets/*`, `/api/maintenance/*`, `/api/reliability/*`, `/api/audit/*`, `/api/parameters/*`, `/api/reports/*`, `/api/notifications/*`.
+Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api/key-movements/*`, `/api/bookings/*`, `/api/tickets/*`, `/api/maintenance/*`, `/api/reliability/*`, `/api/reports/*`, `/api/notifications/*`.
 
 ### Infrastrukturális hiányosságok
 
