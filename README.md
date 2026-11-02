@@ -27,7 +27,7 @@ PowerShell alatt:
 Copy-Item .env.example .env
 ```
 
-A `.env` az MSSQL jelszava mellett a `JWT_SIGNING_KEY`, `JWT_ISSUER`, `JWT_AUDIENCE` és opcionálisan a `JWT_EXPIRES_IN_HOURS` értékeit is beállíthatja. A példában szereplő JWT-kulcs csak helyi fejlesztésre való; éles környezetben adj meg legalább 32 bájtos, titkos kulcsot, és ne commitold a `.env` fájlt vagy valódi hitelesítő adatot.
+A Docker indítása előtt cseréld le az `.env` fájlban az `MSSQL_SA_PASSWORD` helyőrző értékét egyedi, az MSSQL jelszókövetelményeinek megfelelő jelszóra. A fájl a `JWT_SIGNING_KEY`, `JWT_ISSUER`, `JWT_AUDIENCE` és opcionálisan a `JWT_EXPIRES_IN_HOURS` értékeit is beállíthatja. A példában szereplő JWT-kulcs csak helyi fejlesztésre való; éles környezetben adj meg legalább 32 bájtos, titkos kulcsot, és ne commitold a `.env` fájlt vagy valódi hitelesítő adatot.
 
 ## Indítás Docker Compose segítségével
 
@@ -74,8 +74,12 @@ Fejlesztési környezetben a Swagger UI címe `http://localhost:5000/swagger`; a
 - `/api/maintenance` – karbantartási idősávok listázása és kezelése.
 - `/api/keys/{id}/master-access` – mesterkulcs-hozzáférések kezelése.
 - `/api/reliability` – oktatói megbízhatósági pontszámok és események.
+- `/api/parameters` – rendszerparaméterek lekérdezése és adminisztrátori módosítása.
+- `/api/audit` – adminisztrátori auditnapló-lekérdezés és szűrés.
+- `/api/reports` – napi, heti, teremkihasználtsági, kulcsforgalmi és megbízhatósági riportok.
+- `/weatherforecast` – a `main` ágról megőrzött, nyilvános ASP.NET minta-végpont.
 
-A karbantartási, mesterkulcs- és megbízhatósági műveletek hitelesített JWT-t igényelnek; a szerepkör-korlátozott műveleteket a backend ellenőrzi. Az egyes végpontok és DTO-k részletei a Swagger dokumentációban és a `docs/API_DESIGN.md` fájlban találhatók.
+A karbantartási, mesterkulcs-, rendszerparaméter-, audit-, riport- és megbízhatósági műveletek hitelesített JWT-t igényelnek; a szerepkör-korlátozott műveleteket a backend ellenőrzi. Az értesítési entitás szerepel az adatmodellben, de az értesítési végpontok és szolgáltatás még nincsenek implementálva. Az egyes végpontok és DTO-k részletei a Swagger dokumentációban és a `docs/API_DESIGN.md` fájlban találhatók.
 
 ### Karbantartás, mesterkulcsok és megbízhatóság
 
