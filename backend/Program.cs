@@ -302,6 +302,8 @@ app.MapTicketEndpoints();
 app.MapMaintenanceEndpoints();
 app.MapMasterAccessEndpoints();
 app.MapReliabilityEndpoints();
+app.MapSystemAdministrationEndpoints();
+app.MapReportEndpoints();
 
 app.Run();
 
