@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Models;
 using ProjektLabor.Security;
+using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints;
 
@@ -101,6 +102,7 @@ public static class MaintenanceEndpoints
         MaintenanceRequest request,
         ClaimsPrincipal user,
         [FromServices] AppDbContext db,
+        [FromServices] AuditService auditService,
         CancellationToken cancellationToken)
     {
         var administratorId = await GetAdministratorIdAsync(user, db, cancellationToken);
@@ -134,8 +136,17 @@ public static class MaintenanceEndpoints
             Leiras = request.Leiras
         };
 
+        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+            ? null
+            : await db.Database.BeginTransactionAsync(cancellationToken);
         db.KarbantartasiIdosavok.Add(item);
         await db.SaveChangesAsync(cancellationToken);
+        await auditService.LogAsync(user, "CREATE", "KarbantartasiIdosav", item.Id.ToString(),
+            ujErtek: $"TeremId: {item.TeremId}; Start: {item.StartTime:O}; End: {item.EndTime:O}");
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         var response = await FindResponseAsync(db, item.Id, cancellationToken);
         return Results.Created($"/api/maintenance/{item.Id}", response);
@@ -146,6 +157,7 @@ public static class MaintenanceEndpoints
         MaintenanceRequest request,
         ClaimsPrincipal user,
         [FromServices] AppDbContext db,
+        [FromServices] AuditService auditService,
         CancellationToken cancellationToken)
     {
         if (await GetAdministratorIdAsync(user, db, cancellationToken) is null)
@@ -180,7 +192,16 @@ public static class MaintenanceEndpoints
         item.StartTime = request.StartTime;
         item.EndTime = request.EndTime;
         item.Leiras = request.Leiras;
+        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+            ? null
+            : await db.Database.BeginTransactionAsync(cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        await auditService.LogAsync(user, "UPDATE", "KarbantartasiIdosav", item.Id.ToString(),
+            ujErtek: $"TeremId: {item.TeremId}; Start: {item.StartTime:O}; End: {item.EndTime:O}");
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         return Results.Ok(await FindResponseAsync(db, item.Id, cancellationToken));
     }
@@ -189,6 +210,7 @@ public static class MaintenanceEndpoints
         int id,
         ClaimsPrincipal user,
         [FromServices] AppDbContext db,
+        [FromServices] AuditService auditService,
         CancellationToken cancellationToken)
     {
         if (await GetAdministratorIdAsync(user, db, cancellationToken) is null)
@@ -203,8 +225,16 @@ public static class MaintenanceEndpoints
             return Results.NotFound();
         }
 
+        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+            ? null
+            : await db.Database.BeginTransactionAsync(cancellationToken);
         db.KarbantartasiIdosavok.Remove(item);
         await db.SaveChangesAsync(cancellationToken);
+        await auditService.LogAsync(user, "DELETE", "KarbantartasiIdosav", id.ToString());
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         return Results.NoContent();
     }

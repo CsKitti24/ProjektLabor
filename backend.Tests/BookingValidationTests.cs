@@ -21,7 +21,7 @@ namespace backend.Tests
         {
             // Arrange
             var db = CreateInMemoryDbContext(Guid.NewGuid().ToString());
-            var baseTime = DateTime.UtcNow.Date.AddHours(10);
+            var baseTime = DateTime.UtcNow.Date.AddHours(10).AddMinutes(15);
 
             var booking1 = new Foglalas
             {
@@ -41,8 +41,8 @@ namespace backend.Tests
                 Id = 2,
                 FelhasznaloId = 2,
                 TeremId = 101, // Same room
-                StartTime = baseTime.AddMinutes(15), // Overlaps with booking1
-                EndTime = baseTime.AddMinutes(60),
+                StartTime = baseTime, // Overlaps with booking1
+                EndTime = baseTime.AddMinutes(45),
                 Status = "Aktiv"
             };
 
@@ -58,7 +58,7 @@ namespace backend.Tests
         {
             // Arrange
             var db = CreateInMemoryDbContext(Guid.NewGuid().ToString());
-            var baseTime = DateTime.UtcNow.Date.AddHours(10);
+            var baseTime = DateTime.UtcNow.Date.AddHours(10).AddMinutes(15);
 
             var booking1 = new Foglalas
             {

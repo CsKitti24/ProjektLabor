@@ -60,6 +60,12 @@ Az inicializálás csak akkor történik meg, ha az adatbázisban még nincs fel
 
 A JWT `sub` claimje az adatbázisbeli felhasználóazonosító, a `role` claim pedig az alábbi kanonikus értékek egyike legyen: `Oktato`, `Portas`, `Adminisztrator`, `UzemeltetesiIgazgato`.
 
+### Backend-funkciók és integritási szabályok
+
+A backend ténylegesen elérhető funkciói: hitelesítés, szerepkör-védett felhasználó-, terem-, kulcs-, kulcsmozgás-, foglalás-, karbantartás-, hibajegy-, megbízhatóság-, audit-, rendszerparaméter- és riport-végpontok. A részletes, implementációval egyeztetett útvonallista a [docs/API_DESIGN.md](./docs/API_DESIGN.md) fájlban található.
+
+Foglalás csak egy napon belül, 08:00–20:00 között, 45 perces rácson és 45 perces időegységek egész számú többszöröseként hozható létre. A megszüntetett és NoShow foglalás nem blokkol új foglalást; karbantartási átfedés nem engedélyezett.
+
 A következő adatbázis-migráció a korábban eltárolt ékezetes szerepkörértékeket ezekre a kanonikus ASCII értékekre alakítja át; a fiókok egyéb adatait nem módosítja.
 
 ## Indítás Docker Compose segítségével
@@ -95,6 +101,22 @@ Leállítás:
 ```bash
 docker compose down
 ```
+
+### Backend build és tesztelés
+
+```bash
+dotnet build ProjektLabor.sln --configuration Release
+dotnet test ProjektLabor.sln --configuration Release
+```
+
+Az alaptesztek EF InMemory adatbázist használnak. SQL Server-integrációs teszthez kizárólag külön, eldobható tesztadatbázis kapcsolati karakterláncát add meg; fejlesztői adatbázist vagy Docker-volume-ot ne használj:
+
+```bash
+SQLSERVER_TEST_CONNECTION='Server=localhost,1433;Database=ProjektLabor_IntegrationTest_<sajat-azonosito>;User Id=sa;Password=<teszt-jelszo>;TrustServerCertificate=True' \
+  dotnet test backend.Tests/backend.Tests.csproj --filter FullyQualifiedName~SqlServerIntegrationTests
+```
+
+A teszt az alap regresszióban szándékosan kihagyott (`Skip`), mert a repository nem tudja garantálni, hogy a kapcsolati karakterlánc külön tesztadatbázisra mutat. Dedikált SQL Server CI-környezetben a `Skip` attribútum eltávolítása után futtatható; a tesztmigrációkhoz SQL Server 2022 és szükséges jogosultságok kellenek. A repository nem indít és nem töröl fejlesztői adatbázist vagy Docker-volume-ot.
 
 A konténerek és az adatbázis tartós adatait tároló volume-ok törlése nem része a szokásos leállításnak. **Ne használd a `docker compose down -v` parancsot, ha meg akarod tartani az adatbázis adatait.**
 

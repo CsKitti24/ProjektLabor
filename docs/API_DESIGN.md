@@ -1,5 +1,25 @@
 # API_DESIGN.md – Egyetemi Kulcs- és Teremnyilvántartó Rendszer
 
+> **Implementációs állapot (2026-11-02):** Ez a dokumentum a jelenlegi backendhez igazodik. A korábbi tervezeti megjegyzések nem írhatják felül a tényleges útvonalakat, jogosultságokat vagy státuszkódokat.
+
+## Aktuális backend-összefoglaló
+
+Az API ASP.NET Core Minimal API, JWT hitelesítéssel és szerepkör-alapú policykkel. A ténylegesen regisztrált végpontcsoportok: `/api/auth`, `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets`, `/api/maintenance`, `/api/keys/{id}/master-access`, `/api/reliability`, `/api/admin`, `/api/reports` és `/api/health`.
+
+### Üzleti integritás
+
+- Foglalási idő: egy naptári napon belül 08:00–20:00; kezdés és hossz 45 perces rácshoz igazodik.
+- Aktív ütközés: csak az `Aktiv` és `Kesz` státuszú foglalások számítanak; `NoShow` és `Megszuntetve` nem blokkol.
+- A POST és PUT foglalás ugyanazt a terem-, karbantartási-, idő- és ütközésvalidációt használja; az adatbázis mentése ezt ismételten kikényszeríti.
+- A normál foglalás PUT nem állíthat automatikusan kezelt `NoShow` vagy `Kesz` státuszt. Oktató csak aktív foglalást mondhat le.
+- Kulcskiadás és visszavétel: `POST /api/key-movements/issue` és `POST /api/key-movements/return`, `AdminOrPortas` jogosultsággal; a kiadás tranzakciós zárolással, kulcs–terem és foglaló jogosultság ellenőrzéssel történik.
+
+### Aktuális státuszkódok
+
+Sikeres létrehozás `201 Created`, lekérdezés/módosítás `200 OK`, törlés vagy visszavonás `204 No Content` (ahol ezt az endpoint jelzi), hiányzó rekord `404 Not Found`, hibás kérés `400 Bad Request`, jogosultsági hiba `401/403`, üzleti ütközés vagy duplikáció `409 Conflict`. A konkrét DTO-kat az `backend/DTOs` könyvtár és a Swagger séma tartalmazza.
+
+Az alábbi korábbi részletes tervezeti táblázatok útvonal- és státuszlistája változatlan API-szerződésként értendő csak ott, ahol a fenti aktuális regisztrációval egyezik; a `Hiányzik` jelölések a korábbi állapotot dokumentálják, nem a jelenlegi futási állapotot.
+
 > **Verzió:** 1.0 – 3. bemutató előkészítő tervezet  
 > **Dátum:** 2026-10-30  
 > **Státusz:** Tervezet – implementáció még nem történt meg
