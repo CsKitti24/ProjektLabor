@@ -48,6 +48,8 @@ Copy-Item .env.example .env
 
 A tényleges változóneveket és a kötelező értékeket a `.env.example` és a `docker-compose.yml` határozza meg. A `.env` fájlt ne töltsd fel a Git repositoryba, és valódi jelszót, tokent vagy egyéb titkot ne commitolj.
 
+A backend JWT-alapú hitelesítést használ a karbantartási idősávok módosításához. Állítsd be a `JWT_ISSUER`, `JWT_AUDIENCE` és `JWT_SIGNING_KEY` értékeket a `.env` fájlban; a kulcs legalább 32 bájt legyen, és egyezzen a tokeneket aláíró hitelesítő kulccsal. A token `sub` claimjének a felhasználó adatbázisbeli azonosítóját, `role` claimjének pedig az `Adminisztrátor` szerepkört kell tartalmaznia az írási műveletekhez.
+
 ## Indítás Docker Compose segítségével
 
 A repository gyökérkönyvtárában futtasd:
@@ -148,6 +150,41 @@ GET http://localhost:5000/api/rooms/{id}
 
 - **Sikeres válasz (HTTP 200 OK):** A kiválasztott terem DTO adatai.
 - **Ha nem található (HTTP 404 Not Found):** `{"message": "A(z) {id} azonosítójú terem nem található."}`
+
+### Mesterkulcs-jogosultságok
+
+A jogosultságok kezeléséhez hitelesített, `Adminisztrátor` szerepkörű felhasználó szükséges. A POST-kérés JSON-törzse:
+
+```json
+{ "userId": 123 }
+```
+
+| Metódus | Útvonal | Művelet |
+|---|---|---|
+| `GET` | `/api/keys/{id}/master-access` | A mesterkulcshoz jogosult oktatók listázása |
+| `POST` | `/api/keys/{id}/master-access` | Jogosultság adása egy oktatónak |
+| `DELETE` | `/api/keys/{id}/master-access/{userId}` | Jogosultság visszavonása |
+
+A végpontok csak `Mesterkulcs` típusú kulcsot fogadnak el; hozzárendeléskor a megadott felhasználónak `Oktató / Igénylő` szerepkörűnek kell lennie.
+
+## Karbantartási idősávok API
+
+- `GET /api/maintenance?teremId=1&startTime=2026-11-02T08:00:00Z&endTime=2026-11-02T18:00:00Z` – idősávok listázása; minden szűrő opcionális, az időtartomány az átfedő idősávokat adja vissza.
+- `GET /api/maintenance/{id}` – idősáv részletei.
+- `POST /api/maintenance` – új idősáv rögzítése.
+- `PUT /api/maintenance/{id}` – idősáv módosítása.
+- `DELETE /api/maintenance/{id}` – idősáv törlése.
+
+A létrehozási és módosítási kérések törzse: `teremId`, `startTime`, `endTime`, valamint opcionálisan `leiras`. Az írási végpontok csak adatbázisban is adminisztrátori szerepkörű, megfelelő JWT-vel hitelesített felhasználó számára érhetők el. A foglalással ütköző idősáv `409 Conflict` választ eredményez; a megszüntetett foglalások nem blokkolják a karbantartást.
+
+## Megbízhatósági pontozás API
+
+- `GET /api/reliability/users/{userId}` – az oktató aktuális tanévi pontszáma (0–100), valamint az aktuális következmény.
+- `GET /api/reliability/users/{userId}/events` – az oktató összes pontozási eseménye, beleértve a korábbi tanévek előzményeit.
+- `GET /api/reliability/my` – a bejelentkezett oktató saját aktuális tanévi pontszáma.
+- `POST /api/reliability/correction` – adminisztrátori pontkorrekció; törzse: `userId`, `pont` (nullától eltérő egész szám, negatív korrekció is lehetséges) és kötelező, legfeljebb 500 karakteres `indoklas`.
+
+A pontszámot a backend az eseményekből, időrendi sorrendben számítja, és minden esemény után 0–100 közé korlátozza. A tanév szeptember 1-jén kezdődik; a korábbi tanévek eseményei és auditbejegyzései megmaradnak. A 10–19 pontos érték figyelmeztetést, a 20–29 pontos kötelező elbeszélgetést, a 30 vagy több pont elbeszélgetést és kulcskezelési/biztonsági tréninget jelent. Az oktató csak a saját adatait kérheti le, az adminisztrátor és az üzemeltetési igazgató más oktató adatait is megtekintheti. A korrekció csak adatbázisban is adminisztrátori szerepkörű felhasználónak engedélyezett; a pontozási esemény és az auditbejegyzés egy tranzakcióban kerül mentésre.
 
 ## Adatbázis és migrációk
 

@@ -1,5 +1,9 @@
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
+using ProjektLabor.Endpoints;
 using ProjektLabor.DTOs;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -8,6 +12,49 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+var jwtIssuer = builder.Configuration["Authentication:Jwt:Issuer"];
+var jwtAudience = builder.Configuration["Authentication:Jwt:Audience"];
+var jwtSigningKey = builder.Configuration["Authentication:Jwt:SigningKey"];
+
+if (string.IsNullOrWhiteSpace(jwtIssuer) ||
+    string.IsNullOrWhiteSpace(jwtAudience) ||
+    string.IsNullOrWhiteSpace(jwtSigningKey) ||
+    Encoding.UTF8.GetByteCount(jwtSigningKey) < 32)
+{
+    if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing"))
+    {
+        jwtIssuer = "projektlabor-dev";
+        jwtAudience = "projektlabor-dev";
+        jwtSigningKey = "projektlabor-dev-signing-key-32-bytes";
+    }
+    else
+    {
+        throw new InvalidOperationException(
+            "Configure Authentication:Jwt:Issuer, Authentication:Jwt:Audience, and an Authentication:Jwt:SigningKey of at least 32 bytes.");
+    }
+}
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSigningKey)),
+            RoleClaimType = "role",
+            NameClaimType = "sub",
+            ClockSkew = TimeSpan.FromMinutes(1)
+        };
+    });
+builder.Services.AddAuthorization();
+
 // Register DbContext with connection string from configuration
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 if (string.IsNullOrWhiteSpace(connectionString))
@@ -15,7 +62,6 @@ if (string.IsNullOrWhiteSpace(connectionString))
     var startupLogger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger("Startup");
     startupLogger.LogWarning("Warning: 'DefaultConnection' connection string is not configured.");
 }
-
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     if (!string.IsNullOrWhiteSpace(connectionString))
@@ -52,6 +98,14 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapMaintenanceEndpoints();
+app.MapMasterAccessEndpoints();
+app.MapReliabilityEndpoints();
 
 // Automatic migrations on startup if configured (e.g. Docker environment)
 if (app.Configuration.GetValue<bool>("ApplyMigrations") ||

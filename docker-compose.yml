@@ -18,6 +18,9 @@ services:
     ports:
       - "5000:5000"
     environment:
+      - Authentication__Jwt__Issuer=${JWT_ISSUER:?Set JWT_ISSUER in .env}
+      - Authentication__Jwt__Audience=${JWT_AUDIENCE:?Set JWT_AUDIENCE in .env}
+      - Authentication__Jwt__SigningKey=${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
       - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;
       - APPLY_MIGRATIONS=true
       - ASPNETCORE_URLS=http://+:5000
