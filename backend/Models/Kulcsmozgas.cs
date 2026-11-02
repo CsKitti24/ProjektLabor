@@ -15,19 +15,19 @@ namespace ProjektLabor.Models
 
         // Optional link to a booking
         public int? FoglalasId { get; set; }
-        public Foglalas Foglalas { get; set; }
+        public Foglalas? Foglalas { get; set; }
 
         [Required]
-        public string MozgasTipus { get; set; } // Kiadás, Visszavétel, etc.
+        public string MozgasTipus { get; set; } = string.Empty; // Kiadás, Visszavétel, etc.
 
         [Required]
         public DateTime Idopont { get; set; }
 
         [ForeignKey("Operátor")]
         public int OperátorId { get; set; }
-        public Felhasznalo Operátor { get; set; }
+        public Felhasznalo Operátor { get; set; } = null!;
 
-        public string Megjegyzes { get; set; }
+        public string? Megjegyzes { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }

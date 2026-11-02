@@ -18,12 +18,17 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - Authentication__Jwt__Issuer=${JWT_ISSUER:?Set JWT_ISSUER in .env}
-      - Authentication__Jwt__Audience=${JWT_AUDIENCE:?Set JWT_AUDIENCE in .env}
-      - Authentication__Jwt__SigningKey=${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
-      - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;
-      - APPLY_MIGRATIONS=true
-      - ASPNETCORE_URLS=http://+:5000
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:5000
+      APPLY_MIGRATIONS: "true"
+      ConnectionStrings__DefaultConnection: "Server=mssql;Database=KeyAndRoomDb;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;"
+      Jwt__Key: "${JWT_SIGNING_KEY:-}"
+      Jwt__Issuer: "${JWT_ISSUER:?Set JWT_ISSUER in .env}"
+      Jwt__Audience: "${JWT_AUDIENCE:?Set JWT_AUDIENCE in .env}"
+      Jwt__ExpiresInHours: "${JWT_EXPIRES_IN_HOURS:-8}"
+      Authentication__Jwt__Issuer: "${JWT_ISSUER:?Set JWT_ISSUER in .env}"
+      Authentication__Jwt__Audience: "${JWT_AUDIENCE:?Set JWT_AUDIENCE in .env}"
+      Authentication__Jwt__SigningKey: "${JWT_SIGNING_KEY:-}"
     networks:
       - app-network
     depends_on:
@@ -41,8 +46,8 @@ services:
     ports:
       - "1433:1433"
     environment:
-      - ACCEPT_EULA=${ACCEPT_EULA:-Y}
-      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD}
+      ACCEPT_EULA: "${ACCEPT_EULA:-Y}"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}"
     networks:
       - app-network
     volumes:
