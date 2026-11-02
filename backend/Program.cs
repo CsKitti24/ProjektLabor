@@ -1,11 +1,67 @@
+using System.Text;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs;
+using ProjektLabor.DTOs.Auth;
+using ProjektLabor.Endpoints;
+using ProjektLabor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+var jwtKey = builder.Configuration["Jwt:Key"] ?? builder.Configuration["Authentication:Jwt:SigningKey"];
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? builder.Configuration["Authentication:Jwt:Issuer"];
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? builder.Configuration["Authentication:Jwt:Audience"];
+
+if (string.IsNullOrWhiteSpace(jwtKey) ||
+    string.IsNullOrWhiteSpace(jwtIssuer) ||
+    string.IsNullOrWhiteSpace(jwtAudience) ||
+    Encoding.UTF8.GetByteCount(jwtKey) < 32)
+{
+    throw new InvalidOperationException(
+        "Configure Jwt:Key, Jwt:Issuer, and Jwt:Audience; the signing key must be at least 32 bytes.");
+}
+
+builder.Configuration["Jwt:Key"] = jwtKey;
+builder.Configuration["Jwt:Issuer"] = jwtIssuer;
+builder.Configuration["Jwt:Audience"] = jwtAudience;
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            RoleClaimType = ClaimTypes.Role,
+            NameClaimType = "sub",
+            ClockSkew = TimeSpan.FromSeconds(30)
+        };
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("Adminisztrator", policy => policy.RequireRole("Adminisztrator"));
+    options.AddPolicy("Portas", policy => policy.RequireRole("Portas"));
+    options.AddPolicy("Oktato", policy => policy.RequireRole("Oktato"));
+    options.AddPolicy("UzemeltetesiIgazgato", policy => policy.RequireRole("UzemeltetesiIgazgato"));
+    options.AddPolicy("AdminOrIgazgato", policy => policy.RequireRole("Adminisztrator", "UzemeltetesiIgazgato"));
+    options.AddPolicy("AdminOrPortas", policy => policy.RequireRole("Adminisztrator", "Portas"));
+    options.AddPolicy("Authenticated", policy => policy.RequireAuthenticatedUser());
+});
+
+builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<AuditService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -15,14 +71,32 @@ builder.Services.AddSwaggerGen(options =>
         Version = "v1",
         Description = "ProjektLabor terem- és kulcskezelő rendszer REST API dokumentációja."
     });
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Írd be a JWT tokent."
+    });
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+            },
+            Array.Empty<string>()
+        }
+    });
 });
 
-// Register DbContext with connection string from configuration
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 if (string.IsNullOrWhiteSpace(connectionString))
 {
-    var startupLogger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger("Startup");
-    startupLogger.LogWarning("Warning: 'DefaultConnection' connection string is not configured.");
+    var startupLogger = LoggerFactory.Create(logging => logging.AddConsole()).CreateLogger("Startup");
+    startupLogger.LogWarning("The 'DefaultConnection' connection string is not configured.");
 }
 
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -39,65 +113,53 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     }
 });
 
-// Configure CORS for frontend access
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
         policy.AllowAnyOrigin()
-              .AllowAnyHeader()
-              .AllowAnyMethod();
+            .AllowAnyHeader()
+            .AllowAnyMethod();
     });
 });
 
 var app = builder.Build();
 
-// Enable CORS
 app.UseCors("AllowFrontend");
+app.UseAuthentication();
+app.UseAuthorization();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    // Normalization middleware: Swashbuckle 6.6.2 bundles a Swagger UI version whose validator
-    // regex recognizes OpenAPI 3.0.0 through 3.0.3 (or 2.0 / 3.1.0). The Microsoft.OpenApi 1.6.30 dependency
-    // serializes OpenApi3_0 as "3.0.4", causing Swagger UI to report:
-    // "Unable to render this definition. The provided definition does not specify a valid version field."
-    // Normalizing "3.0.4" to "3.0.1" allows Swagger UI to seamlessly parse and render the document.
     app.Use(async (context, next) =>
     {
-        if (context.Request.Path.Value?.EndsWith("/swagger.json", StringComparison.OrdinalIgnoreCase) == true)
+        if (context.Request.Path.Value?.EndsWith("/swagger.json", StringComparison.OrdinalIgnoreCase) != true)
         {
-            var originalBody = context.Response.Body;
-            using var memStream = new MemoryStream();
-            context.Response.Body = memStream;
-
             await next();
-
-            if (context.Response.StatusCode == StatusCodes.Status200OK)
-            {
-                memStream.Seek(0, SeekOrigin.Begin);
-                using var reader = new StreamReader(memStream, System.Text.Encoding.UTF8);
-                var content = await reader.ReadToEndAsync();
-
-                if (content.Contains("\"openapi\": \"3.0.4\""))
-                {
-                    content = content.Replace("\"openapi\": \"3.0.4\"", "\"openapi\": \"3.0.1\"");
-                }
-
-                var bytes = System.Text.Encoding.UTF8.GetBytes(content);
-                context.Response.Body = originalBody;
-                context.Response.ContentLength = bytes.Length;
-                await context.Response.Body.WriteAsync(bytes, 0, bytes.Length);
-                return;
-            }
-
-            memStream.Seek(0, SeekOrigin.Begin);
-            await memStream.CopyToAsync(originalBody);
-            context.Response.Body = originalBody;
             return;
         }
 
+        var originalBody = context.Response.Body;
+        await using var memoryStream = new MemoryStream();
+        context.Response.Body = memoryStream;
         await next();
+
+        if (context.Response.StatusCode == StatusCodes.Status200OK)
+        {
+            memoryStream.Seek(0, SeekOrigin.Begin);
+            using var reader = new StreamReader(memoryStream, Encoding.UTF8);
+            var content = await reader.ReadToEndAsync();
+            content = content.Replace("\"openapi\": \"3.0.4\"", "\"openapi\": \"3.0.1\"");
+            var bytes = Encoding.UTF8.GetBytes(content);
+            context.Response.Body = originalBody;
+            context.Response.ContentLength = bytes.Length;
+            await context.Response.Body.WriteAsync(bytes);
+            return;
+        }
+
+        memoryStream.Seek(0, SeekOrigin.Begin);
+        await memoryStream.CopyToAsync(originalBody);
+        context.Response.Body = originalBody;
     });
 
     app.UseSwagger();
@@ -108,29 +170,35 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// Automatic migrations on startup if configured (e.g. Docker environment)
 if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
     string.Equals(Environment.GetEnvironmentVariable("APPLY_MIGRATIONS"), "true", StringComparison.OrdinalIgnoreCase))
 {
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    
     const int maxRetries = 10;
     const int delaySeconds = 3;
 
-    for (int attempt = 1; attempt <= maxRetries; attempt++)
+    for (var attempt = 1; attempt <= maxRetries; attempt++)
     {
         try
         {
-            logger.LogInformation("Checking and applying pending database migrations (Attempt {Attempt}/{MaxRetries})...", attempt, maxRetries);
+            logger.LogInformation(
+                "Checking and applying pending database migrations (Attempt {Attempt}/{MaxRetries})...",
+                attempt,
+                maxRetries);
             dbContext.Database.Migrate();
             logger.LogInformation("Database migrations applied successfully.");
             break;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to apply database migrations on attempt {Attempt}/{MaxRetries}. Waiting {Delay}s before retry...", attempt, maxRetries, delaySeconds);
+            logger.LogWarning(
+                ex,
+                "Failed to apply database migrations on attempt {Attempt}/{MaxRetries}. Waiting {Delay}s before retry...",
+                attempt,
+                maxRetries,
+                delaySeconds);
             if (attempt < maxRetries)
             {
                 Thread.Sleep(TimeSpan.FromSeconds(delaySeconds));
@@ -143,129 +211,97 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
     }
 }
 
-// -----------------------------------------------------------------------------------------
-// 5.1 Health endpoint
-// -----------------------------------------------------------------------------------------
+app.MapPost("/api/auth/login", async (
+    LoginRequestDto request,
+    AuthService authService,
+    ILogger<Program> logger) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Jelszo))
+    {
+        return Results.BadRequest(new { message = "A felhasználónév és a jelszó megadása kötelező." });
+    }
+
+    var result = await authService.LoginAsync(request);
+    if (result is null)
+    {
+        logger.LogInformation("Login rejected for username {Username}.", request.Username);
+        return Results.Json(
+            new { message = "Hibás felhasználónév vagy jelszó." },
+            statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    return Results.Ok(result);
+})
+.WithName("Login")
+.WithSummary("Felhasználói bejelentkezés – JWT token kiadás")
+.WithTags("Auth")
+.Produces<LoginResponseDto>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest)
+.Produces(StatusCodes.Status401Unauthorized)
+.WithOpenApi();
+
+app.MapPost("/api/auth/logout", () => Results.Ok(new { message = "Sikeres kijelentkezés." }))
+    .WithName("Logout")
+    .WithSummary("Kijelentkezés; a kliens törli a JWT tokent.")
+    .WithTags("Auth")
+    .RequireAuthorization("Authenticated")
+    .Produces(StatusCodes.Status200OK)
+    .Produces(StatusCodes.Status401Unauthorized)
+    .WithOpenApi();
+
+app.MapGet("/api/auth/me", async (HttpContext context, AuthService authService) =>
+{
+    var user = await authService.GetCurrentUserAsync(context.User);
+    return user is null
+        ? Results.Json(new { message = "A felhasználó nem található." }, statusCode: StatusCodes.Status401Unauthorized)
+        : Results.Ok(user);
+})
+.WithName("GetCurrentUser")
+.WithSummary("A bejelentkezett felhasználó adatai")
+.WithTags("Auth")
+.RequireAuthorization("Authenticated")
+.Produces<CurrentUserDto>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status401Unauthorized)
+.WithOpenApi();
+
 app.MapGet("/api/health", async (AppDbContext dbContext, ILogger<Program> logger) =>
 {
     try
     {
-        bool canConnect = await dbContext.Database.CanConnectAsync();
-        if (canConnect)
+        if (await dbContext.Database.CanConnectAsync())
         {
-            return Results.Ok(new
-            {
-                status = "ok",
-                database = "connected"
-            });
+            return Results.Ok(new { status = "ok", database = "connected" });
         }
 
         logger.LogWarning("Health check failed: database connection could not be established.");
-        return Results.Json(new
-        {
-            status = "unhealthy",
-            database = "disconnected"
-        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        return Results.Json(
+            new { status = "unhealthy", database = "disconnected" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
     }
     catch (Exception ex)
     {
         logger.LogError(ex, "Health check failed with an exception.");
-        return Results.Json(new
-        {
-            status = "unhealthy",
-            database = "disconnected"
-        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        return Results.Json(
+            new { status = "unhealthy", database = "disconnected" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 })
 .WithName("GetHealth")
-.WithSummary("Egészségellenőrző végpont (alkalmazás és adatbázis kapcsolat)")
-.WithDescription("Ellenőrzi a backend alkalmazás és az adatbázis-kapcsolat elérhetőségét.")
+.WithSummary("Egészségellenőrzés az adatbázis-kapcsolattal együtt")
 .WithTags("Health")
 .Produces(StatusCodes.Status200OK)
 .Produces(StatusCodes.Status503ServiceUnavailable)
 .WithOpenApi();
 
-// -----------------------------------------------------------------------------------------
-// 5.2 Adatlekérdező végpontok (Rooms / Termek)
-// -----------------------------------------------------------------------------------------
-app.MapGet("/api/rooms", async (AppDbContext dbContext, ILogger<Program> logger) =>
-{
-    try
-    {
-        var rooms = await dbContext.Termek
-            .AsNoTracking()
-            .Select(t => new RoomDto
-            {
-                Id = t.Id,
-                Nev = t.Nev,
-                Kapacitas = t.Kapacitas,
-                Leiras = t.Leiras,
-                Aktivalva = t.Aktivalva
-            })
-            .ToListAsync();
-
-        return Results.Ok(rooms);
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error occurred while retrieving rooms from database.");
-        return Results.Problem(
-            statusCode: StatusCodes.Status500InternalServerError,
-            title: "Internal Server Error",
-            detail: "Hiba történt a termek lekérdezése során."
-        );
-    }
-})
-.WithName("GetRooms")
-.WithSummary("Termek listájának lekérdezése")
-.WithDescription("Lekérdezi a rendszerben rögzített összes terem listáját.")
-.WithTags("Rooms")
-.Produces<List<RoomDto>>(StatusCodes.Status200OK)
-.ProducesProblem(StatusCodes.Status500InternalServerError)
-.WithOpenApi();
-
-app.MapGet("/api/rooms/{id:int}", async (int id, AppDbContext dbContext, ILogger<Program> logger) =>
-{
-    try
-    {
-        var room = await dbContext.Termek
-            .AsNoTracking()
-            .Where(t => t.Id == id)
-            .Select(t => new RoomDto
-            {
-                Id = t.Id,
-                Nev = t.Nev,
-                Kapacitas = t.Kapacitas,
-                Leiras = t.Leiras,
-                Aktivalva = t.Aktivalva
-            })
-            .FirstOrDefaultAsync();
-
-        if (room is null)
-        {
-            return Results.NotFound(new { message = $"A(z) {id} azonosítójú terem nem található." });
-        }
-
-        return Results.Ok(room);
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error occurred while retrieving room {RoomId} from database.", id);
-        return Results.Problem(
-            statusCode: StatusCodes.Status500InternalServerError,
-            title: "Internal Server Error",
-            detail: "Hiba történt a terem lekérdezése során."
-        );
-    }
-})
-.WithName("GetRoomById")
-.WithSummary("Egy adott terem adatainak lekérdezése azonosító alapján")
-.WithDescription("Egy adott terem részletes adatait adja vissza az azonosítója (ID) alapján.")
-.WithTags("Rooms")
-.Produces<RoomDto>(StatusCodes.Status200OK)
-.Produces(StatusCodes.Status404NotFound)
-.ProducesProblem(StatusCodes.Status500InternalServerError)
-.WithOpenApi();
+app.MapUserEndpoints();
+app.MapRoomEndpoints();
+app.MapKeyEndpoints();
+app.MapKeyMovementEndpoints();
+app.MapBookingEndpoints();
+app.MapTicketEndpoints();
+app.MapMaintenanceEndpoints();
+app.MapMasterAccessEndpoints();
+app.MapReliabilityEndpoints();
 
 app.Run();
 

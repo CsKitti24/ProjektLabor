@@ -16,14 +16,14 @@ namespace ProjektLabor.Models
         public int Kapacitas { get; set; }
 
         [MaxLength(500)]
-        public string Leiras { get; set; }
+        public string? Leiras { get; set; }
 
         public bool Aktivalva { get; set; } = true;
 
-        public ICollection<Foglalas> Foglalasok { get; set; }
-        public ICollection<Kulcs> Kulcsok { get; set; }
-        public ICollection<KarbantartasiIdosav> KarbantartasiIdosavok { get; set; }
-        public ICollection<Hibajegy> Hibajegyek { get; set; }
-        public ICollection<KulcsTerem> KulcsTeremKapcsok { get; set; }
+        public ICollection<Foglalas> Foglalasok { get; set; } = new List<Foglalas>();
+        public ICollection<Kulcs> Kulcsok { get; set; } = new List<Kulcs>();
+        public ICollection<KarbantartasiIdosav> KarbantartasiIdosavok { get; set; } = new List<KarbantartasiIdosav>();
+        public ICollection<Hibajegy> Hibajegyek { get; set; } = new List<Hibajegy>();
+        public ICollection<KulcsTerem> KulcsTeremKapcsok { get; set; } = new List<KulcsTerem>();
     }
 }

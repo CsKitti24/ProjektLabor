@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -6,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs;
 using ProjektLabor.Models;
+using ProjektLabor.Services;
 using Xunit;
 
 namespace backend.Tests
@@ -13,10 +15,11 @@ namespace backend.Tests
     public class ApiEndpointTests : IClassFixture<WebApplicationFactory<Program>>
     {
         private readonly WebApplicationFactory<Program> _factory;
+        private readonly string _dbName;
 
         public ApiEndpointTests(WebApplicationFactory<Program> factory)
         {
-            var dbName = "TestDb_" + Guid.NewGuid();
+            _dbName = "TestDb_" + Guid.NewGuid();
             _factory = factory.WithWebHostBuilder(builder =>
             {
                 builder.ConfigureServices(services =>
@@ -32,10 +35,36 @@ namespace backend.Tests
                     // Add in-memory database for testing
                     services.AddDbContext<AppDbContext>(options =>
                     {
-                        options.UseInMemoryDatabase(dbName);
+                        options.UseInMemoryDatabase(_dbName);
                     });
                 });
             });
+        }
+
+        private async Task<string> GetTestJwtTokenAsync(string role = "Oktato")
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var authService = scope.ServiceProvider.GetRequiredService<AuthService>();
+
+            var user = await db.Felhasznalok.FirstOrDefaultAsync(u => u.Role == role);
+            if (user == null)
+            {
+                user = new Felhasznalo
+                {
+                    Username = $"test_{role.ToLower()}",
+                    Nev = $"Teszt {role}",
+                    Email = $"test_{role.ToLower()}@test.hu",
+                    Role = role,
+                    JelszoHash = BCrypt.Net.BCrypt.HashPassword("Test1234!"),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                db.Felhasznalok.Add(user);
+                await db.SaveChangesAsync();
+            }
+
+            return authService.GenerateJwtToken(user);
         }
 
         [Fact]
@@ -56,10 +85,25 @@ namespace backend.Tests
         }
 
         [Fact]
-        public async Task GetRooms_ReturnsEmptyList_WhenNoRoomsExist()
+        public async Task GetRooms_ReturnsUnauthorized_WhenNoTokenProvided()
         {
             // Arrange
             var client = _factory.CreateClient();
+
+            // Act
+            var response = await client.GetAsync("/api/rooms");
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetRooms_ReturnsEmptyList_WhenNoRoomsExist_WithAuth()
+        {
+            // Arrange
+            var token = await GetTestJwtTokenAsync();
+            var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
             // Act
             var response = await client.GetAsync("/api/rooms");
@@ -72,7 +116,7 @@ namespace backend.Tests
         }
 
         [Fact]
-        public async Task GetRooms_ReturnsRooms_WhenRoomsExist()
+        public async Task GetRooms_ReturnsRooms_WhenRoomsExist_WithAuth()
         {
             // Arrange
             using (var scope = _factory.Services.CreateScope())
@@ -88,7 +132,9 @@ namespace backend.Tests
                 await db.SaveChangesAsync();
             }
 
+            var token = await GetTestJwtTokenAsync();
             var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
             // Act
             var response = await client.GetAsync("/api/rooms");
@@ -102,10 +148,25 @@ namespace backend.Tests
         }
 
         [Fact]
-        public async Task GetRoomById_ReturnsNotFound_WhenRoomDoesNotExist()
+        public async Task GetRoomById_ReturnsUnauthorized_WhenNoTokenProvided()
         {
             // Arrange
             var client = _factory.CreateClient();
+
+            // Act
+            var response = await client.GetAsync("/api/rooms/9999");
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task GetRoomById_ReturnsNotFound_WhenRoomDoesNotExist_WithAuth()
+        {
+            // Arrange
+            var token = await GetTestJwtTokenAsync();
+            var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
             // Act
             var response = await client.GetAsync("/api/rooms/9999");
