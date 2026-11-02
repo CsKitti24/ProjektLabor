@@ -54,7 +54,7 @@ React Frontend (port 3000)
         │
         │ HTTP/REST + JWT Bearer token
         ▼
-ASP.NET Core Minimal API (port 5000)
+ASP.NET Core Minimal API (port 8000)
         │
         ├── JWT Authentication Middleware
         ├── RBAC Authorization Middleware

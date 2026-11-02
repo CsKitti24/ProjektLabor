@@ -28,7 +28,7 @@ felülete, ezért a rendszer jelenleg backend-központú, integrációs állapot
 ```mermaid
 flowchart LR
     Browser["Böngésző"] --> Frontend["React + TypeScript + Vite<br/>localhost:3000"]
-    Frontend -->|REST / JSON + Bearer JWT| API["ASP.NET Core Web API<br/>localhost:5000"]
+    Frontend -->|REST / JSON + Bearer JWT| API["ASP.NET Core Web API<br/>localhost:8000"]
     API --> Auth["JWT validáció<br/>RBAC policy-k"]
     API --> EF["Entity Framework Core 8"]
     EF --> DB[("SQL Server 2022<br/>KeyAndRoomDb")]
@@ -41,7 +41,7 @@ Docker Compose három szolgáltatást indít közös bridge hálózaton:
 
 ```mermaid
 flowchart TB
-    FE["frontend :3000"] --> BE["backend :5000"]
+    FE["frontend :3000"] --> BE["backend :8000"]
     BE --> SQL[("mssql :1433")]
     BE -. "startup: APPLY_MIGRATIONS=true" .-> SQL
     SQL --> Volume[("mssql-data volume")]
@@ -78,7 +78,7 @@ flowchart TB
 
 Az összes végpont részletes kérés-/válaszformátuma és jogosultsága a
 [docs/API_DESIGN.md](./docs/API_DESIGN.md) fájlban található. Development
-környezetben a Swagger UI a `http://localhost:5000/swagger` címen érhető el.
+környezetben a Swagger UI a `http://localhost:8000/swagger` címen érhető el.
 
 ### Adatmodell és integritás
 
@@ -134,7 +134,7 @@ cp .env.example .env
 # töltsd ki egyedi MSSQL-, JWT- és szükség esetén bootstrap-admin értékekkel
 docker compose up --build -d
 docker compose ps
-curl http://localhost:5000/api/health
+curl http://localhost:8000/api/health
 ```
 
 Leállítás:
