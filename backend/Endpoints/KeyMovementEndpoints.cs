@@ -15,7 +15,8 @@ namespace ProjektLabor.Endpoints
         public static RouteGroupBuilder MapKeyMovementEndpoints(this IEndpointRouteBuilder routes)
         {
             var group = routes.MapGroup("/api/key-movements")
-                .WithTags("KeyMovements");
+                .WithTags("KeyMovements")
+                .RequireAuthorization("AdminOrPortasOrIgazgato");
 
             // KM1 – POST /api/key-movements/issue
             group.MapPost("/issue", async (
@@ -159,7 +160,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("IssueKey")
             .WithSummary("Kulcs kiadásának rögzítése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("Portas")
             .Produces<KeyMovementItemDto>(StatusCodes.Status201Created)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
@@ -267,7 +268,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("ReturnKey")
             .WithSummary("Kulcs visszavételének rögzítése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("Portas")
             .Produces<KeyMovementItemDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
@@ -356,7 +357,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyMovementsList")
             .WithSummary("Kulcsmozgások listázása szűrőkkel és lapozással")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyMovementListDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
@@ -401,7 +402,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyMovementById")
             .WithSummary("Egy kulcsmozgás részleteinek lekérdezése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyMovementItemDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -479,7 +480,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetOverdueKeys")
             .WithSummary("Lejárt vagy le nem adott kulcsok listázása")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<OverdueKeyDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)

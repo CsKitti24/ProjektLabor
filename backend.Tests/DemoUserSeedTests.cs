@@ -38,16 +38,18 @@ public sealed class DemoUserSeedTests
         var configuration = CreateConfiguration();
         await AdminBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
 
+        var authConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Authentication:Jwt:Issuer"] = "test-issuer",
+                ["Authentication:Jwt:Audience"] = "test-audience",
+                ["Authentication:Jwt:SigningKey"] = "test-signing-key-with-at-least-32-bytes"
+            })
+            .Build();
         var authService = new AuthService(
             db,
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Authentication:Jwt:Issuer"] = "test-issuer",
-                    ["Authentication:Jwt:Audience"] = "test-audience",
-                    ["Authentication:Jwt:SigningKey"] = "test-signing-key-with-at-least-32-bytes"
-                })
-                .Build(),
+            authConfiguration,
+            new JwtSettings("test-issuer", "test-audience", "test-signing-key-with-at-least-32-bytes"),
             NullLogger<AuthService>.Instance);
 
         foreach (var (username, password, role) in DemoUsers())

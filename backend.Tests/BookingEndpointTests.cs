@@ -80,6 +80,7 @@ namespace backend.Tests
         public async Task CreateBooking_Succeeds_AndPreventsOverlappingBooking()
         {
             // Arrange
+            _ = await CreateAuthenticatedUserAsync("Oktato");
             var (client, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("Foglalas Terem 1");
 
@@ -87,8 +88,9 @@ namespace backend.Tests
             var end = start.AddMinutes(90);
 
             // 1. Create first booking
-            var response1 = await client.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
+            var response1 = await client.PostAsJsonAsync("/api/bookings", new
             {
+                felhasznaloId = 1,
                 TeremId = roomId,
                 StartTime = start,
                 EndTime = end
@@ -98,6 +100,7 @@ namespace backend.Tests
             var b1 = await response1.Content.ReadFromJsonAsync<BookingDto>();
             Assert.NotNull(b1);
             Assert.Equal("Aktiv", b1.Status);
+            Assert.NotEqual(1, b1.FelhasznaloId);
 
             // 2. Try creating overlapping booking in same room
             var overlapStart = start;
@@ -146,6 +149,12 @@ namespace backend.Tests
             var otherBookings = await otherBookingsRes.Content.ReadFromJsonAsync<List<BookingDto>>();
             Assert.NotNull(otherBookings);
             Assert.Empty(otherBookings);
+
+            var forbiddenDetails = await client2.GetAsync($"/api/bookings/{myBookings[0].Id}");
+            Assert.Equal(HttpStatusCode.Forbidden, forbiddenDetails.StatusCode);
+
+            var forbiddenList = await client1.GetAsync("/api/bookings");
+            Assert.Equal(HttpStatusCode.Forbidden, forbiddenList.StatusCode);
         }
 
         [Fact]

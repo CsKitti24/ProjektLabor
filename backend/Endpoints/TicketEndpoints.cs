@@ -21,7 +21,7 @@ namespace ProjektLabor.Endpoints
         {
             var group = routes.MapGroup("/api/tickets")
                 .WithTags("Tickets")
-                .RequireAuthorization("Authenticated");
+                .RequireAuthorization("AdminOrPortasOrIgazgato");
 
             // T1 – GET /api/tickets
             group.MapGet("/", async (
@@ -146,11 +146,11 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {request.TeremId} azonosítójú terem nem található." });
                 }
 
-                int userId = 1;
-                var subClaim = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? caller.FindFirst("sub")?.Value;
-                if (int.TryParse(subClaim, out int parsedId))
+                var subject = caller.FindFirst("sub")?.Value
+                    ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!int.TryParse(subject, out var userId) || userId <= 0)
                 {
-                    userId = parsedId;
+                    return Results.Unauthorized();
                 }
 
                 var ticket = new Hibajegy
@@ -194,6 +194,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("CreateTicket")
             .WithSummary("Új hibajegy rögzítése")
+            .RequireAuthorization("AdminOrPortas")
             .Produces<TicketDto>(StatusCodes.Status201Created)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
@@ -256,7 +257,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("UpdateTicketStatus")
             .WithSummary("Hibajegy státuszának módosítása")
-            .RequireAuthorization("AdminOrIgazgato")
+            .RequireAuthorization("Adminisztrator")
             .Produces<TicketDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)

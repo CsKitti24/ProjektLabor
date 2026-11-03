@@ -12,7 +12,8 @@ namespace ProjektLabor.Endpoints
         public static RouteGroupBuilder MapKeyEndpoints(this IEndpointRouteBuilder routes)
         {
             var group = routes.MapGroup("/api/keys")
-                .WithTags("Keys");
+                .WithTags("Keys")
+                .RequireAuthorization("Authenticated");
 
             // K1 – GET /api/keys
             group.MapGet("/", async (
@@ -82,7 +83,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeys")
             .WithSummary("Kulcsok listázása szűrőkkel")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<KeyDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
@@ -127,7 +128,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyById")
             .WithSummary("Egy kulcs adatainak lekérdezése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -363,7 +364,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyStatus")
             .WithSummary("Kulcs aktuális állapotának lekérdezése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyStatusDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -408,7 +409,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyMovements")
             .WithSummary("Kulcs mozgástörténetének lekérdezése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<KeyMovementItemDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)

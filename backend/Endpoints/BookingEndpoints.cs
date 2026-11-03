@@ -68,6 +68,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetMyBookings")
             .WithSummary("A bejelentkezett felhasználó saját foglalásai")
+            .RequireAuthorization("Oktato")
             .Produces<List<BookingDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .WithOpenApi();
@@ -149,12 +150,13 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetBookings")
             .WithSummary("Foglalások listázása szűrőkkel és lapozással")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<BookingListDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .WithOpenApi();
 
             // B2 – GET /api/bookings/{id}
-            group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
+            group.MapGet("/{id:int}", async (int id, AppDbContext db, ClaimsPrincipal caller) =>
             {
                 var f = await db.Foglalasok
                     .AsNoTracking()
@@ -165,6 +167,23 @@ namespace ProjektLabor.Endpoints
                 if (f is null)
                 {
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú foglalás nem található." });
+                }
+
+                var subject = caller.FindFirst("sub")?.Value
+                    ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!int.TryParse(subject, out var callerId) || callerId <= 0)
+                {
+                    return Results.Unauthorized();
+                }
+
+                var canReadAnyBooking =
+                    caller.IsInRole("Portas") ||
+                    caller.IsInRole("Adminisztrator") ||
+                    caller.IsInRole("UzemeltetesiIgazgato");
+                if (!canReadAnyBooking &&
+                    (!caller.IsInRole("Oktato") || f.FelhasznaloId != callerId))
+                {
+                    return Results.Forbid();
                 }
 
                 var dto = new BookingDto
@@ -295,6 +314,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("CreateBooking")
             .WithSummary("Új teremfoglalás létrehozása")
+            .RequireAuthorization("AdminOrOktato")
             .Produces<BookingDto>(StatusCodes.Status201Created)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
