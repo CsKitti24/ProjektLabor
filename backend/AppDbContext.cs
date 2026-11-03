@@ -35,6 +35,19 @@ namespace ProjektLabor.Data
                 .IsUnique()
                 .HasFilter("[AutomationKey] IS NOT NULL");
 
+            modelBuilder.Entity<Ertesites>()
+                .HasIndex(notification => notification.AutomationKey)
+                .IsUnique()
+                .HasFilter("[AutomationKey] IS NOT NULL");
+
+            modelBuilder.Entity<MegbizhatosagiEsemeny>()
+                .HasIndex(item => item.KiadasiKulcsmozgasId)
+                .IsUnique()
+                .HasFilter("[Automatikus] = 1 AND [KiadasiKulcsmozgasId] IS NOT NULL");
+
+            modelBuilder.Entity<Kulcs>()
+                .HasIndex(key => key.Szam).IsUnique();
+
             modelBuilder.Entity<MesterkulcsJogosultsag>()
                 .HasIndex(access => new { access.KulcsId, access.FelhasznaloId })
                 .IsUnique();

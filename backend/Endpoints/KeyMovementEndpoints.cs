@@ -17,7 +17,7 @@ namespace ProjektLabor.Endpoints
         {
             var group = routes.MapGroup("/api/key-movements")
                 .WithTags("KeyMovements")
-                .RequireAuthorization("Authenticated");
+                .RequireAuthorization("AdminOrPortasOrIgazgato");
 
             // KM1 – POST /api/key-movements/issue
             group.MapPost("/issue", async (
@@ -36,8 +36,9 @@ namespace ProjektLabor.Endpoints
                 await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
                     ? null
                     : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+                await SqlServerLocking.AcquireAsync(db, $"key-issue:{request.KulcsId}");
+
                 var key = await db.Kulcsok
-                    .Include(k => k.Terem)
                     .Include(k => k.Kulcsmozgasok)
                     .FirstOrDefaultAsync(k => k.Id == request.KulcsId);
 
@@ -87,18 +88,8 @@ namespace ProjektLabor.Endpoints
                         return Results.BadRequest(new { message = "A foglalás nem ehhez a kulcshoz tartozó teremre szól." });
                     }
 
-                    var isAuthorizedRecipient =
-                        booking.Felhasznalo?.Role == RoleNames.Oktato &&
-                        (key.Tipus != "Mesterkulcs" ||
-                         await db.MesterkulcsJogosultsagok.AnyAsync(access =>
-                             access.KulcsId == key.Id && access.FelhasznaloId == booking.FelhasznaloId));
-                    if (!isAuthorizedRecipient)
-                    {
-                        return Results.Forbid();
-                    }
-
                     recipientId = booking.FelhasznaloId;
-                    recipientName = booking.Felhasznalo?.Nev ?? string.Empty;
+                    recipientName = booking.Felhasznalo.Nev;
                 }
                 else
                 {
@@ -207,6 +198,8 @@ namespace ProjektLabor.Endpoints
                 await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
                     ? null
                     : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+                await SqlServerLocking.AcquireAsync(db, $"key-issue:{request.KulcsId}");
+
                 var key = await db.Kulcsok
                     .Include(k => k.Kulcsmozgasok)
                     .FirstOrDefaultAsync(k => k.Id == request.KulcsId);
@@ -313,7 +306,7 @@ namespace ProjektLabor.Endpoints
                     .Include(km => km.Operátor)
                     .Include(km => km.AtvevoFelhasznalo)
                     .Include(km => km.Foglalas)
-                        .ThenInclude(f => f.Felhasznalo)
+                        .ThenInclude(f => f!.Felhasznalo)
                     .AsQueryable();
 
                 if (kulcsId.HasValue)
@@ -361,7 +354,7 @@ namespace ProjektLabor.Endpoints
                                 : null,
                         OperatorId = km.OperátorId,
                         OperatorNev = km.Operátor != null ? km.Operátor.Nev : string.Empty,
-                        Megjegyzes = km.Megjegyzes
+                        Megjegyzes = km.Megjegyzes ?? string.Empty
                     })
                     .ToListAsync();
 
@@ -390,7 +383,7 @@ namespace ProjektLabor.Endpoints
                     .Include(k => k.Operátor)
                     .Include(k => k.AtvevoFelhasznalo)
                     .Include(k => k.Foglalas)
-                        .ThenInclude(f => f.Felhasznalo)
+                        .ThenInclude(f => f!.Felhasznalo)
                     .FirstOrDefaultAsync(k => k.Id == id);
 
                 if (km is null)
@@ -413,7 +406,7 @@ namespace ProjektLabor.Endpoints
                     AtvevoNev = km.AtvevoFelhasznalo?.Nev ?? km.Foglalas?.Felhasznalo?.Nev,
                     OperatorId = km.OperátorId,
                     OperatorNev = km.Operátor != null ? km.Operátor.Nev : string.Empty,
-                    Megjegyzes = km.Megjegyzes
+                    Megjegyzes = km.Megjegyzes ?? string.Empty
                 };
 
                 return Results.Ok(dto);
@@ -441,7 +434,7 @@ namespace ProjektLabor.Endpoints
                         .ThenInclude(km => km.AtvevoFelhasznalo)
                     .Include(k => k.Kulcsmozgasok)
                         .ThenInclude(km => km.Foglalas)
-                            .ThenInclude(f => f.Felhasznalo)
+                            .ThenInclude(f => f!.Felhasznalo)
                     .ToListAsync();
 
                 var overdueList = new List<OverdueKeyDto>();

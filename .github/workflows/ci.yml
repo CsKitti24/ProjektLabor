@@ -29,6 +29,51 @@ jobs:
       - name: Run backend tests
         run: dotnet test ProjektLabor.sln --no-build --configuration Release --verbosity normal --filter "FullyQualifiedName!~SqlServerIntegrationTests"
 
+  sqlserver-integration:
+    name: SQL Server Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: ${{ secrets.SQLSERVER_TEST_PASSWORD || 'ProjektLabor_CI_SQL_123!' }}
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${{ secrets.SQLSERVER_TEST_PASSWORD || 'ProjektLabor_CI_SQL_123!' }}' -C -Q 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+          --health-start-period 20s
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Create disposable integration database
+        env:
+          MSSQL_TEST_PASSWORD: ${{ secrets.SQLSERVER_TEST_PASSWORD || 'ProjektLabor_CI_SQL_123!' }}
+        run: |
+          for attempt in {1..30}; do
+            if docker exec "${{ job.services.mssql.id }}" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_TEST_PASSWORD" -C -Q "IF DB_ID(N'ProjektLaborSqlIntegration') IS NULL CREATE DATABASE [ProjektLaborSqlIntegration];"; then
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Restore and build backend
+        run: dotnet build ProjektLabor.sln --configuration Release
+
+      - name: Run SQL Server integration tests
+        env:
+          SQLSERVER_TEST_CONNECTION: Server=localhost,1433;Database=ProjektLaborSqlIntegration;User Id=sa;Password=${{ secrets.SQLSERVER_TEST_PASSWORD || 'ProjektLabor_CI_SQL_123!' }};TrustServerCertificate=True;Encrypt=False
+        run: dotnet test backend.Tests/backend.Tests.csproj --no-build --configuration Release --verbosity normal --filter "FullyQualifiedName~SqlServerIntegrationTests"
+
   frontend:
     name: Frontend (Lint & Build)
     runs-on: ubuntu-latest

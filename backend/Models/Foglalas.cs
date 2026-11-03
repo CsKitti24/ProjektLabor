@@ -12,11 +12,11 @@ namespace ProjektLabor.Models
 
         [ForeignKey("Felhasznalo")]
         public int FelhasznaloId { get; set; }
-        public Felhasznalo Felhasznalo { get; set; }
+        public Felhasznalo Felhasznalo { get; set; } = null!;
 
         [ForeignKey("Terem")]
         public int TeremId { get; set; }
-        public Terem Terem { get; set; }
+        public Terem Terem { get; set; } = null!;
 
         [Required]
         public DateTime StartTime { get; set; }
@@ -25,14 +25,14 @@ namespace ProjektLabor.Models
         public DateTime EndTime { get; set; }
 
         [Required]
-        public string Status { get; set; } // Expected values: Aktiv, NoShow, Megszuntetve, Kesz
+        public string Status { get; set; } = string.Empty; // Expected values: Aktiv, NoShow, Megszuntetve, Kesz
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
         // Navigation collections
-        public ICollection<Kulcsmozgas> Kulcsmozgasok { get; set; }
-        public ICollection<Ertesites> Ertesitesek { get; set; }
-        public ICollection<MegbizhatosagiEsemeny> MegbizhatosagiEsemenyek { get; set; }
+        public ICollection<Kulcsmozgas> Kulcsmozgasok { get; set; } = new List<Kulcsmozgas>();
+        public ICollection<Ertesites> Ertesitesek { get; set; } = new List<Ertesites>();
+        public ICollection<MegbizhatosagiEsemeny> MegbizhatosagiEsemenyek { get; set; } = new List<MegbizhatosagiEsemeny>();
     }
 }

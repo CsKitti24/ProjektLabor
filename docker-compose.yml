@@ -22,8 +22,12 @@ services:
       - Authentication__Jwt__Issuer=${JWT_ISSUER:?Set JWT_ISSUER in .env}
       - Authentication__Jwt__Audience=${JWT_AUDIENCE:?Set JWT_AUDIENCE in .env}
       - Authentication__Jwt__SigningKey=${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
-      - BootstrapAdmin__Username=${BOOTSTRAP_ADMIN_USERNAME:-}
-      - BootstrapAdmin__Password=${BOOTSTRAP_ADMIN_PASSWORD:-}
+      - BootstrapAdmin__Username=${BOOTSTRAP_ADMIN_USERNAME:?Set BOOTSTRAP_ADMIN_USERNAME in .env}
+      - BootstrapAdmin__Password=${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}
+      - DemoUsers__Oktato__Password=${DEMO_OKTATO_PASSWORD:-}
+      - DemoUsers__Portas__Password=${DEMO_PORTAS_PASSWORD:-}
+      - DemoUsers__Adminisztrator__Password=${DEMO_ADMIN_PASSWORD:-}
+      - DemoUsers__UzemeltetesiIgazgato__Password=${DEMO_IGAZGATO_PASSWORD:-}
       - BootstrapDemoUsers__Enabled=${BOOTSTRAP_DEMO_USERS_ENABLED:-false}
       - BootstrapDemoUsers__Oktato__Username=${DEMO_OKTATO_USERNAME:-}
       - BootstrapDemoUsers__Oktato__Password=${DEMO_OKTATO_PASSWORD:-}
@@ -50,6 +54,7 @@ services:
       start_period: 15s
 
   mssql:
+    platform: linux/amd64
     image: mcr.microsoft.com/mssql/server:2022-latest
     ports:
       - "1433:1433"

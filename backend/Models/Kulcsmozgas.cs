@@ -11,7 +11,7 @@ namespace ProjektLabor.Models
 
         [ForeignKey("Kulcs")]
         public int KulcsId { get; set; }
-        public Kulcs Kulcs { get; set; }
+        public Kulcs Kulcs { get; set; } = null!;
 
         // Optional link to a booking
         public int? FoglalasId { get; set; }

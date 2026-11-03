@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.Bookings;
 using ProjektLabor.Models;
-using ProjektLabor.Security;
 using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints
@@ -178,11 +177,11 @@ namespace ProjektLabor.Endpoints
                 }
 
                 var canReadAnyBooking =
-                    caller.IsInRole(RoleNames.Portas) ||
-                    caller.IsInRole(RoleNames.Adminisztrator) ||
-                    caller.IsInRole(RoleNames.UzemeltetesiIgazgato);
+                    caller.IsInRole("Portas") ||
+                    caller.IsInRole("Adminisztrator") ||
+                    caller.IsInRole("UzemeltetesiIgazgato");
                 if (!canReadAnyBooking &&
-                    (!caller.IsInRole(RoleNames.Oktato) || f.FelhasznaloId != callerId))
+                    (!caller.IsInRole("Oktato") || f.FelhasznaloId != callerId))
                 {
                     return Results.Forbid();
                 }
@@ -218,13 +217,6 @@ namespace ProjektLabor.Endpoints
                 AuditService auditService,
                 ClaimsPrincipal caller) =>
             {
-                var subject = caller.FindFirst("sub")?.Value
-                    ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                if (!int.TryParse(subject, out var callerId) || callerId <= 0)
-                {
-                    return Results.Unauthorized();
-                }
-
                 var timeError = BookingRules.ValidateTimeRange(request.StartTime, request.EndTime);
                 if (timeError is not null)
                 {
@@ -242,21 +234,30 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = "Deaktivált teremre nem lehet foglalást rögzíteni." });
                 }
 
-                var isAdmin = caller.IsInRole(RoleNames.Adminisztrator);
-                var targetUserId = callerId;
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                await SqlServerLocking.AcquireAsync(db, $"room-booking:{request.TeremId}");
+
+                // Determine target user
+                int targetUserId;
+                var subClaim = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? caller.FindFirst("sub")?.Value;
+                int.TryParse(subClaim, out int callerId);
+
+                bool isAdmin = caller.IsInRole("Adminisztrator");
+
                 if (request.FelhasznaloId.HasValue && isAdmin)
                 {
-                    var targetUserExists = await db.Felhasznalok
-                        .AnyAsync(user => user.Id == request.FelhasznaloId.Value);
-                    if (!targetUserExists)
+                    bool userExists = await db.Felhasznalok.AnyAsync(u => u.Id == request.FelhasznaloId.Value);
+                    if (!userExists)
                     {
-                        return Results.NotFound(new
-                        {
-                            message = $"A(z) {request.FelhasznaloId.Value} azonosítójú felhasználó nem található."
-                        });
+                        return Results.NotFound(new { message = $"A(z) {request.FelhasznaloId.Value} azonosítójú felhasználó nem található." });
                     }
-
                     targetUserId = request.FelhasznaloId.Value;
+                }
+                else
+                {
+                    targetUserId = callerId;
                 }
 
                 // Check for overlapping active bookings in the room
@@ -287,6 +288,10 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Foglalas",
                     entitasId: booking.Id.ToString(),
                     ujErtek: $"TeremId: {booking.TeremId}, Start: {booking.StartTime:O}, End: {booking.EndTime:O}");
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
 
                 var user = await db.Felhasznalok.FindAsync(targetUserId);
 
@@ -335,20 +340,19 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú foglalás nem található." });
                 }
 
-                var subject = caller.FindFirst("sub")?.Value
-                    ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                if (!int.TryParse(subject, out var callerId) || callerId <= 0)
-                {
-                    return Results.Unauthorized();
-                }
+                var subClaim = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? caller.FindFirst("sub")?.Value;
+                int.TryParse(subClaim, out int callerId);
+                bool isAdmin = caller.IsInRole("Adminisztrator");
 
-                bool isAdmin = caller.IsInRole(RoleNames.Adminisztrator);
-
-                if (!isAdmin &&
-                    (!caller.IsInRole(RoleNames.Oktato) || booking.FelhasznaloId != callerId))
+                if (!isAdmin && booking.FelhasznaloId != callerId)
                 {
                     return Results.Forbid();
                 }
+
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                await SqlServerLocking.AcquireAsync(db, $"room-booking:{booking.TeremId}");
 
                 var newStart = request.StartTime ?? booking.StartTime;
                 var newEnd = request.EndTime ?? booking.EndTime;
@@ -392,6 +396,10 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Foglalas",
                     entitasId: id.ToString(),
                     ujErtek: $"Start: {booking.StartTime:O}, End: {booking.EndTime:O}, Status: {booking.Status}");
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
 
                 var result = new BookingDto
                 {
@@ -412,7 +420,6 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("UpdateBooking")
             .WithSummary("Foglalás időpontjának vagy státuszának módosítása")
-            .RequireAuthorization("AdminOrOktato")
             .Produces<BookingDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status403Forbidden)
@@ -434,17 +441,11 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú foglalás nem található." });
                 }
 
-                var subject = caller.FindFirst("sub")?.Value
-                    ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                if (!int.TryParse(subject, out var callerId) || callerId <= 0)
-                {
-                    return Results.Unauthorized();
-                }
+                var subClaim = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? caller.FindFirst("sub")?.Value;
+                int.TryParse(subClaim, out int callerId);
+                bool isAdmin = caller.IsInRole("Adminisztrator");
 
-                bool isAdmin = caller.IsInRole(RoleNames.Adminisztrator);
-
-                if (!isAdmin &&
-                    (!caller.IsInRole(RoleNames.Oktato) || booking.FelhasznaloId != callerId))
+                if (!isAdmin && booking.FelhasznaloId != callerId)
                 {
                     return Results.Forbid();
                 }
@@ -465,7 +466,6 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("DeleteBooking")
             .WithSummary("Foglalás lemondása")
-            .RequireAuthorization("AdminOrOktato")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)

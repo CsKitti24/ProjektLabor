@@ -308,6 +308,9 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Szam")
+                        .IsUnique();
+
                     b.HasIndex("TeremId");
 
                     b.ToTable("Kulcsok");

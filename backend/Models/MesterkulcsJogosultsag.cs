@@ -10,11 +10,11 @@ namespace ProjektLabor.Models
 
         [ForeignKey("Felhasznalo")]
         public int FelhasznaloId { get; set; }
-        public Felhasznalo Felhasznalo { get; set; }
+        public Felhasznalo Felhasznalo { get; set; } = null!;
 
         [ForeignKey("Kulcs")]
         public int KulcsId { get; set; }
-        public Kulcs Kulcs { get; set; }
+        public Kulcs Kulcs { get; set; } = null!;
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
