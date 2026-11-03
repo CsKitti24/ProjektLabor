@@ -10,6 +10,35 @@ namespace backend.Tests;
 public class BackgroundAutomationTests
 {
     [Fact]
+    public void AutomationDatabaseIndexesAndKeyRecipientRelationAreConfigured()
+    {
+        using var db = CreateDb();
+        var notificationIndex = db.Model
+            .FindEntityType(typeof(Ertesites))!
+            .GetIndexes()
+            .Single(index => index.Properties.Any(property => property.Name == nameof(Ertesites.AutomationKey)));
+        var penaltyIndex = db.Model
+            .FindEntityType(typeof(MegbizhatosagiEsemeny))!
+            .GetIndexes()
+            .Single(index => index.Properties.Any(
+                property => property.Name == nameof(MegbizhatosagiEsemeny.KiadasiKulcsmozgasId)));
+        var unresolvedAuditIndex = db.Model
+            .FindEntityType(typeof(AuditLog))!
+            .GetIndexes()
+            .Single(index => index.Properties.Any(
+                property => property.Name == nameof(AuditLog.AutomationKey)));
+        var movementEntity = db.Model.FindEntityType(typeof(Kulcsmozgas))!;
+
+        Assert.True(notificationIndex.IsUnique);
+        Assert.True(penaltyIndex.IsUnique);
+        Assert.True(unresolvedAuditIndex.IsUnique);
+        Assert.Contains(
+            movementEntity.GetForeignKeys(),
+            foreignKey => foreignKey.Properties.Any(
+                property => property.Name == nameof(Kulcsmozgas.AtvevoFelhasznaloId)));
+    }
+
+    [Fact]
     public async Task NoShow_IsNotSetBeforeConfiguredWindow_AndIsSetAfterward()
     {
         await using var db = CreateDb();
@@ -141,7 +170,91 @@ public class BackgroundAutomationTests
         Assert.Equal(3, reliabilityEvent.Pont);
         Assert.True(reliabilityEvent.Automatikus);
         Assert.Equal(closingTime, reliabilityEvent.EredetiHatarido);
-        Assert.Single(await db.AuditLogok.ToListAsync());
+        Assert.Single(await db.AuditLogok
+            .Where(item => item.AutomationKey == null)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task DailyClosing_UsesRecordedRecipientForBookinglessIssue()
+    {
+        await using var db = CreateDb();
+        var (booking, operatorUser) = await SeedBookingAsync(
+            db, "Aktiv", new DateTime(2026, 4, 4, 20, 0, 0, DateTimeKind.Utc));
+        var key = await AddKeyAsync(db, booking.TeremId, "DC-BOOKINGLESS");
+        var issue = await AddMovementAsync(
+            db,
+            key.Id,
+            bookingId: null,
+            operatorUser.Id,
+            "Kiadás",
+            new DateTime(2026, 4, 4, 21, 0, 0, DateTimeKind.Utc),
+            booking.FelhasznaloId);
+        await AddMovementAsync(
+            db,
+            key.Id,
+            bookingId: null,
+            operatorUser.Id,
+            "Kiadás",
+            new DateTime(2026, 4, 4, 21, 1, 0, DateTimeKind.Utc));
+        db.Rendszerparameterek.Add(new Rendszerparameter
+        {
+            Kulcs = "napi_kulcsleadasi_zarasi_idopont",
+            Ertek = "22:00"
+        });
+        await db.SaveChangesAsync();
+        var processor = new DailyKeyClosingProcessor(
+            db,
+            new ConfigurationBuilder().Build(),
+            NullLogger<DailyKeyClosingProcessor>.Instance);
+
+        Assert.Equal(1, await processor.ProcessAsync(
+            new DateTime(2026, 4, 4, 22, 0, 0, DateTimeKind.Utc), default));
+
+        var reliabilityEvent = await db.MegbizhatosagiEsemenyek.SingleAsync();
+        Assert.Equal(booking.FelhasznaloId, reliabilityEvent.FelhasznaloId);
+        Assert.Equal(issue.Id, reliabilityEvent.KiadasiKulcsmozgasId);
+        Assert.Equal(3, reliabilityEvent.Pont);
+        Assert.Empty(await db.AuditLogok
+            .Where(item => item.AutomationKey ==
+                $"DailyKeyClosing:UnresolvedRecipient:{issue.Id}")
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task DailyClosing_AuditsUnresolvedBookinglessIssueOnceWithoutPenalty()
+    {
+        await using var db = CreateDb();
+        var (booking, operatorUser) = await SeedBookingAsync(
+            db, "Aktiv", new DateTime(2026, 4, 4, 20, 0, 0, DateTimeKind.Utc));
+        var key = await AddKeyAsync(db, booking.TeremId, "DC-UNRESOLVED");
+        var issue = await AddMovementAsync(
+            db,
+            key.Id,
+            bookingId: null,
+            operatorUser.Id,
+            "Kiadás",
+            new DateTime(2026, 4, 4, 21, 0, 0, DateTimeKind.Utc));
+        db.Rendszerparameterek.Add(new Rendszerparameter
+        {
+            Kulcs = "napi_kulcsleadasi_zarasi_idopont",
+            Ertek = "22:00"
+        });
+        await db.SaveChangesAsync();
+        var processor = new DailyKeyClosingProcessor(
+            db,
+            new ConfigurationBuilder().Build(),
+            NullLogger<DailyKeyClosingProcessor>.Instance);
+        var closingTime = new DateTime(2026, 4, 4, 22, 0, 0, DateTimeKind.Utc);
+
+        Assert.Equal(0, await processor.ProcessAsync(closingTime, default));
+        Assert.Equal(0, await processor.ProcessAsync(closingTime.AddMinutes(1), default));
+
+        Assert.Empty(await db.MegbizhatosagiEsemenyek.ToListAsync());
+        var audit = await db.AuditLogok.SingleAsync();
+        Assert.Equal(issue.Id.ToString(), audit.EntitasId);
+        Assert.Equal($"DailyKeyClosing:UnresolvedRecipient:{issue.Id}", audit.AutomationKey);
+        Assert.Contains("pontlevonás nem történt", audit.Indoklas);
     }
 
     [Fact]
@@ -329,15 +442,17 @@ public class BackgroundAutomationTests
     private static async Task<Kulcsmozgas> AddMovementAsync(
         AppDbContext db,
         int keyId,
-        int bookingId,
+        int? bookingId,
         int operatorId,
         string type,
-        DateTime time)
+        DateTime time,
+        int? recipientId = null)
     {
         var movement = new Kulcsmozgas
         {
             KulcsId = keyId,
             FoglalasId = bookingId,
+            AtvevoFelhasznaloId = recipientId,
             OperátorId = operatorId,
             MozgasTipus = type,
             Idopont = time

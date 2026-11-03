@@ -36,19 +36,14 @@ public sealed class DailyKeyClosingProcessor
         var issuedMovements = await _db.Kulcsmozgasok
             .Include(movement => movement.Foglalas)
             .Where(movement =>
-                movement.FoglalasId != null &&
                 (movement.MozgasTipus == IssueMovement ||
                  movement.MozgasTipus == LegacyIssueMovement))
             .ToListAsync(cancellationToken);
 
         var createdCount = 0;
+        var unresolvedRecipientCount = 0;
         foreach (var movement in issuedMovements)
         {
-            if (movement.Foglalas is null)
-            {
-                continue;
-            }
-
             var issuedAtUtc = AsUtc(movement.Idopont);
             var localIssuedAt = TimeZoneInfo.ConvertTimeFromUtc(issuedAtUtc, timeZone);
             var deadlineDate = DateOnly.FromDateTime(localIssuedAt);
@@ -76,6 +71,31 @@ public sealed class DailyKeyClosingProcessor
                 continue;
             }
 
+            var recipientId = movement.AtvevoFelhasznaloId ?? movement.Foglalas?.FelhasznaloId;
+            if (!recipientId.HasValue)
+            {
+                unresolvedRecipientCount++;
+                var automationKey = $"DailyKeyClosing:UnresolvedRecipient:{movement.Id}";
+                var alreadyLogged = await _db.AuditLogok
+                    .AnyAsync(entry => entry.AutomationKey == automationKey, cancellationToken);
+                if (!alreadyLogged)
+                {
+                    var loggedAt = AsUtc(nowUtc);
+                    _db.AuditLogok.Add(new AuditLog
+                    {
+                        MuveletTipus = "Automatizálási adatprobléma",
+                        EntitasTipus = "Kulcsmozgas",
+                        EntitasId = movement.Id.ToString(CultureInfo.InvariantCulture),
+                        AutomationKey = automationKey,
+                        UjErtek = $"KulcsId: {movement.KulcsId}; FoglalasId: nincs; AtvevoFelhasznaloId: nincs",
+                        Indoklas = "Napi zárás: a kiadáshoz nem tartozik foglalás vagy rögzített átvevő; pontlevonás nem történt.",
+                        LetrehozasIdeje = loggedAt
+                    });
+                }
+
+                continue;
+            }
+
             var alreadyScored = await _db.MegbizhatosagiEsemenyek.AnyAsync(
                 item => item.KiadasiKulcsmozgasId == movement.Id,
                 cancellationToken);
@@ -87,7 +107,7 @@ public sealed class DailyKeyClosingProcessor
             var now = AsUtc(nowUtc);
             _db.MegbizhatosagiEsemenyek.Add(new MegbizhatosagiEsemeny
             {
-                FelhasznaloId = movement.Foglalas.FelhasznaloId,
+                FelhasznaloId = recipientId.Value,
                 KulcsId = movement.KulcsId,
                 FoglalasId = movement.FoglalasId,
                 KiadasiKulcsmozgasId = movement.Id,
@@ -105,20 +125,30 @@ public sealed class DailyKeyClosingProcessor
                 MuveletTipus = "Automatikus büntetőpont",
                 EntitasTipus = "Kulcsmozgas",
                 EntitasId = movement.Id.ToString(CultureInfo.InvariantCulture),
-                UjErtek = $"{PenaltyEventType}: +{PenaltyPoints}; FelhasznaloId: {movement.Foglalas.FelhasznaloId}",
+                UjErtek = $"{PenaltyEventType}: +{PenaltyPoints}; FelhasznaloId: {recipientId.Value}",
                 Indoklas = "Napi zárási feldolgozás",
                 LetrehozasIdeje = now
             });
             createdCount++;
         }
 
-        if (createdCount > 0)
+        if (unresolvedRecipientCount > 0)
+        {
+            _logger.LogWarning(
+                "Skipped {MovementCount} overdue key issues without a booking or recorded recipient.",
+                unresolvedRecipientCount);
+        }
+
+        if (createdCount > 0 || _db.ChangeTracker.HasChanges())
         {
             await _db.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation(
-                "Created {PenaltyCount} unreturned-key reliability penalties at {ProcessedAtUtc}.",
-                createdCount,
-                nowUtc);
+            if (createdCount > 0)
+            {
+                _logger.LogInformation(
+                    "Created {PenaltyCount} unreturned-key reliability penalties at {ProcessedAtUtc}.",
+                    createdCount,
+                    nowUtc);
+            }
         }
 
         return createdCount;

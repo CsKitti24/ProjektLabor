@@ -6,6 +6,7 @@ using ProjektLabor.Data;
 using ProjektLabor.DTOs.KeyMovements;
 using ProjektLabor.DTOs.Keys;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints
@@ -82,6 +83,11 @@ namespace ProjektLabor.Endpoints
                         return Results.BadRequest(new { message = "A foglaláshoz tartozó átvevő nem módosítható." });
                     }
 
+                    if (booking.TeremId != key.TeremId)
+                    {
+                        return Results.BadRequest(new { message = "A foglalás nem ehhez a kulcshoz tartozó teremre szól." });
+                    }
+
                     recipientId = booking.FelhasznaloId;
                     recipientName = booking.Felhasznalo.Nev;
                 }
@@ -103,9 +109,15 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.NotFound(new { message = "A megadott átvevő nem található." });
                     }
-                    if (recipient.Role != "Oktato")
+                    if (recipient.Role != RoleNames.Oktato)
                     {
                         return Results.BadRequest(new { message = "Kulcs átvevője csak oktató lehet." });
+                    }
+                    if (key.Tipus == "Mesterkulcs" &&
+                        !await db.MesterkulcsJogosultsagok.AnyAsync(access =>
+                            access.KulcsId == key.Id && access.FelhasznaloId == recipient.Id))
+                    {
+                        return Results.Forbid();
                     }
 
                     recipientId = recipient.Id;
@@ -240,7 +252,6 @@ namespace ProjektLabor.Endpoints
                 {
                     await transaction.CommitAsync();
                 }
-
                 var opUser = await db.Felhasznalok.FindAsync(operatorId.Value);
                 var recipientName = recipientId.HasValue
                     ? await db.Felhasznalok

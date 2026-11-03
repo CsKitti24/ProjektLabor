@@ -261,6 +261,20 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
     public async Task CreateAndStatusRoutes_EnforceRoleMatrixAndUseTokenOperatorId()
     {
         await SeedUsersAndMasterKeyAsync();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Kulcsok.Add(new Kulcs
+            {
+                Id = 11,
+                Szam = "K-11",
+                Tipus = "Osztalykulcs",
+                TeremId = 1,
+                Aktivalva = true
+            });
+            await db.SaveChangesAsync();
+        }
+
         var ticketRequest = new
         {
             teremId = 1,
@@ -333,13 +347,14 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
 
         var issue = await porter.PostAsJsonAsync(
             "/api/key-movements/issue",
-            new { kulcsId = 10, atvevoFelhasznaloId = 1 });
+            new { kulcsId = 11, atvevoFelhasznaloId = 1 });
         Assert.Equal(System.Net.HttpStatusCode.Created, issue.StatusCode);
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var movement = await db.Kulcsmozgasok.SingleAsync();
             Assert.Equal(2, movement.OperátorId);
+            Assert.Equal(1, movement.AtvevoFelhasznaloId);
         }
 
         foreach (var (userId, role) in AllRoles().Where(user => user.Role != RoleNames.Portas))
@@ -347,13 +362,13 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
             using var deniedClient = CreateAuthenticatedClient(userId, role);
             var deniedReturn = await deniedClient.PostAsJsonAsync(
                 "/api/key-movements/return",
-                new { kulcsId = 10 });
+                new { kulcsId = 11 });
             Assert.Equal(System.Net.HttpStatusCode.Forbidden, deniedReturn.StatusCode);
         }
 
         var returned = await porter.PostAsJsonAsync(
             "/api/key-movements/return",
-            new { kulcsId = 10 });
+            new { kulcsId = 11 });
         Assert.Equal(System.Net.HttpStatusCode.OK, returned.StatusCode);
     }
 
