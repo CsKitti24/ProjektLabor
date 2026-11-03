@@ -12,7 +12,8 @@ namespace ProjektLabor.Endpoints
         public static RouteGroupBuilder MapKeyEndpoints(this IEndpointRouteBuilder routes)
         {
             var group = routes.MapGroup("/api/keys")
-                .WithTags("Keys");
+                .WithTags("Keys")
+                .RequireAuthorization("Authenticated");
 
             // K1 – GET /api/keys
             group.MapGet("/", async (
@@ -82,7 +83,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeys")
             .WithSummary("Kulcsok listázása szűrőkkel")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<KeyDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
@@ -127,7 +128,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyById")
             .WithSummary("Egy kulcs adatainak lekérdezése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -336,6 +337,7 @@ namespace ProjektLabor.Endpoints
                 var lastMovement = await db.Kulcsmozgasok
                     .AsNoTracking()
                     .Include(km => km.Operátor)
+                    .Include(km => km.AtvevoFelhasznalo)
                     .Include(km => km.Foglalas)
                         .ThenInclude(f => f.Felhasznalo)
                     .Where(km => km.KulcsId == id)
@@ -355,7 +357,9 @@ namespace ProjektLabor.Endpoints
                     Allapot = allapot,
                     KiadasIdopontja = allapot == "Kiadva" ? lastMovement?.Idopont : null,
                     KiadtaOperatorNev = allapot == "Kiadva" ? lastMovement?.Operátor?.Nev : null,
-                    AktualisBirtokosNev = allapot == "Kiadva" ? lastMovement?.Foglalas?.Felhasznalo?.Nev : null,
+                    AktualisBirtokosNev = allapot == "Kiadva"
+                        ? lastMovement?.AtvevoFelhasznalo?.Nev ?? lastMovement?.Foglalas?.Felhasznalo?.Nev
+                        : null,
                     KapcsolodoFoglalasId = allapot == "Kiadva" ? lastMovement?.FoglalasId : null
                 };
 
@@ -363,7 +367,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyStatus")
             .WithSummary("Kulcs aktuális állapotának lekérdezése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyStatusDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -383,6 +387,7 @@ namespace ProjektLabor.Endpoints
                     .AsNoTracking()
                     .Include(km => km.Kulcs)
                     .Include(km => km.Operátor)
+                    .Include(km => km.AtvevoFelhasznalo)
                     .Include(km => km.Foglalas)
                         .ThenInclude(f => f.Felhasznalo)
                     .Where(km => km.KulcsId == id)
@@ -398,6 +403,12 @@ namespace ProjektLabor.Endpoints
                         FoglalasFelhasznaloNev = km.Foglalas != null && km.Foglalas.Felhasznalo != null
                             ? km.Foglalas.Felhasznalo.Nev
                             : null,
+                        AtvevoFelhasznaloId = km.AtvevoFelhasznaloId,
+                        AtvevoNev = km.AtvevoFelhasznalo != null
+                            ? km.AtvevoFelhasznalo.Nev
+                            : km.Foglalas != null && km.Foglalas.Felhasznalo != null
+                                ? km.Foglalas.Felhasznalo.Nev
+                                : null,
                         OperatorId = km.OperátorId,
                         OperatorNev = km.Operátor != null ? km.Operátor.Nev : string.Empty,
                         Megjegyzes = km.Megjegyzes
@@ -408,7 +419,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyMovements")
             .WithSummary("Kulcs mozgástörténetének lekérdezése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<KeyMovementItemDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)

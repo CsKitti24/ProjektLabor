@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.Auth;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 using Xunit;
 
 namespace backend.Tests
@@ -85,6 +86,34 @@ namespace backend.Tests
         }
 
         [Fact]
+        public async Task Login_SucceedsForEveryCanonicalRole_WithoutReturningPassword()
+        {
+            var client = _factory.CreateClient();
+            foreach (var role in RoleNames.All)
+            {
+                var username = $"login_{role}";
+                var password = $"Strong-{role}-password-2026";
+                await SeedUserAsync(username, password, role);
+
+                var response = await client.PostAsJsonAsync("/api/auth/login", new LoginRequestDto
+                {
+                    Username = username,
+                    Jelszo = password
+                });
+
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                var result = await response.Content.ReadFromJsonAsync<LoginResponseDto>();
+                Assert.NotNull(result);
+                Assert.Equal(role, result.Felhasznalo.Role);
+                Assert.False(string.IsNullOrWhiteSpace(result.Token));
+
+                var responseBody = await response.Content.ReadAsStringAsync();
+                Assert.DoesNotContain(password, responseBody, StringComparison.Ordinal);
+                Assert.DoesNotContain("JelszoHash", responseBody, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        [Fact]
         public async Task Login_WithInvalidPassword_ReturnsUnauthorized()
         {
             // Arrange
@@ -159,6 +188,8 @@ namespace backend.Tests
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, meResponse.StatusCode);
+            var meBody = await meResponse.Content.ReadAsStringAsync();
+            Assert.DoesNotContain("Jelszo", meBody, StringComparison.OrdinalIgnoreCase);
             var meResult = await meResponse.Content.ReadFromJsonAsync<CurrentUserDto>();
             Assert.NotNull(meResult);
             Assert.Equal("portas1", meResult.Username);

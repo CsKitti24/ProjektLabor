@@ -8,6 +8,14 @@ public static class RoleNames
     public const string Portas = "Portas";
     public const string Adminisztrator = "Adminisztrator";
     public const string UzemeltetesiIgazgato = "UzemeltetesiIgazgato";
+
+    public static readonly string[] All =
+    [
+        Oktato,
+        Portas,
+        Adminisztrator,
+        UzemeltetesiIgazgato
+    ];
 }
 
 public static class RolePolicies

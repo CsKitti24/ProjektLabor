@@ -4,25 +4,26 @@
 
 ## Aktuális backend-összefoglaló
 
-Az API ASP.NET Core Minimal API, JWT hitelesítéssel és szerepkör-alapú policykkel. A ténylegesen regisztrált végpontcsoportok: `/api/auth`, `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets`, `/api/maintenance`, `/api/keys/{id}/master-access`, `/api/reliability`, `/api/admin`, `/api/reports` és `/api/health`.
+Az API ASP.NET Core Minimal API, JWT-hitelesítéssel és szerepkör-alapú policykkel. A ténylegesen regisztrált végpontcsoportok: `/api/auth`, `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets`, `/api/maintenance`, `/api/keys/{id}/master-access`, `/api/reliability`, `/api/notifications`, `/api/admin`, `/api/reports` és `/api/health`.
 
 ### Üzleti integritás
 
 - Foglalási idő: egy naptári napon belül 08:00–20:00; kezdés és hossz 45 perces rácshoz igazodik.
-- Aktív ütközés: csak az `Aktiv` és `Kesz` státuszú foglalások számítanak; `NoShow` és `Megszuntetve` nem blokkol.
-- A POST és PUT foglalás ugyanazt a terem-, karbantartási-, idő- és ütközésvalidációt használja; az adatbázis mentése ezt ismételten kikényszeríti.
-- A normál foglalás PUT nem állíthat automatikusan kezelt `NoShow` vagy `Kesz` státuszt. Oktató csak aktív foglalást mondhat le.
-- Kulcskiadás és visszavétel: `POST /api/key-movements/issue` és `POST /api/key-movements/return`, `AdminOrPortas` jogosultsággal; a kiadás tranzakciós zárolással, kulcs–terem és foglaló jogosultság ellenőrzéssel történik.
+- A foglalás létrehozása és módosítása ugyanazt az idő-, aktív terem-, ütközés- és karbantartási validációt használja; a lemondott és `NoShow` státuszú foglalások nem blokkolnak.
+- Az automatizált `NoShow`, foglalásvége előtti értesítés és napi kulcszárási folyamatok idempotens háttérfeldolgozókkal futnak.
+- Kulcskiadás és -visszavétel: `POST /api/key-movements/issue` és `POST /api/key-movements/return`, `Portas` jogosultsággal. A kiadás sorosítható adatbázis-tranzakciót, kulcs–terem megfeleltetést és a foglaló jogosultságának ellenőrzését használja.
+- A `Portas` szerepkör adhat ki és vehet vissza kulcsot; listázni a `Portas`, `Adminisztrator` és `UzemeltetesiIgazgato` szerepkörök tudnak.
+- Production környezetben a JWT issuer, audience és legalább 32 bájtos aláírókulcs konfigurálása kötelező; a forráskódbeli és minta kulcsokkal a backend nem indul el.
 
 ### Aktuális státuszkódok
 
 Sikeres létrehozás `201 Created`, lekérdezés/módosítás `200 OK`, törlés vagy visszavonás `204 No Content` (ahol ezt az endpoint jelzi), hiányzó rekord `404 Not Found`, hibás kérés `400 Bad Request`, jogosultsági hiba `401/403`, üzleti ütközés vagy duplikáció `409 Conflict`. A konkrét DTO-kat az `backend/DTOs` könyvtár és a Swagger séma tartalmazza.
 
-Az alábbi korábbi részletes tervezeti táblázatok útvonal- és státuszlistája változatlan API-szerződésként értendő csak ott, ahol a fenti aktuális regisztrációval egyezik; a `Hiányzik` jelölések a korábbi állapotot dokumentálják, nem a jelenlegi futási állapotot.
-
+> **Korábbi tervezeti részletek:** A következő fejezetek 2026-10-30-i tervből származnak. Az útvonal-, státusz- és jogosultsági táblázataik tervezeti/historikus adatok, nem feltétlenül egyeznek a mai implementációval; az aktuális viselkedést a fenti összefoglaló és a backend kódja határozza meg.
+>
 > **Verzió:** 1.0 – 3. bemutató előkészítő tervezet  
 > **Dátum:** 2026-10-30  
-> **Státusz:** Tervezet – implementáció még nem történt meg
+> **Státusz:** Korábbi terv, nem aktuális API-szerződés
 
 ---
 
@@ -43,11 +44,11 @@ Az alábbi korábbi részletes tervezeti táblázatok útvonal- és státuszlist
 
 ## 1. Architekturális áttekintés
 
-### 1.1. Jelenlegi állapot
+### 1.1. Aktuális implementáció
 
-A backend **ASP.NET Core Minimal API** stílusban épül fel (nem Controller-alapú), egyetlen `Program.cs` fájlban. Az autentikáció és jogosultságkezelés **még nincs implementálva** – sem JWT middleware, sem `[Authorize]` dekorátorok nincsenek jelen. Az összes jelenlegi végpont nyilvánosan elérhető.
+A backend endpoint-modulokra bontott **ASP.NET Core Minimal API**. A JWT Bearer-hitelesítés és a szerepkör-alapú policyk regisztrálva vannak; a védett útvonalak jogosultsága endpointonként van beállítva.
 
-### 1.2. Tervezett architektúra (3. bemutató)
+### 1.2. Tervezeti architektúra (korábbi terv)
 
 ```
 React Frontend (port 3000)
@@ -92,11 +93,13 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 | Adminisztrátor | `"Adminisztrator"` |
 | Üzemeltetési Igazgató | `"UzemeltetesiIgazgato"` |
 
-> ⚠️ **Figyelem**: A `Role` mező típusa jelenleg `string` (szabad szöveg), enum-megkötés nincs sem a modellben, sem a migrációban. A backend validációnak ezt ellenőriznie kell.
+> A `Role` mező tárolási típusa `string`; az alkalmazás szerepkör-konstansokat és szerepkör-ellenőrzéseket használ.
 
 ---
 
-## 2. Teljes API-végpontlista
+## 2. API-végpontlista (korábbi terv)
+
+Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapot jelzései.
 
 ### Autentikáció
 
@@ -227,8 +230,8 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| N1 | GET | `/api/notifications/my` | Saját értesítések lekérdezése | 🔴 Hiányzik |
-| N2 | GET | `/api/notifications/pending` | Kiküldendő értesítések (belső szolgáltatás) | 🔴 Hiányzik |
+| N1 | GET | `/api/notifications/my` | Saját értesítések lekérdezése | ✅ Kész |
+| N2 | GET | `/api/notifications/pending` | Függőben lévő értesítések (Adminisztrátor / Portás) | ✅ Kész |
 
 ### Egészségellenőrzés
 
@@ -596,6 +599,7 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 {
   "kulcsId":    "int (kötelező)",
   "foglalasId": "int (opcionális)",
+  "atvevoFelhasznaloId": "int (foglalás nélkül kötelező, oktató azonosítója)",
   "megjegyzes": "string (opcionális, max 500)"
 }
 ```
@@ -605,7 +609,8 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 {
   "id": "int", "kulcsId": "int", "mozgasTipus": "Kiadás",
   "idopont": "datetime", "operatorId": "int", "operatorNev": "string",
-  "foglalasId": "int|null", "megjegyzes": "string|null"
+  "foglalasId": "int|null", "atvevoFelhasznaloId": "int|null",
+  "atvevoNev": "string|null", "megjegyzes": "string|null"
 }
 ```
 
@@ -615,7 +620,9 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 - A kulcs jelenleg nem lehet „Kiadva" állapotban
 - A kulcs aktív legyen
 - Ha `foglalasId` megadott: a foglalás aktív legyen és a terem kulcsával egyezzen
-- `OperátorId` = bejelentkezett portás ID-je (token alapján)
+- Foglalás esetén az átvevő a foglalás tulajdonosa; más átvevő nem adható meg
+- Foglalás nélkül kötelező egy létező oktatót átvevőként rögzíteni
+- `OperátorId` = a hitelesített token `sub` claimjéből vett portás ID-je
 - `Idopont` = szerver által generált UTC időbélyeg
 - Audit log bejegyzés
 
@@ -655,6 +662,8 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 4. Foglalás vége < leadás <= napi zárás → `KesedelmesLeadott` (+1 pont)
 5. Napi zárás után → `LeNemAdott` (+3 pont)
 6. Automatikusan `MegbizhatosagiEsemeny` rekord jön létre az oktatóhoz
+7. A foglaláshoz kötött régi kulcsmozgások átvevője a foglalás tulajdonosából kerül helyreállításra
+8. Foglalás és rögzített átvevő nélküli régi mozgásnál nincs automatikus pontlevonás; egyedi kulcsmozgás-azonosítóval auditjelzés készül
 
 **HTTP státuszkódok:** `200 OK`, `400 Bad Request`, `404 Not Found`, `401 Unauthorized`, `403 Forbidden`
 
@@ -1071,13 +1080,27 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
   "id": "int", "foglalasId": "int",
   "ertesitesTipus": "string (BeforeEnd)",
   "idoPont": "datetime",
-  "allapot": "string (Kesz|KuldesAlatt|Hiba)"
+  "allapot": "string (Kesz|KuldesAlatt|Hiba)",
+  "createdAt": "datetime",
+  "foglalasKezdete": "datetime", "foglalasVege": "datetime"
 }]
 ```
 
 **Kapcsolódó entitások:** `Ertesitesek`, `Foglalasok`
 
 **HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`
+
+---
+
+### N2 – GET `/api/notifications/pending`
+
+**Funkció:** A `KuldesAlatt` állapotú értesítések listája a belső kézbesítési folyamat számára.
+
+**Jogosultság:** `Adminisztrator`, `Portas`.
+
+**Válasz:** Ugyanaz az értesítés-DTO, mint az N1 végpontnál; tartalmazza a kapcsolódó foglalás azonosítóját, kezdetét és lejáratát is.
+
+**HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`.
 
 ---
 
@@ -1173,6 +1196,7 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 | GET /api/reports/reliability | ❌ | ❌ | ✅ | ✅ |
 | **Értesítések** | | | | |
 | GET /api/notifications/my | ✅ | ❌ | ❌ | ❌ |
+| GET /api/notifications/pending | ❌ | ✅ | ✅ | ❌ |
 | **Health** | | | | |
 | GET /api/health | ✅ | ✅ | ✅ | ✅ |
 
@@ -1274,6 +1298,7 @@ public class IssueKeyRequestDto
     [Required]
     public int KulcsId { get; set; }
     public int? FoglalasId { get; set; }
+    public int? AtvevoFelhasznaloId { get; set; }
     [MaxLength(500)]
     public string? Megjegyzes { get; set; }
 }
@@ -1297,6 +1322,8 @@ public class KeyMovementDto
     public int OperatorId { get; set; }
     public string OperatorNev { get; set; } = string.Empty;
     public int? FoglalasId { get; set; }
+    public int? AtvevoFelhasznaloId { get; set; }
+    public string? AtvevoNev { get; set; }
     public string? Megjegyzes { get; set; }
 }
 ```
@@ -1436,6 +1463,8 @@ Minden végpontnál egységes hibakezelés szükséges:
 
 ## 8. Meglévő és hiányzó funkciók összesítése
 
+Az alábbi rész korábbi állapotfelvételből maradt a dokumentumban; a benne lévő végpontlisták és státuszok nem aktuálisak. Az aktuális implementációt az oldal elején lévő összefoglaló és a backend kódja írja le.
+
 ### ✅ Teljesen megvalósult
 
 | Végpont | Megjegyzés |
@@ -1454,9 +1483,9 @@ Minden végpontnál egységes hibakezelés szükséges:
 | GET `/api/rooms/{id}` | JWT autentikáció és jogosultságellenőrzés hiányzik |
 | `AppDbContext.ValidateBookings()` | DB szintű ütközésvizsgálat megvan, de API szinten nincs 409-es válasz és érthető üzenet |
 
-### 🔴 Teljesen hiányzó (implementálásra vár)
+### 🔴 További hiányzó végpontok
 
-Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api/key-movements/*`, `/api/bookings/*`, `/api/tickets/*`, `/api/maintenance/*`, `/api/reliability/*`, `/api/reports/*`, `/api/notifications/*`.
+A többi hiányzó végpont: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api/key-movements/*`, `/api/bookings/*`, `/api/tickets/*`, `/api/maintenance/*`, `/api/reliability/*`, `/api/reports/*`.
 
 ### Infrastrukturális hiányosságok
 
@@ -1466,13 +1495,16 @@ Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `
 | RBAC policy-k regisztrációja (`AddAuthorization`) | 🔴 Hiányzik |
 | BCrypt jelszó-hash könyvtár | 🔴 Hiányzik (NuGet: `BCrypt.Net-Next`) |
 | Általános Audit log service (újrafelhasználható) | 🔴 Hiányzik |
-| No-show automatizmus (háttérszolgáltatás / ütemező) | 🔴 Hiányzik |
-| Értesítés-generáló háttérszolgáltatás | 🔴 Hiányzik |
+| No-show automatizmus (`BackgroundService`) | ✅ Kész |
+| Foglalásvége-értesítés (`BackgroundService`) | ✅ Kész |
+| Napi zárási +3 büntetőpont (`BackgroundService`) | ✅ Kész |
 | Service-réteg kialakítása (jelenleg minden a `Program.cs`-ben van) | 🔴 Hiányzik |
 
 ---
 
 ## 9. Prioritási sorrend
+
+Az alábbi prioritási lista a korábbi bemutatóterv része, nem aktuális fejlesztési státusz.
 
 ### 🔴 P0 – 3. bemutató kötelező minimuma
 
@@ -1525,12 +1557,15 @@ Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `
 | 35 | GET `/api/notifications/my` | Értesítések lekérdezése |
 | 36 | POST `/api/auth/logout` | Token invalidálás |
 | 37 | MK1–MK3 (mesterkulcs-jogosultságok) | Speciális kulcsjogosultságok |
-| 38 | No-show automatizmus (`IHostedService`) | Automatikus státuszváltás |
-| 39 | Értesítés-generáló háttérszolgáltatás | Foglalás-végfigyelmeztető |
+| 38 | No-show automatizmus (`BackgroundService`) | ✅ Kész |
+| 39 | Foglalás lejárta előtti értesítés | ✅ Kész |
+| 40 | Napi zárási +3 büntetőpont | ✅ Kész |
 
 ---
 
 ## 10. Ellentmondások a projektterv és a kód között
+
+Az alábbi megjegyzések a 2026-10-30-i terv és kód összevetését őrzik; az azóta megoldott ellentmondások nem jelentenek fennálló hibát.
 
 ### 10.1. ⚠️ Ékezetes mező neve a `Kulcsmozgas` modellben
 
@@ -1546,11 +1581,10 @@ Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `
 **Ütközés:** A migrált adatbázis `Leiras` oszlopa `NOT NULL`, de a modell és a DTO nullable-ként kezeli. Adatbevitelnél ez hibás működéshez vezethet.  
 **Ajánlás:** Vagy a modellben kell `[Required]`-ot hozzáadni, vagy a migrációban `nullable: true`-ra javítani.
 
-### 10.3. ⚠️ JWT autentikáció nincs implementálva
+### 10.3. ✅ JWT-hitelesítés – a korábbi eltérés megoldva
 
-**Projektterv:** „JWT alapú hitelesítéssel lép be a rendszerbe."  
-**Kód:** A `Program.cs`-ben sem `AddAuthentication`, sem `AddAuthorization`, sem `UseAuthentication`, sem `UseAuthorization` nem szerepel. Valamennyi jelenlegi végpont nyilvánosán elérhető.  
-**Következmény:** A 3. bemutató előtt implementálni kell a teljes JWT middleware láncat.
+**Jelenlegi kód:** A `Program.cs` regisztrálja a JWT Bearer-hitelesítést és az RBAC-policyket, a middleware pedig a védett végpontok előtt ellenőrzi a tokent. A `JwtSettings` a szükséges issuer-, audience- és aláírókulcs-konfigurációt is validálja.
+**Állapot:** A 2026-10-30-i tervben leírt hiányosság már nem áll fenn; a részletes, endpointonkénti jogosultsági szabályokat a backend kódja és a fenti aktuális összefoglaló tartalmazza.
 
 ### 10.4. ℹ️ `Felhasznalo.Role` enum típusának hiánya
 

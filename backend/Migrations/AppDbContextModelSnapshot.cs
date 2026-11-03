@@ -30,6 +30,10 @@ namespace backend.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AutomationKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("EntitasId")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -62,6 +66,10 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AutomationKey")
+                        .IsUnique()
+                        .HasFilter("[AutomationKey] IS NOT NULL");
+
                     b.HasIndex("FelhasznaloId");
 
                     b.ToTable("AuditLogok");
@@ -79,6 +87,10 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("AutomationKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -93,6 +105,10 @@ namespace backend.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AutomationKey")
+                        .IsUnique()
+                        .HasFilter("[AutomationKey] IS NOT NULL");
 
                     b.HasIndex("FoglalasId");
 
@@ -320,6 +336,9 @@ namespace backend.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AtvevoFelhasznaloId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -344,6 +363,8 @@ namespace backend.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AtvevoFelhasznaloId");
+
                     b.HasIndex("FoglalasId");
 
                     b.HasIndex("KulcsId");
@@ -360,6 +381,9 @@ namespace backend.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("Automatikus")
+                        .HasColumnType("bit");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -411,7 +435,9 @@ namespace backend.Migrations
 
                     b.HasIndex("FoglalasId");
 
-                    b.HasIndex("KiadasiKulcsmozgasId");
+                    b.HasIndex("KiadasiKulcsmozgasId")
+                        .IsUnique()
+                        .HasFilter("[Automatikus] = 1 AND [KiadasiKulcsmozgasId] IS NOT NULL");
 
                     b.HasIndex("KulcsId");
 
@@ -623,6 +649,11 @@ namespace backend.Migrations
 
             modelBuilder.Entity("ProjektLabor.Models.Kulcsmozgas", b =>
                 {
+                    b.HasOne("ProjektLabor.Models.Felhasznalo", "AtvevoFelhasznalo")
+                        .WithMany()
+                        .HasForeignKey("AtvevoFelhasznaloId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ProjektLabor.Models.Foglalas", "Foglalas")
                         .WithMany("Kulcsmozgasok")
                         .HasForeignKey("FoglalasId");
@@ -638,6 +669,8 @@ namespace backend.Migrations
                         .HasForeignKey("OperátorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("AtvevoFelhasznalo");
 
                     b.Navigation("Foglalas");
 

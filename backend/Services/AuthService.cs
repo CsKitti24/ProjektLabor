@@ -1,24 +1,30 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.Auth;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 
 namespace ProjektLabor.Services
 {
     public class AuthService
     {
         private readonly AppDbContext _db;
+        private readonly JwtSettings _jwtSettings;
         private readonly IConfiguration _config;
         private readonly ILogger<AuthService> _logger;
 
-        public AuthService(AppDbContext db, IConfiguration config, ILogger<AuthService> logger)
+        public AuthService(
+            AppDbContext db,
+            IConfiguration config,
+            JwtSettings jwtSettings,
+            ILogger<AuthService> logger)
         {
             _db = db;
             _config = config;
+            _jwtSettings = jwtSettings;
             _logger = logger;
         }
 
@@ -71,8 +77,9 @@ namespace ProjektLabor.Services
         /// </summary>
         public string GenerateJwtToken(Felhasznalo user)
         {
-            var key = GetSigningKey();
-            var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+            var credentials = new SigningCredentials(
+                _jwtSettings.GetSymmetricSecurityKey(),
+                SecurityAlgorithms.HmacSha256);
 
             var claims = new[]
             {
@@ -84,8 +91,8 @@ namespace ProjektLabor.Services
             };
 
             var token = new JwtSecurityToken(
-                issuer: _config["Authentication:Jwt:Issuer"] ?? _config["Jwt:Issuer"],
-                audience: _config["Authentication:Jwt:Audience"] ?? _config["Jwt:Audience"],
+                issuer: _jwtSettings.Issuer,
+                audience: _jwtSettings.Audience,
                 claims: claims,
                 expires: DateTime.UtcNow.AddHours(GetExpiresInHours()),
                 signingCredentials: credentials
@@ -119,17 +126,6 @@ namespace ProjektLabor.Services
                 .FirstOrDefaultAsync();
 
             return user;
-        }
-
-        public SymmetricSecurityKey GetSigningKey()
-        {
-            var keyString = _config["Authentication:Jwt:SigningKey"] ?? _config["Jwt:Key"]
-                ?? throw new InvalidOperationException("JWT kulcs nincs konfigurálva (Jwt:Key).");
-
-            if (keyString.Length < 32)
-                throw new InvalidOperationException("A JWT kulcsnak legalább 32 karakter hosszúnak kell lennie.");
-
-            return new SymmetricSecurityKey(Encoding.UTF8.GetBytes(keyString));
         }
 
         private double GetExpiresInHours()

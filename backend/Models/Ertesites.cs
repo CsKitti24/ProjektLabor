@@ -22,6 +22,9 @@ namespace ProjektLabor.Models
         [Required]
         public string Allapot { get; set; } // Kesz, KuldesAlatt, Hiba
 
+        [MaxLength(100)]
+        public string? AutomationKey { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }
