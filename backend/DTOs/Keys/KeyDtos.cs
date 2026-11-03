@@ -62,6 +62,8 @@ namespace ProjektLabor.DTOs.Keys
         public DateTime Idopont { get; set; }
         public int? FoglalasId { get; set; }
         public string? FoglalasFelhasznaloNev { get; set; }
+        public int? AtvevoFelhasznaloId { get; set; }
+        public string? AtvevoNev { get; set; }
         public int OperatorId { get; set; }
         public string OperatorNev { get; set; } = string.Empty;
         public string Megjegyzes { get; set; } = string.Empty;

@@ -167,6 +167,17 @@ dotnet build ProjektLabor.sln
 dotnet test ProjektLabor.sln
 ```
 
+Az SQL Server-integrációs teszt valódi SQL Serverhez csatlakozik, és a
+`SQLSERVER_TEST_CONNECTION` környezeti változóban megadott szerveren egyedi
+ideiglenes adatbázist hoz létre, majd a futás végén törli azt. Csak eldobható
+fejlesztői vagy teszt SQL Serveren futtasd, amelyen a tesztfelhasználónak
+adatbázis-létrehozási és -törlési jogosultsága van:
+
+```bash
+SQLSERVER_TEST_CONNECTION='Server=localhost,1433;Database=master;User Id=sa;Password=<jelszo>;TrustServerCertificate=True;Encrypt=False' \
+  dotnet test backend.Tests/backend.Tests.csproj
+```
+
 Frontend lint és build:
 
 ```bash

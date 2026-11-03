@@ -336,6 +336,7 @@ namespace ProjektLabor.Endpoints
                 var lastMovement = await db.Kulcsmozgasok
                     .AsNoTracking()
                     .Include(km => km.Operátor)
+                    .Include(km => km.AtvevoFelhasznalo)
                     .Include(km => km.Foglalas)
                         .ThenInclude(f => f.Felhasznalo)
                     .Where(km => km.KulcsId == id)
@@ -355,7 +356,9 @@ namespace ProjektLabor.Endpoints
                     Allapot = allapot,
                     KiadasIdopontja = allapot == "Kiadva" ? lastMovement?.Idopont : null,
                     KiadtaOperatorNev = allapot == "Kiadva" ? lastMovement?.Operátor?.Nev : null,
-                    AktualisBirtokosNev = allapot == "Kiadva" ? lastMovement?.Foglalas?.Felhasznalo?.Nev : null,
+                    AktualisBirtokosNev = allapot == "Kiadva"
+                        ? lastMovement?.AtvevoFelhasznalo?.Nev ?? lastMovement?.Foglalas?.Felhasznalo?.Nev
+                        : null,
                     KapcsolodoFoglalasId = allapot == "Kiadva" ? lastMovement?.FoglalasId : null
                 };
 
@@ -383,6 +386,7 @@ namespace ProjektLabor.Endpoints
                     .AsNoTracking()
                     .Include(km => km.Kulcs)
                     .Include(km => km.Operátor)
+                    .Include(km => km.AtvevoFelhasznalo)
                     .Include(km => km.Foglalas)
                         .ThenInclude(f => f.Felhasznalo)
                     .Where(km => km.KulcsId == id)
@@ -398,6 +402,12 @@ namespace ProjektLabor.Endpoints
                         FoglalasFelhasznaloNev = km.Foglalas != null && km.Foglalas.Felhasznalo != null
                             ? km.Foglalas.Felhasznalo.Nev
                             : null,
+                        AtvevoFelhasznaloId = km.AtvevoFelhasznaloId,
+                        AtvevoNev = km.AtvevoFelhasznalo != null
+                            ? km.AtvevoFelhasznalo.Nev
+                            : km.Foglalas != null && km.Foglalas.Felhasznalo != null
+                                ? km.Foglalas.Felhasznalo.Nev
+                                : null,
                         OperatorId = km.OperátorId,
                         OperatorNev = km.Operátor != null ? km.Operátor.Nev : string.Empty,
                         Megjegyzes = km.Megjegyzes

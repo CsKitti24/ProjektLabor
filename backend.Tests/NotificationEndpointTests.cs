@@ -43,7 +43,7 @@ public class NotificationEndpointTests : IClassFixture<WebApplicationFactory<Pro
         await SeedNotificationAsync(owner.Id);
         await SeedNotificationAsync(otherUser.Id);
 
-        var response = await ownerClient.GetAsync("/api/notifications/my");
+        var response = await ownerClient.GetAsync($"/api/notifications/my?userId={otherUser.Id}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var notifications = await response.Content.ReadFromJsonAsync<List<NotificationEndpoints.NotificationResponse>>();
@@ -66,8 +66,11 @@ public class NotificationEndpointTests : IClassFixture<WebApplicationFactory<Pro
             HttpStatusCode.Forbidden,
             (await instructorClient.GetAsync("/api/notifications/pending")).StatusCode);
 
+        var (administratorClient, _) = await CreateClientAsync("Adminisztrator");
         var response = await receptionistClient.GetAsync("/api/notifications/pending");
+        var administratorResponse = await administratorClient.GetAsync("/api/notifications/pending");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, administratorResponse.StatusCode);
         var notifications = await response.Content.ReadFromJsonAsync<List<NotificationEndpoints.NotificationResponse>>();
         Assert.NotNull(notifications);
         var notification = Assert.Single(notifications);

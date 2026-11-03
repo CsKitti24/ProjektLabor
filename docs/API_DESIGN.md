@@ -576,6 +576,7 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 {
   "kulcsId":    "int (kötelező)",
   "foglalasId": "int (opcionális)",
+  "atvevoFelhasznaloId": "int (foglalás nélkül kötelező, oktató azonosítója)",
   "megjegyzes": "string (opcionális, max 500)"
 }
 ```
@@ -585,7 +586,8 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 {
   "id": "int", "kulcsId": "int", "mozgasTipus": "Kiadás",
   "idopont": "datetime", "operatorId": "int", "operatorNev": "string",
-  "foglalasId": "int|null", "megjegyzes": "string|null"
+  "foglalasId": "int|null", "atvevoFelhasznaloId": "int|null",
+  "atvevoNev": "string|null", "megjegyzes": "string|null"
 }
 ```
 
@@ -595,7 +597,9 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 - A kulcs jelenleg nem lehet „Kiadva" állapotban
 - A kulcs aktív legyen
 - Ha `foglalasId` megadott: a foglalás aktív legyen és a terem kulcsával egyezzen
-- `OperátorId` = bejelentkezett portás ID-je (token alapján)
+- Foglalás esetén az átvevő a foglalás tulajdonosa; más átvevő nem adható meg
+- Foglalás nélkül kötelező egy létező oktatót átvevőként rögzíteni
+- `OperátorId` = a hitelesített token `sub` claimjéből vett portás ID-je
 - `Idopont` = szerver által generált UTC időbélyeg
 - Audit log bejegyzés
 
@@ -635,6 +639,8 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 4. Foglalás vége < leadás <= napi zárás → `KesedelmesLeadott` (+1 pont)
 5. Napi zárás után → `LeNemAdott` (+3 pont)
 6. Automatikusan `MegbizhatosagiEsemeny` rekord jön létre az oktatóhoz
+7. A foglaláshoz kötött régi kulcsmozgások átvevője a foglalás tulajdonosából kerül helyreállításra
+8. Foglalás és rögzített átvevő nélküli régi mozgásnál nincs automatikus pontlevonás; egyedi kulcsmozgás-azonosítóval auditjelzés készül
 
 **HTTP státuszkódok:** `200 OK`, `400 Bad Request`, `404 Not Found`, `401 Unauthorized`, `403 Forbidden`
 
@@ -1269,6 +1275,7 @@ public class IssueKeyRequestDto
     [Required]
     public int KulcsId { get; set; }
     public int? FoglalasId { get; set; }
+    public int? AtvevoFelhasznaloId { get; set; }
     [MaxLength(500)]
     public string? Megjegyzes { get; set; }
 }
@@ -1292,6 +1299,8 @@ public class KeyMovementDto
     public int OperatorId { get; set; }
     public string OperatorNev { get; set; } = string.Empty;
     public int? FoglalasId { get; set; }
+    public int? AtvevoFelhasznaloId { get; set; }
+    public string? AtvevoNev { get; set; }
     public string? Megjegyzes { get; set; }
 }
 ```

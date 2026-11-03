@@ -30,6 +30,10 @@ namespace backend.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AutomationKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("EntitasId")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -61,6 +65,10 @@ namespace backend.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AutomationKey")
+                        .IsUnique()
+                        .HasFilter("[AutomationKey] IS NOT NULL");
 
                     b.HasIndex("FelhasznaloId");
 
@@ -328,6 +336,9 @@ namespace backend.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AtvevoFelhasznaloId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -351,6 +362,8 @@ namespace backend.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AtvevoFelhasznaloId");
 
                     b.HasIndex("FoglalasId");
 
@@ -636,6 +649,11 @@ namespace backend.Migrations
 
             modelBuilder.Entity("ProjektLabor.Models.Kulcsmozgas", b =>
                 {
+                    b.HasOne("ProjektLabor.Models.Felhasznalo", "AtvevoFelhasznalo")
+                        .WithMany()
+                        .HasForeignKey("AtvevoFelhasznaloId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ProjektLabor.Models.Foglalas", "Foglalas")
                         .WithMany("Kulcsmozgasok")
                         .HasForeignKey("FoglalasId");
@@ -651,6 +669,8 @@ namespace backend.Migrations
                         .HasForeignKey("OperátorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("AtvevoFelhasznalo");
 
                     b.Navigation("Foglalas");
 
