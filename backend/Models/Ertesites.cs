@@ -11,16 +11,19 @@ namespace ProjektLabor.Models
 
         [ForeignKey("Foglalas")]
         public int FoglalasId { get; set; }
-        public Foglalas Foglalas { get; set; }
+        public Foglalas Foglalas { get; set; } = null!;
 
         [Required]
-        public string ErtesitesTipus { get; set; } // BeforeEnd
+        public string ErtesitesTipus { get; set; } = string.Empty; // BeforeEnd
 
         [Required]
         public DateTime IdoPont { get; set; }
 
         [Required]
-        public string Allapot { get; set; } // Kesz, KuldesAlatt, Hiba
+        public string Allapot { get; set; } = string.Empty; // Kesz, KuldesAlatt, Hiba
+
+        [MaxLength(100)]
+        public string? AutomationKey { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }

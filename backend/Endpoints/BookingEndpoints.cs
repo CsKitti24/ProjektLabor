@@ -215,6 +215,11 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = "Deaktivált teremre nem lehet foglalást rögzíteni." });
                 }
 
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                await SqlServerLocking.AcquireAsync(db, $"room-booking:{request.TeremId}");
+
                 // Determine target user
                 int targetUserId;
                 var subClaim = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? caller.FindFirst("sub")?.Value;
@@ -264,6 +269,10 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Foglalas",
                     entitasId: booking.Id.ToString(),
                     ujErtek: $"TeremId: {booking.TeremId}, Start: {booking.StartTime:O}, End: {booking.EndTime:O}");
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
 
                 var user = await db.Felhasznalok.FindAsync(targetUserId);
 
@@ -320,6 +329,11 @@ namespace ProjektLabor.Endpoints
                     return Results.Forbid();
                 }
 
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                await SqlServerLocking.AcquireAsync(db, $"room-booking:{booking.TeremId}");
+
                 var newStart = request.StartTime ?? booking.StartTime;
                 var newEnd = request.EndTime ?? booking.EndTime;
 
@@ -362,6 +376,10 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Foglalas",
                     entitasId: id.ToString(),
                     ujErtek: $"Start: {booking.StartTime:O}, End: {booking.EndTime:O}, Status: {booking.Status}");
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
 
                 var result = new BookingDto
                 {

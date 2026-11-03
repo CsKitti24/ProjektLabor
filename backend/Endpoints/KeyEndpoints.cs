@@ -337,7 +337,7 @@ namespace ProjektLabor.Endpoints
                     .AsNoTracking()
                     .Include(km => km.Operátor)
                     .Include(km => km.Foglalas)
-                        .ThenInclude(f => f.Felhasznalo)
+                        .ThenInclude(f => f!.Felhasznalo)
                     .Where(km => km.KulcsId == id)
                     .OrderByDescending(km => km.Idopont)
                     .FirstOrDefaultAsync();
@@ -384,7 +384,7 @@ namespace ProjektLabor.Endpoints
                     .Include(km => km.Kulcs)
                     .Include(km => km.Operátor)
                     .Include(km => km.Foglalas)
-                        .ThenInclude(f => f.Felhasznalo)
+                        .ThenInclude(f => f!.Felhasznalo)
                     .Where(km => km.KulcsId == id)
                     .OrderByDescending(km => km.Idopont)
                     .Select(km => new KeyMovementItemDto
@@ -400,7 +400,7 @@ namespace ProjektLabor.Endpoints
                             : null,
                         OperatorId = km.OperátorId,
                         OperatorNev = km.Operátor != null ? km.Operátor.Nev : string.Empty,
-                        Megjegyzes = km.Megjegyzes
+                        Megjegyzes = km.Megjegyzes ?? string.Empty
                     })
                     .ToListAsync();
 

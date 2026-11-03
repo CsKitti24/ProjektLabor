@@ -25,6 +25,9 @@ namespace ProjektLabor.Models
         [MaxLength(50)]
         public string? EntitasId { get; set; }
 
+        [MaxLength(100)]
+        public string? AutomationKey { get; set; }
+
         public string? RegiErtek { get; set; }
 
         public string? UjErtek { get; set; }

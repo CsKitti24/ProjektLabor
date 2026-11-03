@@ -11,20 +11,20 @@ namespace ProjektLabor.Models
         public int Id { get; set; }
 
         [Required, MaxLength(20)]
-        public string Szam { get; set; }
+        public string Szam { get; set; } = string.Empty;
 
         [Required, MaxLength(20)]
-        public string Tipus { get; set; } // Mesterkulcs, Osztalykulcs
+        public string Tipus { get; set; } = string.Empty; // Mesterkulcs, Osztalykulcs
 
         public bool Aktivalva { get; set; } = true;
 
         // Foreign key to Terem
         public int TeremId { get; set; }
-        public Terem Terem { get; set; }
+        public Terem Terem { get; set; } = null!;
 
-        public ICollection<Kulcsmozgas> Kulcsmozgasok { get; set; }
-        public ICollection<MesterkulcsJogosultsag> MesterkulcsJogosultsagok { get; set; }
-        public ICollection<MegbizhatosagiEsemeny> MegbizhatosagiEsemenyek { get; set; }
-        public ICollection<KulcsTerem> KulcsTeremKapcsok { get; set; }
+        public ICollection<Kulcsmozgas> Kulcsmozgasok { get; set; } = new List<Kulcsmozgas>();
+        public ICollection<MesterkulcsJogosultsag> MesterkulcsJogosultsagok { get; set; } = new List<MesterkulcsJogosultsag>();
+        public ICollection<MegbizhatosagiEsemeny> MegbizhatosagiEsemenyek { get; set; } = new List<MegbizhatosagiEsemeny>();
+        public ICollection<KulcsTerem> KulcsTeremKapcsok { get; set; } = new List<KulcsTerem>();
     }
 }

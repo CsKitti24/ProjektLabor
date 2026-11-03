@@ -30,6 +30,24 @@ namespace ProjektLabor.Data
             modelBuilder.Entity<Felhasznalo>()
                 .HasIndex(u => u.Email).IsUnique();
 
+            modelBuilder.Entity<AuditLog>()
+                .HasIndex(entry => entry.AutomationKey)
+                .IsUnique()
+                .HasFilter("[AutomationKey] IS NOT NULL");
+
+            modelBuilder.Entity<Ertesites>()
+                .HasIndex(notification => notification.AutomationKey)
+                .IsUnique()
+                .HasFilter("[AutomationKey] IS NOT NULL");
+
+            modelBuilder.Entity<MegbizhatosagiEsemeny>()
+                .HasIndex(item => item.KiadasiKulcsmozgasId)
+                .IsUnique()
+                .HasFilter("[Automatikus] = 1 AND [KiadasiKulcsmozgasId] IS NOT NULL");
+
+            modelBuilder.Entity<Kulcs>()
+                .HasIndex(key => key.Szam).IsUnique();
+
             modelBuilder.Entity<MesterkulcsJogosultsag>()
                 .HasIndex(access => new { access.KulcsId, access.FelhasznaloId })
                 .IsUnique();
@@ -65,6 +83,12 @@ namespace ProjektLabor.Data
                 .HasOne(k => k.Operátor)
                 .WithMany(u => u.Kulcsmozgasok)
                 .HasForeignKey(k => k.OperátorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Kulcsmozgas>()
+                .HasOne(movement => movement.AtvevoFelhasznalo)
+                .WithMany()
+                .HasForeignKey(movement => movement.AtvevoFelhasznaloId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             // Seed default system parameters

@@ -10,6 +10,8 @@ namespace ProjektLabor.DTOs.KeyMovements
 
         public int? FoglalasId { get; set; }
 
+        public int? AtvevoFelhasznaloId { get; set; }
+
         [MaxLength(500, ErrorMessage = "A megjegyzés legfeljebb 500 karakter lehet.")]
         public string? Megjegyzes { get; set; }
     }

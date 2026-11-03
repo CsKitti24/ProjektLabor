@@ -1573,3 +1573,14 @@ Az összes többi felsorolt végpont hiányzik: `/api/auth/*`, `/api/users/*`, `
 ---
 
 *A dokumentum a kódbázis 2026-10-30-i állapotát tükrözi. Frissítendő minden implementációs lépés után.*
+# SQL Server tranzakciós garanciák
+
+A foglalás-átfedés ellenőrzése és a kulcs kiadásának állapotellenőrzése SQL
+Serveren tranzakción belül történik. A backend SQL Server alkalmazászárral
+sorozza ugyanazon terem foglalásmódosításait és ugyanazon kulcs kiadását vagy
+visszavételét, ezért két párhuzamos kérés nem adhatja ki ugyanazt a kulcsot
+kétszer, illetve nem kerülheti meg az átfedésvizsgálatot.
+
+Az adatbázis foreign key-k és unique indexek a végponti ellenőrzésektől
+függetlenül is kikényszerítik az integritást. A kulcsszám, felhasználónév,
+e-mail-cím és mesterkulcs-jogosultság egyedi.

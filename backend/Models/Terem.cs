@@ -10,7 +10,7 @@ namespace ProjektLabor.Models
         public int Id { get; set; }
 
         [Required, MaxLength(100)]
-        public string Nev { get; set; }
+        public string Nev { get; set; } = string.Empty;
 
         [Required]
         public int Kapacitas { get; set; }

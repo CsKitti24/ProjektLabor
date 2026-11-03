@@ -88,6 +88,25 @@ namespace backend.Tests
             return (room.Id, key.Id);
         }
 
+        private async Task<int> SeedTeacherAsync()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var teacher = new Felhasznalo
+            {
+                Username = $"km_teacher_{Guid.NewGuid():N}",
+                Nev = "Teszt oktató",
+                Email = $"{Guid.NewGuid():N}@test.hu",
+                Role = "Oktato",
+                JelszoHash = BCrypt.Net.BCrypt.HashPassword("TestPass123!"),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.Felhasznalok.Add(teacher);
+            await db.SaveChangesAsync();
+            return teacher.Id;
+        }
+
         [Fact]
         public async Task CreateKey_Succeeds_ForAdmin()
         {
@@ -120,6 +139,7 @@ namespace backend.Tests
             // Arrange
             var portasClient = await CreateClientWithRoleAsync("Portas");
             var (_, keyId) = await SeedRoomAndKeyAsync("K-200");
+            var teacherId = await SeedTeacherAsync();
 
             // 1. Check initial state is Szabad
             var statusBefore = await portasClient.GetFromJsonAsync<KeyStatusDto>($"/api/keys/{keyId}/status");
@@ -130,6 +150,7 @@ namespace backend.Tests
             var issueResponse = await portasClient.PostAsJsonAsync("/api/key-movements/issue", new IssueKeyRequestDto
             {
                 KulcsId = keyId,
+                AtvevoFelhasznaloId = teacherId,
                 Megjegyzes = "Átadva órára"
             });
             Assert.Equal(HttpStatusCode.Created, issueResponse.StatusCode);

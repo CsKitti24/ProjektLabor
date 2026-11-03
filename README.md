@@ -17,7 +17,7 @@ felülete, ezért a rendszer jelenleg backend-központú, integrációs állapot
 | Frontend | React 19, TypeScript, Vite 8 | Kezdő Vite-felület, a domain UI még hiányzik |
 | Backend | ASP.NET Core Web API, .NET 8 | Kész, endpoint-modulokra bontva |
 | Adatbázis | Microsoft SQL Server 2022 | Docker Compose-ban konfigurálva |
-| ORM/migráció | Entity Framework Core 8, SQL Server provider | Kész, 3 migráció verziózva |
+| ORM/migráció | Entity Framework Core 8, SQL Server provider | Kész, 4 migráció verziózva |
 | Hitelesítés | JWT Bearer, BCrypt.Net-Next | Kész |
 | Dokumentáció | Swagger/OpenAPI v1 | Development környezetben elérhető |
 | Tesztelés | xUnit, ASP.NET Core test host, EF InMemory | Kész; külön SQL Server teszt is előkészítve |
@@ -127,11 +127,26 @@ karbantartási idősáv, hibajegy, értesítés, megbízhatósági esemény, aud
 
 ## Indítás
 
-### Docker Compose
+### Előfeltételek és konfiguráció
+
+- .NET 8 SDK helyi backend- és tesztfuttatáshoz.
+- Docker Desktop Compose támogatással a teljes stackhez.
+- SQL Server 2022 egy külön, eldobható adatbázissal az integrációs tesztekhez.
+
+Hozd létre a helyi konfigurációt, majd töltsd ki a JWT- és SQL Server-értékeket:
 
 ```bash
 cp .env.example .env
-# töltsd ki egyedi MSSQL-, JWT- és szükség esetén bootstrap-admin értékekkel
+```
+
+A `MSSQL_SA_PASSWORD`, `JWT_SIGNING_KEY`, `JWT_ISSUER`, `JWT_AUDIENCE`,
+`BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD` kötelező
+Compose-változók. A bootstrap-admin értékek meglévő adatbázisnál nem kerülnek
+felhasználásra; a jelszó legalább 12 karakteres legyen.
+
+### Docker Compose
+
+```bash
 docker compose up --build -d
 docker compose ps
 curl http://localhost:8000/api/health
@@ -148,6 +163,41 @@ parancsot. A kötelező és opcionális környezeti változókat az
 [.env.example](./.env.example) és a [docker-compose.yml](./docker-compose.yml)
 határozza meg.
 
+A backend az `mssql` health check után indul, és `APPLY_MIGRATIONS=true` mellett
+automatikusan alkalmazza a teljes EF Core migrációs láncot. Apple Siliconon a
+SQL Server hivatalos image-e jelenleg csak `linux/amd64` image-ként használható,
+ezért a Compose Docker-emulációt kér; ez nem natív ARM64 támogatás.
+
+### Migrációk és tesztfelhasználó
+
+```bash
+dotnet ef migrations list --project backend/backend.csproj
+dotnet ef migrations script --project backend/backend.csproj --idempotent --output /tmp/projektlabor-migrations.sql
+```
+
+Az adatbázist Compose indításakor a backend inicializálja. Az első admin a `BOOTSTRAP_ADMIN_USERNAME` és
+`BOOTSTRAP_ADMIN_PASSWORD` megadásával jön létre. A négy prezentációs
+demófelhasználó jelszava a `DEMO_*_PASSWORD` változókból érkezik; a seedelés
+felhasználónévenként idempotens, és meglévő felhasználót nem módosít.
+
+### Helyi demófelhasználók
+
+Az alábbi fiókok kizárólag helyi fejlesztési és prezentációs célra szolgálnak:
+
+| Felhasználónév | Szerepkör | Jelszó |
+|---|---|---|
+| `demo-oktato` | Oktato | `DemoOktato2026!` |
+| `demo-portas` | Portas | `DemoPortas2026!` |
+| `demo-admin` | Adminisztrator | `DemoAdmin2026!` |
+| `demo-igazgato` | UzemeltetesiIgazgato | `DemoIgazgato2026!` |
+
+Ezeket a `DEMO_OKTATO_PASSWORD`, `DEMO_PORTAS_PASSWORD`,
+`DEMO_ADMIN_PASSWORD` és `DEMO_IGAZGATO_PASSWORD` környezeti változók adják
+át a backendnek. A jelszavak csak BCrypt hash formában kerülnek az adatbázisba.
+Bejelentkezéskor a backend JWT tokent ad vissza, amelyben a szerepkör claim
+alapján működnek a jogosultsági policy-k. Token nélkül a védett végpontok `401`,
+nem megfelelő szerepkörrel pedig `403` választ adnak.
+
 ### Helyi fejlesztés
 
 ```bash
@@ -161,17 +211,26 @@ npm run lint
 npm run build
 ```
 
-Az SQL Server-integrációs tesztet csak külön, eldobható tesztadatbázissal
-futtasd a `SQLSERVER_TEST_CONNECTION` változó megadásával. A normál CI ezt a
-tesztet szándékosan kihagyja.
+SQL Server-integrációs tesztekhez adj meg egy külön, eldobható adatbázist:
+
+```bash
+SQLSERVER_TEST_CONNECTION='Server=localhost,1433;Database=ProjektLaborSqlIntegration;User Id=sa;Password=<teszt-jelszó>;TrustServerCertificate=True;Encrypt=False' \
+  dotnet test backend.Tests/backend.Tests.csproj --configuration Release \
+  --filter "FullyQualifiedName~SqlServerIntegrationTests"
+```
+
+A tesztek migrálnak, adatot írnak/olvasnak, ellenőrzik a foreign key és unique
+korlátozásokat, valamint a tranzakció-visszagörgetést. Ne használd a fejlesztői
+vagy éles adatbázist.
 
 ## CI
 
 A [CI workflow](./.github/workflows/ci.yml) `main` push és pull request esetén:
 
 1. restore/build/test futtat a backendre,
-2. lintet és buildet futtat a frontendben,
-3. validálja a Compose konfigurációt és megkísérli a Docker buildet.
+2. külön, eldobható SQL Server szolgáltatáson futtatja az integrációs teszteket,
+3. lintet és buildet futtat a frontendben,
+4. validálja a Compose konfigurációt és megkísérli a Docker buildet.
 
 ## Kapcsolódó dokumentumok
 

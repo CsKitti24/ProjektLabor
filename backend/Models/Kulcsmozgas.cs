@@ -11,11 +11,14 @@ namespace ProjektLabor.Models
 
         [ForeignKey("Kulcs")]
         public int KulcsId { get; set; }
-        public Kulcs Kulcs { get; set; }
+        public Kulcs Kulcs { get; set; } = null!;
 
         // Optional link to a booking
         public int? FoglalasId { get; set; }
         public Foglalas? Foglalas { get; set; }
+
+        public int? AtvevoFelhasznaloId { get; set; }
+        public Felhasznalo? AtvevoFelhasznalo { get; set; }
 
         [Required]
         public string MozgasTipus { get; set; } = string.Empty; // Kiadás, Visszavétel, etc.

@@ -11,20 +11,20 @@ namespace ProjektLabor.Models
 
         [ForeignKey("Felhasznalo")]
         public int FelhasznaloId { get; set; }
-        public Felhasznalo Felhasznalo { get; set; }
+        public Felhasznalo Felhasznalo { get; set; } = null!;
 
         [ForeignKey("Terem")]
         public int TeremId { get; set; }
-        public Terem Terem { get; set; }
+        public Terem Terem { get; set; } = null!;
 
         [Required]
-        public string Kategoria { get; set; }
+        public string Kategoria { get; set; } = string.Empty;
 
         [Required]
-        public string Leiras { get; set; }
+        public string Leiras { get; set; } = string.Empty;
 
         [Required]
-        public string Statusz { get; set; } // Nyitva, Folyamatban, Megoldva, Zarva
+        public string Statusz { get; set; } = string.Empty; // Nyitva, Folyamatban, Megoldva, Zarva
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
