@@ -7,12 +7,9 @@ namespace ProjektLabor.Services
     public class AuditService
     {
         private readonly AppDbContext _db;
-        private readonly ILogger<AuditService> _logger;
-
         public AuditService(AppDbContext db, ILogger<AuditService> logger)
         {
             _db = db;
-            _logger = logger;
         }
 
         public async Task LogAsync(
@@ -24,9 +21,7 @@ namespace ProjektLabor.Services
             string? ujErtek = null,
             string? indoklas = null)
         {
-            try
-            {
-                int? userId = null;
+            int? userId = null;
                 var subClaim = user?.FindFirst(ClaimTypes.NameIdentifier)?.Value
                     ?? user?.FindFirst("sub")?.Value;
 
@@ -35,8 +30,8 @@ namespace ProjektLabor.Services
                     userId = parsedId;
                 }
 
-                var log = new AuditLog
-                {
+            var log = new AuditLog
+            {
                     FelhasznaloId = userId,
                     MuveletTipus = muveletTipus,
                     EntitasTipus = entitasTipus,
@@ -47,14 +42,8 @@ namespace ProjektLabor.Services
                     LetrehozasIdeje = DateTime.UtcNow
                 };
 
-                _db.AuditLogok.Add(log);
-                await _db.SaveChangesAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Nem sikerült az audit log mentése: {MuveletTipus} {EntitasTipus} {EntitasId}",
-                    muveletTipus, entitasTipus, entitasId);
-            }
+            _db.AuditLogok.Add(log);
+            await _db.SaveChangesAsync();
         }
     }
 }

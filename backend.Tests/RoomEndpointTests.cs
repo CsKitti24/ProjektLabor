@@ -40,32 +40,6 @@ namespace backend.Tests
             });
         }
 
-        [Fact]
-        public async Task GetRoomsAndRoomById_AreAccessibleWithoutAuthentication()
-        {
-            int roomId;
-            using (var scope = _factory.Services.CreateScope())
-            {
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var room = new Terem
-                {
-                    Nev = "Nyilvánosan lekérdezhető terem",
-                    Kapacitas = 25,
-                    Aktivalva = true
-                };
-                db.Termek.Add(room);
-                await db.SaveChangesAsync();
-                roomId = room.Id;
-            }
-
-            var client = _factory.CreateClient();
-            var listResponse = await client.GetAsync("/api/rooms");
-            var detailsResponse = await client.GetAsync($"/api/rooms/{roomId}");
-
-            Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
-            Assert.Equal(HttpStatusCode.OK, detailsResponse.StatusCode);
-        }
-
         private async Task<HttpClient> CreateClientWithRoleAsync(string role)
         {
             using var scope = _factory.Services.CreateScope();

@@ -19,6 +19,7 @@ namespace backend.Tests
 
         public ApiEndpointTests(WebApplicationFactory<Program> factory)
         {
+            TestJwtConfiguration.ConfigureEnvironment();
             _dbName = "TestDb_" + Guid.NewGuid();
             _factory = factory.WithWebHostBuilder(builder =>
             {
@@ -41,32 +42,6 @@ namespace backend.Tests
             });
         }
 
-        private async Task<string> GetTestJwtTokenAsync(string role = "Oktato")
-        {
-            using var scope = _factory.Services.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var authService = scope.ServiceProvider.GetRequiredService<AuthService>();
-
-            var user = await db.Felhasznalok.FirstOrDefaultAsync(u => u.Role == role);
-            if (user == null)
-            {
-                user = new Felhasznalo
-                {
-                    Username = $"test_{role.ToLower()}",
-                    Nev = $"Teszt {role}",
-                    Email = $"test_{role.ToLower()}@test.hu",
-                    Role = role,
-                    JelszoHash = BCrypt.Net.BCrypt.HashPassword("Test1234!"),
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-                db.Felhasznalok.Add(user);
-                await db.SaveChangesAsync();
-            }
-
-            return authService.GenerateJwtToken(user);
-        }
-
         [Fact]
         public async Task GetHealth_ReturnsOk_WhenDatabaseReachable()
         {
@@ -85,7 +60,7 @@ namespace backend.Tests
         }
 
         [Fact]
-        public async Task GetRooms_ReturnsOk_WhenNoTokenProvided()
+        public async Task GetRooms_ReturnsUnauthorized_WhenNoTokenProvided()
         {
             // Arrange
             var client = _factory.CreateClient();
@@ -94,7 +69,7 @@ namespace backend.Tests
             var response = await client.GetAsync("/api/rooms");
 
             // Assert
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
         [Fact]
@@ -148,7 +123,7 @@ namespace backend.Tests
         }
 
         [Fact]
-        public async Task GetRoomById_ReturnsNotFound_WhenNoTokenProvided_AndRoomDoesNotExist()
+        public async Task GetRoomById_ReturnsUnauthorized_WhenNoTokenProvided()
         {
             // Arrange
             var client = _factory.CreateClient();
@@ -157,21 +132,18 @@ namespace backend.Tests
             var response = await client.GetAsync("/api/rooms/9999");
 
             // Assert
-            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
         [Fact]
         public async Task GetRoomById_ReturnsNotFound_WhenRoomDoesNotExist_WithAuth()
         {
-            // Arrange
             var token = await GetTestJwtTokenAsync();
             var client = _factory.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-            // Act
             var response = await client.GetAsync("/api/rooms/9999");
 
-            // Assert
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
@@ -210,6 +182,33 @@ namespace backend.Tests
         {
             public string Status { get; set; } = string.Empty;
             public string Database { get; set; } = string.Empty;
+        }
+
+        private async Task<string> GetTestJwtTokenAsync(string role = "Oktato")
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var authService = scope.ServiceProvider.GetRequiredService<AuthService>();
+
+            var user = await db.Felhasznalok.FirstOrDefaultAsync(account => account.Role == role);
+            if (user is null)
+            {
+                var suffix = Guid.NewGuid().ToString("N");
+                user = new Felhasznalo
+                {
+                    Username = $"test_{role.ToLowerInvariant()}_{suffix[..8]}",
+                    Nev = $"Teszt {role}",
+                    Email = $"test_{suffix}@test.hu",
+                    Role = role,
+                    JelszoHash = BCrypt.Net.BCrypt.HashPassword("Test1234!"),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                db.Felhasznalok.Add(user);
+                await db.SaveChangesAsync();
+            }
+
+            return authService.GenerateJwtToken(user);
         }
     }
 }

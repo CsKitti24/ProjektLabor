@@ -4,19 +4,19 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
+using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints;
 
 public static class MasterAccessEndpoints
 {
-    private const string AdministratorRole = "Adminisztrátor";
-    private const string InstructorRole = "Oktató / Igénylő";
     private const string MasterKeyType = "Mesterkulcs";
 
     public static IEndpointRouteBuilder MapMasterAccessEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var masterAccess = endpoints.MapGroup("/api/keys/{id:int}/master-access")
-            .RequireAuthorization();
+            .RequireAuthorization(RolePolicies.Administrator);
 
         masterAccess.MapGet("/", GetAsync)
             .WithName("GetMasterKeyAccess");
@@ -63,6 +63,7 @@ public static class MasterAccessEndpoints
         MasterAccessRequest request,
         ClaimsPrincipal principal,
         [FromServices] AppDbContext db,
+        [FromServices] AuditService auditService,
         CancellationToken cancellationToken)
     {
         if (await GetAdministratorIdAsync(principal, db, cancellationToken) is null)
@@ -82,7 +83,7 @@ public static class MasterAccessEndpoints
 
         var instructor = await db.Felhasznalok
             .AsNoTracking()
-            .Where(account => account.Id == request.UserId && account.Role == InstructorRole)
+            .Where(account => account.Id == request.UserId && account.Role == RoleNames.Oktato)
             .Select(account => new InstructorResponse(account.Id, account.Nev))
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -105,8 +106,18 @@ public static class MasterAccessEndpoints
             CreatedAt = DateTime.UtcNow
         };
 
+        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+            ? null
+            : await db.Database.BeginTransactionAsync(cancellationToken);
         db.MesterkulcsJogosultsagok.Add(access);
         await db.SaveChangesAsync(cancellationToken);
+        await auditService.LogAsync(
+            principal, "GRANT", "MesterkulcsJogosultsag", access.Id.ToString(),
+            ujErtek: $"KulcsId: {id}; FelhasznaloId: {instructor.Id}");
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         return Results.Created(
             $"/api/keys/{id}/master-access/{instructor.Id}",
@@ -118,6 +129,7 @@ public static class MasterAccessEndpoints
         int userId,
         ClaimsPrincipal principal,
         [FromServices] AppDbContext db,
+        [FromServices] AuditService auditService,
         CancellationToken cancellationToken)
     {
         if (await GetAdministratorIdAsync(principal, db, cancellationToken) is null)
@@ -139,8 +151,18 @@ public static class MasterAccessEndpoints
             return Results.NotFound(new { message = "A jogosultság nem található." });
         }
 
+        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+            ? null
+            : await db.Database.BeginTransactionAsync(cancellationToken);
         db.MesterkulcsJogosultsagok.Remove(access);
         await db.SaveChangesAsync(cancellationToken);
+        await auditService.LogAsync(
+            principal, "REVOKE", "MesterkulcsJogosultsag", access.Id.ToString(),
+            regiErtek: $"KulcsId: {id}; FelhasznaloId: {userId}");
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         return Results.NoContent();
     }
@@ -150,7 +172,7 @@ public static class MasterAccessEndpoints
         AppDbContext db,
         CancellationToken cancellationToken)
     {
-        if (!principal.IsInRole(AdministratorRole) ||
+        if (!principal.IsInRole(RoleNames.Adminisztrator) ||
             !int.TryParse(
                 principal.FindFirstValue("sub"),
                 NumberStyles.None,
@@ -161,7 +183,7 @@ public static class MasterAccessEndpoints
         }
 
         return await db.Felhasznalok
-            .Where(account => account.Id == userId && account.Role == AdministratorRole)
+            .Where(account => account.Id == userId && account.Role == RoleNames.Adminisztrator)
             .Select(account => (int?)account.Id)
             .SingleOrDefaultAsync(cancellationToken);
     }

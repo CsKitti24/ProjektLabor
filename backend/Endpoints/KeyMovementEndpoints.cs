@@ -1,3 +1,4 @@
+using System.Data;
 using System.Globalization;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
@@ -5,6 +6,7 @@ using ProjektLabor.Data;
 using ProjektLabor.DTOs.KeyMovements;
 using ProjektLabor.DTOs.Keys;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints
@@ -14,7 +16,8 @@ namespace ProjektLabor.Endpoints
         public static RouteGroupBuilder MapKeyMovementEndpoints(this IEndpointRouteBuilder routes)
         {
             var group = routes.MapGroup("/api/key-movements")
-                .WithTags("KeyMovements");
+                .WithTags("KeyMovements")
+                .RequireAuthorization("Authenticated");
 
             // KM1 – POST /api/key-movements/issue
             group.MapPost("/issue", async (
@@ -30,7 +33,11 @@ namespace ProjektLabor.Endpoints
                     return Results.Unauthorized();
                 }
 
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
                 var key = await db.Kulcsok
+                    .Include(k => k.Terem)
                     .Include(k => k.Kulcsmozgasok)
                     .FirstOrDefaultAsync(k => k.Id == request.KulcsId);
 
@@ -75,8 +82,23 @@ namespace ProjektLabor.Endpoints
                         return Results.BadRequest(new { message = "A foglaláshoz tartozó átvevő nem módosítható." });
                     }
 
+                    if (booking.TeremId != key.TeremId)
+                    {
+                        return Results.BadRequest(new { message = "A foglalás nem ehhez a kulcshoz tartozó teremre szól." });
+                    }
+
+                    var isAuthorizedRecipient =
+                        booking.Felhasznalo?.Role == RoleNames.Oktato &&
+                        (key.Tipus != "Mesterkulcs" ||
+                         await db.MesterkulcsJogosultsagok.AnyAsync(access =>
+                             access.KulcsId == key.Id && access.FelhasznaloId == booking.FelhasznaloId));
+                    if (!isAuthorizedRecipient)
+                    {
+                        return Results.Forbid();
+                    }
+
                     recipientId = booking.FelhasznaloId;
-                    recipientName = booking.Felhasznalo.Nev;
+                    recipientName = booking.Felhasznalo?.Nev ?? string.Empty;
                 }
                 else
                 {
@@ -96,9 +118,15 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.NotFound(new { message = "A megadott átvevő nem található." });
                     }
-                    if (recipient.Role != "Oktato")
+                    if (recipient.Role != RoleNames.Oktato)
                     {
                         return Results.BadRequest(new { message = "Kulcs átvevője csak oktató lehet." });
+                    }
+                    if (key.Tipus == "Mesterkulcs" &&
+                        !await db.MesterkulcsJogosultsagok.AnyAsync(access =>
+                            access.KulcsId == key.Id && access.FelhasznaloId == recipient.Id))
+                    {
+                        return Results.Forbid();
                     }
 
                     recipientId = recipient.Id;
@@ -126,6 +154,10 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Kulcsmozgas",
                     entitasId: movement.Id.ToString(),
                     ujErtek: $"KulcsId: {key.Id}, FoglalasId: {request.FoglalasId}");
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
 
                 var opUser = await db.Felhasznalok.FindAsync(operatorId.Value);
 
@@ -149,7 +181,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("IssueKey")
             .WithSummary("Kulcs kiadásának rögzítése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("Portas")
             .Produces<KeyMovementItemDto>(StatusCodes.Status201Created)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
@@ -172,6 +204,9 @@ namespace ProjektLabor.Endpoints
                     return Results.Unauthorized();
                 }
 
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
                 var key = await db.Kulcsok
                     .Include(k => k.Kulcsmozgasok)
                     .FirstOrDefaultAsync(k => k.Id == request.KulcsId);
@@ -220,7 +255,10 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Kulcsmozgas",
                     entitasId: returnMovement.Id.ToString(),
                     ujErtek: $"KulcsId: {key.Id}");
-
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
                 var opUser = await db.Felhasznalok.FindAsync(operatorId.Value);
                 var recipientName = recipientId.HasValue
                     ? await db.Felhasznalok
@@ -248,7 +286,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("ReturnKey")
             .WithSummary("Kulcs visszavételének rögzítése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("Portas")
             .Produces<KeyMovementItemDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
@@ -337,7 +375,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyMovementsList")
             .WithSummary("Kulcsmozgások listázása szűrőkkel és lapozással")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyMovementListDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
@@ -382,7 +420,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetKeyMovementById")
             .WithSummary("Egy kulcsmozgás részleteinek lekérdezése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyMovementItemDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -460,7 +498,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetOverdueKeys")
             .WithSummary("Lejárt vagy le nem adott kulcsok listázása")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<OverdueKeyDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)

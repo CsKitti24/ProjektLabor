@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.Bookings;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints
@@ -68,6 +69,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetMyBookings")
             .WithSummary("A bejelentkezett felhasználó saját foglalásai")
+            .RequireAuthorization("Oktato")
             .Produces<List<BookingDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .WithOpenApi();
@@ -149,12 +151,13 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetBookings")
             .WithSummary("Foglalások listázása szűrőkkel és lapozással")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<BookingListDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .WithOpenApi();
 
             // B2 – GET /api/bookings/{id}
-            group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
+            group.MapGet("/{id:int}", async (int id, AppDbContext db, ClaimsPrincipal caller) =>
             {
                 var f = await db.Foglalasok
                     .AsNoTracking()
@@ -165,6 +168,23 @@ namespace ProjektLabor.Endpoints
                 if (f is null)
                 {
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú foglalás nem található." });
+                }
+
+                var subject = caller.FindFirst("sub")?.Value
+                    ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!int.TryParse(subject, out var callerId) || callerId <= 0)
+                {
+                    return Results.Unauthorized();
+                }
+
+                var canReadAnyBooking =
+                    caller.IsInRole(RoleNames.Portas) ||
+                    caller.IsInRole(RoleNames.Adminisztrator) ||
+                    caller.IsInRole(RoleNames.UzemeltetesiIgazgato);
+                if (!canReadAnyBooking &&
+                    (!caller.IsInRole(RoleNames.Oktato) || f.FelhasznaloId != callerId))
+                {
+                    return Results.Forbid();
                 }
 
                 var dto = new BookingDto
@@ -198,9 +218,17 @@ namespace ProjektLabor.Endpoints
                 AuditService auditService,
                 ClaimsPrincipal caller) =>
             {
-                if (request.StartTime >= request.EndTime)
+                var subject = caller.FindFirst("sub")?.Value
+                    ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!int.TryParse(subject, out var callerId) || callerId <= 0)
                 {
-                    return Results.BadRequest(new { message = "A kezdési időpontnak meg kell előznie a befejezési időpontot." });
+                    return Results.Unauthorized();
+                }
+
+                var timeError = BookingRules.ValidateTimeRange(request.StartTime, request.EndTime);
+                if (timeError is not null)
+                {
+                    return Results.BadRequest(new { message = timeError });
                 }
 
                 var room = await db.Termek.FindAsync(request.TeremId);
@@ -214,48 +242,29 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = "Deaktivált teremre nem lehet foglalást rögzíteni." });
                 }
 
-                // Determine target user
-                int targetUserId;
-                var subClaim = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? caller.FindFirst("sub")?.Value;
-                int.TryParse(subClaim, out int callerId);
-
-                bool isAdmin = caller.IsInRole("Adminisztrator");
-
+                var isAdmin = caller.IsInRole(RoleNames.Adminisztrator);
+                var targetUserId = callerId;
                 if (request.FelhasznaloId.HasValue && isAdmin)
                 {
-                    bool userExists = await db.Felhasznalok.AnyAsync(u => u.Id == request.FelhasznaloId.Value);
-                    if (!userExists)
+                    var targetUserExists = await db.Felhasznalok
+                        .AnyAsync(user => user.Id == request.FelhasznaloId.Value);
+                    if (!targetUserExists)
                     {
-                        return Results.NotFound(new { message = $"A(z) {request.FelhasznaloId.Value} azonosítójú felhasználó nem található." });
+                        return Results.NotFound(new
+                        {
+                            message = $"A(z) {request.FelhasznaloId.Value} azonosítójú felhasználó nem található."
+                        });
                     }
+
                     targetUserId = request.FelhasznaloId.Value;
-                }
-                else
-                {
-                    targetUserId = callerId;
                 }
 
                 // Check for overlapping active bookings in the room
-                bool hasConflict = await db.Foglalasok.AnyAsync(f =>
-                    f.TeremId == request.TeremId &&
-                    f.Status != "Megszuntetve" &&
-                    request.StartTime < f.EndTime &&
-                    request.EndTime > f.StartTime);
-
-                if (hasConflict)
+                var validationError = await BookingRules.ValidateAsync(
+                    db, request.TeremId, request.StartTime, request.EndTime);
+                if (validationError is not null)
                 {
-                    return Results.Conflict(new { message = "A megadott idősáv ütközik egy már meglévő foglalással." });
-                }
-
-                // Check for overlapping maintenance
-                bool maintenanceConflict = await db.KarbantartasiIdosavok.AnyAsync(m =>
-                    m.TeremId == request.TeremId &&
-                    request.StartTime < m.EndTime &&
-                    request.EndTime > m.StartTime);
-
-                if (maintenanceConflict)
-                {
-                    return Results.Conflict(new { message = "A terem a megadott időszakban karbantartás alatt áll." });
+                    return Results.Conflict(new { message = validationError });
                 }
 
                 var booking = new Foglalas
@@ -300,6 +309,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("CreateBooking")
             .WithSummary("Új teremfoglalás létrehozása")
+            .RequireAuthorization("AdminOrOktato")
             .Produces<BookingDto>(StatusCodes.Status201Created)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
@@ -325,11 +335,17 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú foglalás nem található." });
                 }
 
-                var subClaim = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? caller.FindFirst("sub")?.Value;
-                int.TryParse(subClaim, out int callerId);
-                bool isAdmin = caller.IsInRole("Adminisztrator");
+                var subject = caller.FindFirst("sub")?.Value
+                    ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!int.TryParse(subject, out var callerId) || callerId <= 0)
+                {
+                    return Results.Unauthorized();
+                }
 
-                if (!isAdmin && booking.FelhasznaloId != callerId)
+                bool isAdmin = caller.IsInRole(RoleNames.Adminisztrator);
+
+                if (!isAdmin &&
+                    (!caller.IsInRole(RoleNames.Oktato) || booking.FelhasznaloId != callerId))
                 {
                     return Results.Forbid();
                 }
@@ -337,24 +353,17 @@ namespace ProjektLabor.Endpoints
                 var newStart = request.StartTime ?? booking.StartTime;
                 var newEnd = request.EndTime ?? booking.EndTime;
 
-                if (newStart >= newEnd)
+                var timeError = BookingRules.ValidateTimeRange(newStart, newEnd);
+                if (timeError is not null)
                 {
-                    return Results.BadRequest(new { message = "A kezdési időpontnak meg kell előznie a befejezési időpontot." });
+                    return Results.BadRequest(new { message = timeError });
                 }
 
-                if (request.StartTime.HasValue || request.EndTime.HasValue)
+                var validationError = await BookingRules.ValidateAsync(
+                    db, booking.TeremId, newStart, newEnd, id);
+                if (validationError is not null)
                 {
-                    bool conflict = await db.Foglalasok.AnyAsync(f =>
-                        f.Id != id &&
-                        f.TeremId == booking.TeremId &&
-                        f.Status != "Megszuntetve" &&
-                        newStart < f.EndTime &&
-                        newEnd > f.StartTime);
-
-                    if (conflict)
-                    {
-                        return Results.Conflict(new { message = "Az új időpont ütközik egy már meglévő foglalással." });
-                    }
+                    return Results.Conflict(new { message = validationError });
                 }
 
                 if (!string.IsNullOrWhiteSpace(request.Status))
@@ -363,6 +372,10 @@ namespace ProjektLabor.Endpoints
                     if (canonicalStatus == null)
                     {
                         return Results.BadRequest(new { message = $"Érvénytelen foglalás státusz: '{request.Status}'. Megengedett: Aktiv, NoShow, Megszuntetve, Kesz." });
+                    }
+                    if (!BookingRules.IsUserStatusChangeAllowed(booking.Status, canonicalStatus, isAdmin))
+                    {
+                        return Results.Forbid();
                     }
                     booking.Status = canonicalStatus;
                 }
@@ -399,6 +412,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("UpdateBooking")
             .WithSummary("Foglalás időpontjának vagy státuszának módosítása")
+            .RequireAuthorization("AdminOrOktato")
             .Produces<BookingDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status403Forbidden)
@@ -420,11 +434,17 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú foglalás nem található." });
                 }
 
-                var subClaim = caller.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? caller.FindFirst("sub")?.Value;
-                int.TryParse(subClaim, out int callerId);
-                bool isAdmin = caller.IsInRole("Adminisztrator");
+                var subject = caller.FindFirst("sub")?.Value
+                    ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!int.TryParse(subject, out var callerId) || callerId <= 0)
+                {
+                    return Results.Unauthorized();
+                }
 
-                if (!isAdmin && booking.FelhasznaloId != callerId)
+                bool isAdmin = caller.IsInRole(RoleNames.Adminisztrator);
+
+                if (!isAdmin &&
+                    (!caller.IsInRole(RoleNames.Oktato) || booking.FelhasznaloId != callerId))
                 {
                     return Results.Forbid();
                 }
@@ -445,6 +465,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("DeleteBooking")
             .WithSummary("Foglalás lemondása")
+            .RequireAuthorization("AdminOrOktato")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)

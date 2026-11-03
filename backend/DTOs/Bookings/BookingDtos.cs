@@ -22,7 +22,7 @@ namespace ProjektLabor.DTOs.Bookings
         [Required(ErrorMessage = "A terem azonosítójának megadása kötelező.")]
         public int TeremId { get; set; }
 
-        public int? FelhasznaloId { get; set; } // Opcionális: admin más nevében is foglalhat
+        public int? FelhasznaloId { get; set; }
 
         [Required(ErrorMessage = "A kezdési időpont megadása kötelező.")]
         public DateTime StartTime { get; set; }

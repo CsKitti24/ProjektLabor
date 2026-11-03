@@ -1,8 +1,29 @@
 # API_DESIGN.md – Egyetemi Kulcs- és Teremnyilvántartó Rendszer
 
+> **Implementációs állapot (2026-11-02):** Ez a dokumentum a jelenlegi backendhez igazodik. A korábbi tervezeti megjegyzések nem írhatják felül a tényleges útvonalakat, jogosultságokat vagy státuszkódokat.
+
+## Aktuális backend-összefoglaló
+
+Az API ASP.NET Core Minimal API, JWT-hitelesítéssel és szerepkör-alapú policykkel. A ténylegesen regisztrált végpontcsoportok: `/api/auth`, `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets`, `/api/maintenance`, `/api/keys/{id}/master-access`, `/api/reliability`, `/api/notifications`, `/api/admin`, `/api/reports` és `/api/health`.
+
+### Üzleti integritás
+
+- Foglalási idő: egy naptári napon belül 08:00–20:00; kezdés és hossz 45 perces rácshoz igazodik.
+- A foglalás létrehozása és módosítása ugyanazt az idő-, aktív terem-, ütközés- és karbantartási validációt használja; a lemondott és `NoShow` státuszú foglalások nem blokkolnak.
+- Az automatizált `NoShow`, foglalásvége előtti értesítés és napi kulcszárási folyamatok idempotens háttérfeldolgozókkal futnak.
+- Kulcskiadás és -visszavétel: `POST /api/key-movements/issue` és `POST /api/key-movements/return`, `Portas` jogosultsággal. A kiadás sorosítható adatbázis-tranzakciót, kulcs–terem megfeleltetést és a foglaló jogosultságának ellenőrzését használja.
+- A `Portas` szerepkör adhat ki és vehet vissza kulcsot; listázni a `Portas`, `Adminisztrator` és `UzemeltetesiIgazgato` szerepkörök tudnak.
+- Production környezetben a JWT issuer, audience és legalább 32 bájtos aláírókulcs konfigurálása kötelező; a forráskódbeli és minta kulcsokkal a backend nem indul el.
+
+### Aktuális státuszkódok
+
+Sikeres létrehozás `201 Created`, lekérdezés/módosítás `200 OK`, törlés vagy visszavonás `204 No Content` (ahol ezt az endpoint jelzi), hiányzó rekord `404 Not Found`, hibás kérés `400 Bad Request`, jogosultsági hiba `401/403`, üzleti ütközés vagy duplikáció `409 Conflict`. A konkrét DTO-kat az `backend/DTOs` könyvtár és a Swagger séma tartalmazza.
+
+> **Korábbi tervezeti részletek:** A következő fejezetek 2026-10-30-i tervből származnak. Az útvonal-, státusz- és jogosultsági táblázataik tervezeti/historikus adatok, nem feltétlenül egyeznek a mai implementációval; az aktuális viselkedést a fenti összefoglaló és a backend kódja határozza meg.
+>
 > **Verzió:** 1.0 – 3. bemutató előkészítő tervezet  
 > **Dátum:** 2026-10-30  
-> **Státusz:** Tervezet – implementáció még nem történt meg
+> **Státusz:** Korábbi terv, nem aktuális API-szerződés
 
 ---
 
@@ -23,18 +44,18 @@
 
 ## 1. Architekturális áttekintés
 
-### 1.1. Jelenlegi állapot
+### 1.1. Aktuális implementáció
 
-A backend **ASP.NET Core Minimal API** stílusban épül fel (nem Controller-alapú), egyetlen `Program.cs` fájlban. Az autentikáció és jogosultságkezelés **még nincs implementálva** – sem JWT middleware, sem `[Authorize]` dekorátorok nincsenek jelen. Az összes jelenlegi végpont nyilvánosan elérhető.
+A backend endpoint-modulokra bontott **ASP.NET Core Minimal API**. A JWT Bearer-hitelesítés és a szerepkör-alapú policyk regisztrálva vannak; a védett útvonalak jogosultsága endpointonként van beállítva.
 
-### 1.2. Tervezett architektúra (3. bemutató)
+### 1.2. Tervezeti architektúra (korábbi terv)
 
 ```
 React Frontend (port 3000)
         │
         │ HTTP/REST + JWT Bearer token
         ▼
-ASP.NET Core Minimal API (port 5000)
+ASP.NET Core Minimal API (port 8000)
         │
         ├── JWT Authentication Middleware
         ├── RBAC Authorization Middleware
@@ -72,11 +93,13 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 | Adminisztrátor | `"Adminisztrator"` |
 | Üzemeltetési Igazgató | `"UzemeltetesiIgazgato"` |
 
-> ⚠️ **Figyelem**: A `Role` mező típusa jelenleg `string` (szabad szöveg), enum-megkötés nincs sem a modellben, sem a migrációban. A backend validációnak ezt ellenőriznie kell.
+> A `Role` mező tárolási típusa `string`; az alkalmazás szerepkör-konstansokat és szerepkör-ellenőrzéseket használ.
 
 ---
 
-## 2. Teljes API-végpontlista
+## 2. API-végpontlista (korábbi terv)
+
+Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapot jelzései.
 
 ### Autentikáció
 
@@ -1440,6 +1463,8 @@ Minden végpontnál egységes hibakezelés szükséges:
 
 ## 8. Meglévő és hiányzó funkciók összesítése
 
+Az alábbi rész korábbi állapotfelvételből maradt a dokumentumban; a benne lévő végpontlisták és státuszok nem aktuálisak. Az aktuális implementációt az oldal elején lévő összefoglaló és a backend kódja írja le.
+
 ### ✅ Teljesen megvalósult
 
 | Végpont | Megjegyzés |
@@ -1478,6 +1503,8 @@ A többi hiányzó végpont: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api
 ---
 
 ## 9. Prioritási sorrend
+
+Az alábbi prioritási lista a korábbi bemutatóterv része, nem aktuális fejlesztési státusz.
 
 ### 🔴 P0 – 3. bemutató kötelező minimuma
 
@@ -1538,6 +1565,8 @@ A többi hiányzó végpont: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api
 
 ## 10. Ellentmondások a projektterv és a kód között
 
+Az alábbi megjegyzések a 2026-10-30-i terv és kód összevetését őrzik; az azóta megoldott ellentmondások nem jelentenek fennálló hibát.
+
 ### 10.1. ⚠️ Ékezetes mező neve a `Kulcsmozgas` modellben
 
 **Projektterv:** Az entitás megfelel a tervnek.  
@@ -1552,11 +1581,10 @@ A többi hiányzó végpont: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api
 **Ütközés:** A migrált adatbázis `Leiras` oszlopa `NOT NULL`, de a modell és a DTO nullable-ként kezeli. Adatbevitelnél ez hibás működéshez vezethet.  
 **Ajánlás:** Vagy a modellben kell `[Required]`-ot hozzáadni, vagy a migrációban `nullable: true`-ra javítani.
 
-### 10.3. ⚠️ JWT autentikáció nincs implementálva
+### 10.3. ✅ JWT-hitelesítés – a korábbi eltérés megoldva
 
-**Projektterv:** „JWT alapú hitelesítéssel lép be a rendszerbe."  
-**Kód:** A `Program.cs`-ben sem `AddAuthentication`, sem `AddAuthorization`, sem `UseAuthentication`, sem `UseAuthorization` nem szerepel. Valamennyi jelenlegi végpont nyilvánosán elérhető.  
-**Következmény:** A 3. bemutató előtt implementálni kell a teljes JWT middleware láncat.
+**Jelenlegi kód:** A `Program.cs` regisztrálja a JWT Bearer-hitelesítést és az RBAC-policyket, a middleware pedig a védett végpontok előtt ellenőrzi a tokent. A `JwtSettings` a szükséges issuer-, audience- és aláírókulcs-konfigurációt is validálja.
+**Állapot:** A 2026-10-30-i tervben leírt hiányosság már nem áll fenn; a részletes, endpointonkénti jogosultsági szabályokat a backend kódja és a fenti aktuális összefoglaló tartalmazza.
 
 ### 10.4. ℹ️ `Felhasznalo.Role` enum típusának hiánya
 

@@ -179,6 +179,17 @@ namespace backend.Tests
                 Megjegyzes = "Visszahozva sértetlenül"
             });
             Assert.Equal(HttpStatusCode.OK, returnResponse.StatusCode);
+            var returned = await returnResponse.Content.ReadFromJsonAsync<KeyMovementItemDto>();
+            Assert.NotNull(returned);
+            Assert.Equal(portasUserId, returned.OperatorId);
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                Assert.All(
+                    await db.Kulcsmozgasok.OrderBy(movement => movement.Id).ToListAsync(),
+                    movement => Assert.Equal(portasUserId, movement.OperátorId));
+            }
 
             // 6. Check state is Szabad again
             var statusReturned = await portasClient.GetFromJsonAsync<KeyStatusDto>($"/api/keys/{keyId}/status");
