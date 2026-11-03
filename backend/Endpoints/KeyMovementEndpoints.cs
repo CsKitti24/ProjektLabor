@@ -1,5 +1,6 @@
-using System.Security.Claims;
 using System.Data;
+using System.Globalization;
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.KeyMovements;
@@ -26,7 +27,8 @@ namespace ProjektLabor.Endpoints
                 ClaimsPrincipal caller) =>
             {
                 var operatorId = GetCallerId(caller);
-                if (operatorId is null)
+                if (operatorId is null ||
+                    !await db.Felhasznalok.AnyAsync(user => user.Id == operatorId.Value))
                 {
                     return Results.Unauthorized();
                 }
@@ -59,12 +61,13 @@ namespace ProjektLabor.Endpoints
                     return Results.Conflict(new { message = "A kulcs jelenleg ki van adva, előbb vissza kell venni." });
                 }
 
-                // Check booking if provided
+                int recipientId;
+                string recipientName;
                 if (request.FoglalasId.HasValue)
                 {
                     var booking = await db.Foglalasok
-                        .Include(f => f.Felhasznalo)
-                        .FirstOrDefaultAsync(f => f.Id == request.FoglalasId.Value);
+                        .Include(item => item.Felhasznalo)
+                        .FirstOrDefaultAsync(item => item.Id == request.FoglalasId.Value);
                     if (booking is null)
                     {
                         return Results.NotFound(new { message = $"A(z) {request.FoglalasId.Value} azonosítójú foglalás nem található." });
@@ -73,6 +76,12 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.BadRequest(new { message = $"A foglalás nem aktív (jelenlegi státusz: {booking.Status})." });
                     }
+                    if (request.AtvevoFelhasznaloId.HasValue &&
+                        request.AtvevoFelhasznaloId.Value != booking.FelhasznaloId)
+                    {
+                        return Results.BadRequest(new { message = "A foglaláshoz tartozó átvevő nem módosítható." });
+                    }
+
                     if (booking.TeremId != key.TeremId)
                     {
                         return Results.BadRequest(new { message = "A foglalás nem ehhez a kulcshoz tartozó teremre szól." });
@@ -87,12 +96,48 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.Forbid();
                     }
+
+                    recipientId = booking.FelhasznaloId;
+                    recipientName = booking.Felhasznalo?.Nev ?? string.Empty;
+                }
+                else
+                {
+                    if (!request.AtvevoFelhasznaloId.HasValue)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            message = "Foglalás nélküli kulcskiadásnál az átvevő oktató azonosítója kötelező."
+                        });
+                    }
+
+                    var recipient = await db.Felhasznalok
+                        .Where(user => user.Id == request.AtvevoFelhasznaloId.Value)
+                        .Select(user => new { user.Id, user.Nev, user.Role })
+                        .SingleOrDefaultAsync();
+                    if (recipient is null)
+                    {
+                        return Results.NotFound(new { message = "A megadott átvevő nem található." });
+                    }
+                    if (recipient.Role != RoleNames.Oktato)
+                    {
+                        return Results.BadRequest(new { message = "Kulcs átvevője csak oktató lehet." });
+                    }
+                    if (key.Tipus == "Mesterkulcs" &&
+                        !await db.MesterkulcsJogosultsagok.AnyAsync(access =>
+                            access.KulcsId == key.Id && access.FelhasznaloId == recipient.Id))
+                    {
+                        return Results.Forbid();
+                    }
+
+                    recipientId = recipient.Id;
+                    recipientName = recipient.Nev;
                 }
 
                 var movement = new Kulcsmozgas
                 {
                     KulcsId = key.Id,
                     FoglalasId = request.FoglalasId,
+                    AtvevoFelhasznaloId = recipientId,
                     MozgasTipus = "Kiadás",
                     Idopont = DateTime.UtcNow,
                     OperátorId = operatorId.Value,
@@ -115,9 +160,6 @@ namespace ProjektLabor.Endpoints
                 }
 
                 var opUser = await db.Felhasznalok.FindAsync(operatorId.Value);
-                var bookingUser = request.FoglalasId.HasValue
-                    ? (await db.Foglalasok.Include(f => f.Felhasznalo).FirstOrDefaultAsync(f => f.Id == request.FoglalasId.Value))?.Felhasznalo?.Nev
-                    : null;
 
                 var result = new KeyMovementItemDto
                 {
@@ -127,7 +169,9 @@ namespace ProjektLabor.Endpoints
                     MozgasTipus = movement.MozgasTipus,
                     Idopont = movement.Idopont,
                     FoglalasId = movement.FoglalasId,
-                    FoglalasFelhasznaloNev = bookingUser,
+                    FoglalasFelhasznaloNev = request.FoglalasId.HasValue ? recipientName : null,
+                    AtvevoFelhasznaloId = recipientId,
+                    AtvevoNev = recipientName,
                     OperatorId = operatorId.Value,
                     OperatorNev = opUser?.Nev ?? string.Empty,
                     Megjegyzes = movement.Megjegyzes
@@ -154,7 +198,8 @@ namespace ProjektLabor.Endpoints
                 ClaimsPrincipal caller) =>
             {
                 var operatorId = GetCallerId(caller);
-                if (operatorId is null)
+                if (operatorId is null ||
+                    !await db.Felhasznalok.AnyAsync(user => user.Id == operatorId.Value))
                 {
                     return Results.Unauthorized();
                 }
@@ -180,10 +225,20 @@ namespace ProjektLabor.Endpoints
                     return Results.Conflict(new { message = "A kulcs jelenleg nincs kiadva, nem lehet visszavenni." });
                 }
 
+                var recipientId = lastMovement.AtvevoFelhasznaloId;
+                if (!recipientId.HasValue && lastMovement.FoglalasId.HasValue)
+                {
+                    recipientId = await db.Foglalasok
+                        .Where(booking => booking.Id == lastMovement.FoglalasId.Value)
+                        .Select(booking => (int?)booking.FelhasznaloId)
+                        .SingleOrDefaultAsync();
+                }
+
                 var returnMovement = new Kulcsmozgas
                 {
                     KulcsId = key.Id,
                     FoglalasId = lastMovement.FoglalasId,
+                    AtvevoFelhasznaloId = recipientId,
                     MozgasTipus = "Visszavétel",
                     Idopont = DateTime.UtcNow,
                     OperátorId = operatorId.Value,
@@ -204,8 +259,13 @@ namespace ProjektLabor.Endpoints
                 {
                     await transaction.CommitAsync();
                 }
-
                 var opUser = await db.Felhasznalok.FindAsync(operatorId.Value);
+                var recipientName = recipientId.HasValue
+                    ? await db.Felhasznalok
+                        .Where(user => user.Id == recipientId.Value)
+                        .Select(user => user.Nev)
+                        .SingleOrDefaultAsync()
+                    : null;
 
                 var result = new KeyMovementItemDto
                 {
@@ -215,6 +275,8 @@ namespace ProjektLabor.Endpoints
                     MozgasTipus = returnMovement.MozgasTipus,
                     Idopont = returnMovement.Idopont,
                     FoglalasId = returnMovement.FoglalasId,
+                    AtvevoFelhasznaloId = recipientId,
+                    AtvevoNev = recipientName,
                     OperatorId = operatorId.Value,
                     OperatorNev = opUser?.Nev ?? string.Empty,
                     Megjegyzes = returnMovement.Megjegyzes
@@ -249,6 +311,7 @@ namespace ProjektLabor.Endpoints
                     .AsNoTracking()
                     .Include(km => km.Kulcs)
                     .Include(km => km.Operátor)
+                    .Include(km => km.AtvevoFelhasznalo)
                     .Include(km => km.Foglalas)
                         .ThenInclude(f => f.Felhasznalo)
                     .AsQueryable();
@@ -290,6 +353,12 @@ namespace ProjektLabor.Endpoints
                         FoglalasFelhasznaloNev = km.Foglalas != null && km.Foglalas.Felhasznalo != null
                             ? km.Foglalas.Felhasznalo.Nev
                             : null,
+                        AtvevoFelhasznaloId = km.AtvevoFelhasznaloId,
+                        AtvevoNev = km.AtvevoFelhasznalo != null
+                            ? km.AtvevoFelhasznalo.Nev
+                            : km.Foglalas != null && km.Foglalas.Felhasznalo != null
+                                ? km.Foglalas.Felhasznalo.Nev
+                                : null,
                         OperatorId = km.OperátorId,
                         OperatorNev = km.Operátor != null ? km.Operátor.Nev : string.Empty,
                         Megjegyzes = km.Megjegyzes
@@ -319,6 +388,7 @@ namespace ProjektLabor.Endpoints
                     .AsNoTracking()
                     .Include(k => k.Kulcs)
                     .Include(k => k.Operátor)
+                    .Include(k => k.AtvevoFelhasznalo)
                     .Include(k => k.Foglalas)
                         .ThenInclude(f => f.Felhasznalo)
                     .FirstOrDefaultAsync(k => k.Id == id);
@@ -339,6 +409,8 @@ namespace ProjektLabor.Endpoints
                     FoglalasFelhasznaloNev = km.Foglalas != null && km.Foglalas.Felhasznalo != null
                         ? km.Foglalas.Felhasznalo.Nev
                         : null,
+                    AtvevoFelhasznaloId = km.AtvevoFelhasznaloId,
+                    AtvevoNev = km.AtvevoFelhasznalo?.Nev ?? km.Foglalas?.Felhasznalo?.Nev,
                     OperatorId = km.OperátorId,
                     OperatorNev = km.Operátor != null ? km.Operátor.Nev : string.Empty,
                     Megjegyzes = km.Megjegyzes
@@ -365,6 +437,8 @@ namespace ProjektLabor.Endpoints
                     .AsNoTracking()
                     .Where(k => k.Aktivalva)
                     .Include(k => k.Terem)
+                    .Include(k => k.Kulcsmozgasok)
+                        .ThenInclude(km => km.AtvevoFelhasznalo)
                     .Include(k => k.Kulcsmozgasok)
                         .ThenInclude(km => km.Foglalas)
                             .ThenInclude(f => f.Felhasznalo)
@@ -411,11 +485,12 @@ namespace ProjektLabor.Endpoints
                                 KiadasIdeje = last.Idopont,
                                 FoglalasId = last.FoglalasId,
                                 FoglalasVége = last.Foglalas?.EndTime,
-                                BirtokosNev = last.Foglalas?.Felhasznalo?.Nev,
-                                BirtokosEmail = last.Foglalas?.Felhasznalo?.Email,
+                                BirtokosNev = last.AtvevoFelhasznalo?.Nev ?? last.Foglalas?.Felhasznalo?.Nev,
+                                BirtokosEmail = last.AtvevoFelhasznalo?.Email ?? last.Foglalas?.Felhasznalo?.Email,
                                 KésésPercekben = Math.Round((now - deadline).TotalMinutes, 1)
                             });
                         }
+
                     }
                 }
 
@@ -434,9 +509,12 @@ namespace ProjektLabor.Endpoints
 
         private static int? GetCallerId(ClaimsPrincipal caller)
         {
-            var subject = caller.FindFirst("sub")?.Value
-                ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            return int.TryParse(subject, out var userId) && userId > 0 ? userId : null;
+            var subject = caller.FindFirstValue("sub") ??
+                          caller.FindFirstValue(ClaimTypes.NameIdentifier);
+            return int.TryParse(subject, NumberStyles.None, CultureInfo.InvariantCulture, out var userId) &&
+                   userId > 0
+                ? userId
+                : null;
         }
     }
 }

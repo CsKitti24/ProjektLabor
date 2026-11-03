@@ -17,6 +17,9 @@ namespace ProjektLabor.Models
         public int? FoglalasId { get; set; }
         public Foglalas? Foglalas { get; set; }
 
+        public int? AtvevoFelhasznaloId { get; set; }
+        public Felhasznalo? AtvevoFelhasznalo { get; set; }
+
         [Required]
         public string MozgasTipus { get; set; } = string.Empty; // Kiadás, Visszavétel, etc.
 

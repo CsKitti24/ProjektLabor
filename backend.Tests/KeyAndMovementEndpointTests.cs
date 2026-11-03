@@ -40,7 +40,7 @@ namespace backend.Tests
             });
         }
 
-        private async Task<HttpClient> CreateClientWithRoleAsync(string role)
+        private async Task<(HttpClient Client, int UserId)> CreateClientWithRoleAsync(string role)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -63,7 +63,27 @@ namespace backend.Tests
 
             var client = _factory.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            return client;
+            return (client, user.Id);
+        }
+
+        private async Task<int> SeedInstructorAsync()
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var suffix = Guid.NewGuid().ToString("N");
+            var instructor = new Felhasznalo
+            {
+                Username = suffix[..12],
+                Nev = "Teszt oktató",
+                Email = $"{suffix}@test.hu",
+                Role = "Oktato",
+                JelszoHash = BCrypt.Net.BCrypt.HashPassword("TestPass123!"),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.Felhasznalok.Add(instructor);
+            await db.SaveChangesAsync();
+            return instructor.Id;
         }
 
         private async Task<(int RoomId, int KeyId)> SeedRoomAndKeyAsync(string keyNumber)
@@ -92,7 +112,7 @@ namespace backend.Tests
         public async Task CreateKey_Succeeds_ForAdmin()
         {
             // Arrange
-            var client = await CreateClientWithRoleAsync("Adminisztrator");
+            var (client, _) = await CreateClientWithRoleAsync("Adminisztrator");
             var (roomId, _) = await SeedRoomAndKeyAsync("K-100");
 
             var newKeyDto = new CreateKeyRequestDto
@@ -118,9 +138,9 @@ namespace backend.Tests
         public async Task IssueAndReturnKey_Lifecycle_WorksCorrectly()
         {
             // Arrange
-            _ = await CreateClientWithRoleAsync("Oktato");
-            var portasClient = await CreateClientWithRoleAsync("Portas");
+            var (portasClient, portasUserId) = await CreateClientWithRoleAsync("Portas");
             var (_, keyId) = await SeedRoomAndKeyAsync("K-200");
+            var recipientId = await SeedInstructorAsync();
 
             // 1. Check initial state is Szabad
             var statusBefore = await portasClient.GetFromJsonAsync<KeyStatusDto>($"/api/keys/{keyId}/status");
@@ -131,12 +151,14 @@ namespace backend.Tests
             var issueResponse = await portasClient.PostAsJsonAsync("/api/key-movements/issue", new IssueKeyRequestDto
             {
                 KulcsId = keyId,
+                AtvevoFelhasznaloId = recipientId,
                 Megjegyzes = "Átadva órára"
             });
             Assert.Equal(HttpStatusCode.Created, issueResponse.StatusCode);
-            var issued = await issueResponse.Content.ReadFromJsonAsync<KeyMovementItemDto>();
-            Assert.NotNull(issued);
-            Assert.Equal(2, issued.OperatorId);
+            var issue = await issueResponse.Content.ReadFromJsonAsync<KeyMovementItemDto>();
+            Assert.NotNull(issue);
+            Assert.Equal(recipientId, issue.AtvevoFelhasznaloId);
+            Assert.Equal(portasUserId, issue.OperatorId);
 
             // 3. Check state is now Kiadva
             var statusIssued = await portasClient.GetFromJsonAsync<KeyStatusDto>($"/api/keys/{keyId}/status");
@@ -159,20 +181,41 @@ namespace backend.Tests
             Assert.Equal(HttpStatusCode.OK, returnResponse.StatusCode);
             var returned = await returnResponse.Content.ReadFromJsonAsync<KeyMovementItemDto>();
             Assert.NotNull(returned);
-            Assert.Equal(2, returned.OperatorId);
+            Assert.Equal(portasUserId, returned.OperatorId);
 
             using (var scope = _factory.Services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 Assert.All(
                     await db.Kulcsmozgasok.OrderBy(movement => movement.Id).ToListAsync(),
-                    movement => Assert.Equal(2, movement.OperátorId));
+                    movement => Assert.Equal(portasUserId, movement.OperátorId));
             }
 
             // 6. Check state is Szabad again
             var statusReturned = await portasClient.GetFromJsonAsync<KeyStatusDto>($"/api/keys/{keyId}/status");
             Assert.NotNull(statusReturned);
             Assert.Equal("Szabad", statusReturned.Allapot);
+        }
+
+        [Fact]
+        public async Task IssueWithoutBooking_RequiresInstructorRecipient()
+        {
+            var (portasClient, portasUserId) = await CreateClientWithRoleAsync("Portas");
+            var (_, keyId) = await SeedRoomAndKeyAsync("K-201");
+
+            var missingRecipient = await portasClient.PostAsJsonAsync(
+                "/api/key-movements/issue",
+                new IssueKeyRequestDto { KulcsId = keyId });
+            Assert.Equal(HttpStatusCode.BadRequest, missingRecipient.StatusCode);
+
+            var staffAsRecipient = await portasClient.PostAsJsonAsync(
+                "/api/key-movements/issue",
+                new IssueKeyRequestDto
+                {
+                    KulcsId = keyId,
+                    AtvevoFelhasznaloId = portasUserId
+                });
+            Assert.Equal(HttpStatusCode.BadRequest, staffAsRecipient.StatusCode);
         }
     }
 }

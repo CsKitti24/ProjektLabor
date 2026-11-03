@@ -318,16 +318,31 @@ A kezdeti migráció neve: `InitialCreate`.
 dotnet build ProjektLabor.sln --configuration Release
 dotnet test ProjektLabor.sln --configuration Release \
   --filter "FullyQualifiedName!~SqlServerIntegrationTests"
+```
 
+Az SQL Server-integrációs teszt valódi SQL Serverhez csatlakozik, és a
+`SQLSERVER_TEST_CONNECTION` környezeti változóban megadott szerveren egyedi
+ideiglenes adatbázist hoz létre, majd a futás végén törli azt. Csak eldobható
+fejlesztői vagy teszt SQL Serveren futtasd, amelyen a tesztfelhasználónak
+adatbázis-létrehozási és -törlési jogosultsága van:
+
+```bash
+SQLSERVER_TEST_CONNECTION='Server=localhost,1433;Database=master;User Id=sa;Password=<jelszo>;TrustServerCertificate=True;Encrypt=False' \
+  dotnet test backend.Tests/backend.Tests.csproj
+```
+
+Frontend lint és build:
+
+```bash
 cd frontend
 npm ci
 npm run lint
 npm run build
 ```
 
-Az SQL Server-integrációs tesztet csak külön, eldobható tesztadatbázissal
-futtasd a `SQLSERVER_TEST_CONNECTION` változó megadásával; a teszt a megadott
-adatbázisra futtatja a migrációkat, majd a demo-bootstrapot, BCrypt-hasheket
+Az SQL Server-integrációs tesztet csak külön, eldobható SQL Serveren futtasd
+a `SQLSERVER_TEST_CONNECTION` változó megadásával; a teszt külön ideiglenes
+adatbázisokon futtatja a migrációkat, majd a demo-bootstrapot, BCrypt-hasheket
 és mind a négy szerepkör hitelesítését ellenőrzi. A normál CI ezt a tesztet
 szándékosan kihagyja. Példa:
 
@@ -337,8 +352,8 @@ SQLSERVER_TEST_CONNECTION='Server=localhost,1433;Database=DisposableProjektLabor
   --filter "FullyQualifiedName~SqlServerIntegrationTests"
 ```
 
-Az adatbázis legyen külön erre a célra létrehozott és eldobható; a teszt nem
-törli az adatbázist. A normál CI ezt a tesztet szándékosan kihagyja.
+A tesztek a létrehozott ideiglenes adatbázisokat a futás végén törlik. A normál
+CI ezt a tesztet szándékosan kihagyja.
 
 ## CI
 
