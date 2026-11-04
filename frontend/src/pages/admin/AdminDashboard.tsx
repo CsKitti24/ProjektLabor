@@ -6,10 +6,8 @@ import {
   Key,
   CalendarDays,
   FileText,
-  Users,
   BarChart2,
   ArrowRight,
-  ShieldCheck,
 } from 'lucide-react'
 import client from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'

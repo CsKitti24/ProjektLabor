@@ -48,7 +48,7 @@ type TabType = 'weekly' | 'utilization' | 'reliability'
 
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('weekly')
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
 
   const [weeklyData, setWeeklyData] = useState<WeeklyReport | null>(null)
@@ -56,27 +56,57 @@ export default function ReportsPage() {
   const [reliabilityData, setReliabilityData] = useState<ReliabilityReport | null>(null)
 
   useEffect(() => {
-    setIsLoading(true)
-    setError('')
+    let ignore = false
 
     if (activeTab === 'weekly') {
       client
         .get<WeeklyReport>('/reports/weekly')
-        .then((res) => setWeeklyData(res.data))
-        .catch(() => setError('A heti riport betöltése nem sikerült.'))
-        .finally(() => setIsLoading(false))
+        .then((res) => {
+          if (!ignore) {
+            setWeeklyData(res.data)
+            setError('')
+          }
+        })
+        .catch(() => {
+          if (!ignore) setError('A heti riport betöltése nem sikerült.')
+        })
+        .finally(() => {
+          if (!ignore) setIsLoading(false)
+        })
     } else if (activeTab === 'utilization') {
       client
         .get<RoomUtilization>('/reports/room-utilization')
-        .then((res) => setUtilizationData(res.data))
-        .catch(() => setError('A kihasználtsági riport betöltése nem sikerült.'))
-        .finally(() => setIsLoading(false))
+        .then((res) => {
+          if (!ignore) {
+            setUtilizationData(res.data)
+            setError('')
+          }
+        })
+        .catch(() => {
+          if (!ignore) setError('A kihasználtsági riport betöltése nem sikerült.')
+        })
+        .finally(() => {
+          if (!ignore) setIsLoading(false)
+        })
     } else if (activeTab === 'reliability') {
       client
         .get<ReliabilityReport>('/reports/reliability')
-        .then((res) => setReliabilityData(res.data))
-        .catch(() => setError('A megbízhatósági riport betöltése nem sikerült.'))
-        .finally(() => setIsLoading(false))
+        .then((res) => {
+          if (!ignore) {
+            setReliabilityData(res.data)
+            setError('')
+          }
+        })
+        .catch(() => {
+          if (!ignore) setError('A megbízhatósági riport betöltése nem sikerült.')
+        })
+        .finally(() => {
+          if (!ignore) setIsLoading(false)
+        })
+    }
+
+    return () => {
+      ignore = true
     }
   }, [activeTab])
 
@@ -97,7 +127,7 @@ export default function ReportsPage() {
         <button
           type="button"
           className={`report-tab-btn ${activeTab === 'weekly' ? 'active' : ''}`}
-          onClick={() => setActiveTab('weekly')}
+          onClick={() => { setActiveTab('weekly'); setIsLoading(true); }}
         >
           <Calendar size={14} strokeWidth={1.5} />
           <span>Heti kulcs- és teremforgalom</span>
@@ -105,7 +135,7 @@ export default function ReportsPage() {
         <button
           type="button"
           className={`report-tab-btn ${activeTab === 'utilization' ? 'active' : ''}`}
-          onClick={() => setActiveTab('utilization')}
+          onClick={() => { setActiveTab('utilization'); setIsLoading(true); }}
         >
           <DoorOpen size={14} strokeWidth={1.5} />
           <span>Teremkihasználtság</span>
@@ -113,7 +143,7 @@ export default function ReportsPage() {
         <button
           type="button"
           className={`report-tab-btn ${activeTab === 'reliability' ? 'active' : ''}`}
-          onClick={() => setActiveTab('reliability')}
+          onClick={() => { setActiveTab('reliability'); setIsLoading(true); }}
         >
           <Award size={14} strokeWidth={1.5} />
           <span>Megbízhatósági statisztika</span>

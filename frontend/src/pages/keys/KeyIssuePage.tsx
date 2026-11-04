@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react'
+import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { ArrowUpRight, Check, AlertCircle, Key as KeyIcon } from 'lucide-react'
 import client from '../../api/client'
 
@@ -28,7 +28,7 @@ export default function KeyIssuePage() {
   const [success, setSuccess] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-  const fetchKeys = () => {
+  const fetchKeys = useCallback(() => {
     client
       .get<KeyItem[]>('/keys')
       .then((r) => {
@@ -37,12 +37,12 @@ export default function KeyIssuePage() {
           (k) => k.aktivalva !== false && (k.jelenlegiAllapot === 'Szabad' || !k.jelenlegiAllapot)
         )
         setKeys(available)
-        if (available.length > 0 && !keyId) {
-          setKeyId(String(available[0].id))
+        if (available.length > 0) {
+          setKeyId((prev) => (prev ? prev : String(available[0].id)))
         }
       })
       .catch(() => {})
-  }
+  }, [])
 
   useEffect(() => {
     fetchKeys()
@@ -54,11 +54,11 @@ export default function KeyIssuePage() {
         const userList = Array.isArray(res.data) ? res.data : (res.data?.items ?? [])
         setUsers(userList)
         if (userList.length > 0) {
-          setUserId(String(userList[0].id))
+          setUserId((prev) => (prev ? prev : String(userList[0].id)))
         }
       })
       .catch(() => {})
-  }, [])
+  }, [fetchKeys])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()

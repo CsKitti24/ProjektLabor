@@ -48,7 +48,32 @@ export default function ActiveKeysPage() {
   }
 
   useEffect(() => {
-    fetchData()
+    let ignore = false
+    Promise.all([
+      client.get<KeyItem[]>('/keys'),
+      client.get<OverdueKey[]>('/key-movements/overdue').catch(() => ({ data: [] })),
+    ])
+      .then(([keysRes, overdueRes]) => {
+        if (!ignore) {
+          setKeys(keysRes.data)
+          setOverdueKeys(overdueRes.data)
+          setError('')
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const axErr = err as { response?: { data?: { message?: string } } }
+          setError(axErr.response?.data?.message || 'Nem sikerült betölteni az aktív kulcsokat.')
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setIsLoading(false)
+        }
+      })
+    return () => {
+      ignore = true
+    }
   }, [])
 
   const issuedKeys = keys.filter((k) => k.jelenlegiAllapot === 'Kiadva')

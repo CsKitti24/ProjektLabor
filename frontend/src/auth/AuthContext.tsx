@@ -60,13 +60,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   })
 
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'))
-  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [isLoading, setIsLoading] = useState<boolean>(() => Boolean(localStorage.getItem('auth_token')))
 
   // Kezdeti felhasználó adategyeztetés a backenddel /api/auth/me végponton
   useEffect(() => {
     const currentToken = localStorage.getItem('auth_token')
     if (!currentToken) {
-      setIsLoading(false)
       return
     }
 

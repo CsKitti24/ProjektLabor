@@ -56,7 +56,30 @@ export default function KeyMovementsPage() {
   }
 
   useEffect(() => {
-    fetchMovements()
+    let ignore = false
+    client
+      .get<{ items?: KeyMovement[] } | KeyMovement[]>('/key-movements')
+      .then((r) => {
+        if (!ignore) {
+          const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
+          setMovements(list)
+          setError('')
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const axErr = err as { response?: { data?: { message?: string } } }
+          setError(axErr.response?.data?.message || 'Nem sikerült betölteni a kulcsmozgásokat.')
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setIsLoading(false)
+        }
+      })
+    return () => {
+      ignore = true
+    }
   }, [])
 
   return (

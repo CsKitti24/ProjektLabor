@@ -36,24 +36,30 @@ export default function UsersPage() {
   const [editRole, setEditRole] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
-  const fetchUsers = () => {
-    setIsLoading(true)
+  useEffect(() => {
+    let ignore = false
     client
       .get<{ items?: UserItem[] } | UserItem[]>('/users')
       .then((r) => {
-        const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
-        setUsers(list)
-        setError('')
+        if (!ignore) {
+          const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
+          setUsers(list)
+          setError('')
+        }
       })
       .catch((err: unknown) => {
-        const axErr = err as { response?: { data?: { message?: string } } }
-        setError(axErr.response?.data?.message || 'Nem sikerült betölteni a felhasználókat.')
+        if (!ignore) {
+          const axErr = err as { response?: { data?: { message?: string } } }
+          setError(axErr.response?.data?.message || 'Nem sikerült betölteni a felhasználókat.')
+        }
       })
-      .finally(() => setIsLoading(false))
-  }
+      .finally(() => {
+        if (!ignore) setIsLoading(false)
+      })
 
-  useEffect(() => {
-    fetchUsers()
+    return () => {
+      ignore = true
+    }
   }, [])
 
   const handleEditStart = (user: UserItem) => {
