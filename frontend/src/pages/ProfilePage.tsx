@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User as UserIcon, LogOut, Shield, Mail, Award, Clock, AlertTriangle } from 'lucide-react'
+import { User as UserIcon, LogOut, Shield, Mail, Award } from 'lucide-react'
 import { useAuth, type UserRole } from '../auth/AuthContext'
 import client from '../api/client'
 
@@ -30,22 +30,29 @@ export default function ProfilePage() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [reliability, setReliability] = useState<ReliabilityData | null>(null)
-  const [isLoadingReliability, setIsLoadingReliability] = useState(false)
+  const [isLoadingReliability, setIsLoadingReliability] = useState(() => Boolean(user && (user.role === 'Oktato' || user.role === 'UzemeltetesiIgazgato')))
 
   useEffect(() => {
     if (user && (user.role === 'Oktato' || user.role === 'UzemeltetesiIgazgato')) {
-      setIsLoadingReliability(true)
+      let isCancelled = false
       client
         .get<ReliabilityData>('/reliability/my')
         .then((res) => {
-          setReliability(res.data)
+          if (!isCancelled) {
+            setReliability(res.data)
+          }
         })
         .catch(() => {
           // Ha nincs még rögzített esemény vagy hiba lép fel
         })
         .finally(() => {
-          setIsLoadingReliability(false)
+          if (!isCancelled) {
+            setIsLoadingReliability(false)
+          }
         })
+      return () => {
+        isCancelled = true
+      }
     }
   }, [user])
 

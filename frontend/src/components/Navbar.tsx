@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Search, User as UserIcon, Key, LogOut } from 'lucide-react'
+import { Search, User as UserIcon, LogOut } from 'lucide-react'
 import { useAuth, type UserRole } from '../auth/AuthContext'
 import LoginModal from './LoginModal'
 

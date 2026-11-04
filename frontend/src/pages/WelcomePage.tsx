@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Key, ArrowRight } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import Navbar from '../components/Navbar'
 import LoginModal from '../components/LoginModal'
 import { useAuth, type UserRole } from '../auth/AuthContext'

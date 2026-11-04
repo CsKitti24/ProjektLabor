@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Key, Lock, User, AlertCircle, ArrowRight, ArrowLeft } from 'lucide-react'
+import { Lock, User, AlertCircle, ArrowRight, ArrowLeft } from 'lucide-react'
 import { useAuth, type UserRole } from '../auth/AuthContext'
 
 function getDashboardPath(role: UserRole): string {

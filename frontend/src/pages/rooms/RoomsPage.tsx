@@ -54,7 +54,29 @@ export default function RoomsPage() {
   }
 
   useEffect(() => {
-    fetchRooms()
+    let ignore = false
+    client
+      .get<Room[]>('/rooms')
+      .then((res) => {
+        if (!ignore) {
+          setRooms(res.data)
+          setError('')
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const axErr = err as { response?: { data?: { message?: string } } }
+          setError(axErr.response?.data?.message || 'Nem sikerült betölteni a termeket.')
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setIsLoading(false)
+        }
+      })
+    return () => {
+      ignore = true
+    }
   }, [])
 
   const handleCreateRoom = async (e: FormEvent) => {

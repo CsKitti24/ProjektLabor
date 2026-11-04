@@ -89,15 +89,40 @@ export default function TicketsPage() {
   }, [])
 
   useEffect(() => {
-    loadTickets()
+    let ignore = false
+    client
+      .get<{ items?: Ticket[] } | Ticket[]>('/tickets')
+      .then((r) => {
+        if (!ignore) {
+          const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
+          setTickets(list)
+          setError('')
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const axErr = err as { response?: { data?: { message?: string } } }
+          setError(axErr.response?.data?.message || 'Nem sikerült betölteni a hibajegyeket.')
+        }
+      })
+      .finally(() => {
+        if (!ignore) setIsLoading(false)
+      })
+
     client
       .get<RoomOption[]>('/rooms')
       .then((res) => {
-        setRooms(res.data)
-        if (res.data.length > 0) setSelectedRoomId(String(res.data[0].id))
+        if (!ignore) {
+          setRooms(res.data)
+          if (res.data.length > 0) setSelectedRoomId(String(res.data[0].id))
+        }
       })
       .catch(() => {})
-  }, [loadTickets])
+
+    return () => {
+      ignore = true
+    }
+  }, [])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()

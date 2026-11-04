@@ -69,7 +69,33 @@ export default function MaintenancePage() {
   }
 
   useEffect(() => {
-    loadData()
+    let ignore = false
+    Promise.all([
+      client.get<MaintenanceItem[]>('/maintenance'),
+      client.get<RoomOption[]>('/rooms').catch(() => ({ data: [] })),
+    ])
+      .then(([mRes, rRes]) => {
+        if (!ignore) {
+          setItems(mRes.data)
+          setRooms(rRes.data)
+          if (rRes.data.length > 0) setTeremId(String(rRes.data[0].id))
+          setError('')
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const axErr = err as { response?: { data?: { message?: string } } }
+          setError(axErr.response?.data?.message || 'Nem sikerült betölteni a karbantartásokat.')
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setIsLoading(false)
+        }
+      })
+    return () => {
+      ignore = true
+    }
   }, [])
 
   const handleCreate = async (e: FormEvent) => {

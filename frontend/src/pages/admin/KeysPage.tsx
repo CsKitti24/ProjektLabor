@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Key, Search, AlertCircle, Plus, Check } from 'lucide-react'
+import { Key, Search, AlertCircle } from 'lucide-react'
 import client from '../../api/client'
 
 interface KeyItem {
