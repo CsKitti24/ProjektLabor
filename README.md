@@ -1,338 +1,276 @@
-# Egyetemi kulcs- és teremnyilvántartó rendszer
+# Egyetemi Kulcs- és Teremnyilvántartó Rendszer (ProjektLabor)
 
-Az alkalmazás egyetemi termek, foglalások, kulcsok és kulcsmozgások központi
-nyilvántartására készül. A backend jelenlegi állapota a fő üzleti modulokat,
-JWT-alapú hitelesítést, szerepkörös jogosultságkezelést, SQL Server-adatbázist,
-riportokat és automatizált teszteket tartalmaz. A frontend még a Vite kezdő
-felülete, ezért a rendszer jelenleg backend-központú, integrációs állapotban van.
+Egyetemi termek, teremfoglalások, fizikai kulcsok és kulcsmozgások teljes körű, szerepkör-alapú nyilvántartó és menedzsment rendszere.
 
-> **Állapotfelvétel:** 2026. november 2.
-> A „kész” jelölés a repositoryban ténylegesen megtalálható és tesztelt
-> funkcionalitást jelenti, nem csak a tervben szereplő célt.
+---
 
-A backend jelenlegi állapota JWT-hitelesítést, szerepkör-alapú jogosultságkezelést,
-üzleti végpontokat és SQL Server-adatbázis-integrációt tartalmaz. A frontend
-jelenleg a Vite kezdőfelülete.
+## Főbb funkciók és szerepkörök
+
+A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikált jogosultságokkal és felülettel:
+
+| Szerepkör | Fő felelősségi kör | Elérhető funkciók |
+| :--- | :--- | :--- |
+| **`Oktato`** | Foglalások és kulcshasználat | Teremkatalógus böngészése, új foglalás leadása, saját foglalások és megbízhatósági pontszám megtekintése, hibajegy bejelentése. |
+| **`Portas`** | Kulcsok fizikai kiadása és visszavétele | Aktív foglalásokhoz tartozó kulcsok kiadása/visszavétele, kulcsmozgások naplózása, átvételi elismervény, azonnali hibajegy rögzítés. |
+| **`Adminisztrator`** | Rendszertörzsadatok és konfiguráció | Felhasználók kezelése és szerepkör-módosítás, termek és kulcsok CRUD, mesterkulcs-jogosultságok, karbantartási idősávok, rendszerparaméterek, megbízhatósági korrekció. |
+| **`UzemeltetesiIgazgato`** | Ellenőrzés és riportálás | Teremkihasználtsági statisztikák, napi és heti riportok, kulcsforgalom elemzése, oktatói megbízhatósági audit, teljes rendszeresemény-napló. |
+
+---
 
 ## Technológiai stack
 
-| Réteg | Technológia | Repository-állapot |
-|---|---|---|
-| Frontend | React 19, TypeScript, Vite 8 | Kezdő Vite-felület, a domain UI még hiányzik |
-| Backend | ASP.NET Core Web API, .NET 8 | Kész, endpoint-modulokra bontva |
-| Adatbázis | Microsoft SQL Server 2022 | Docker Compose-ban konfigurálva |
-| ORM/migráció | Entity Framework Core 8, SQL Server provider | Kész, 3 migráció verziózva |
-| Hitelesítés | JWT Bearer, BCrypt.Net-Next | Kész |
-| Dokumentáció | Swagger/OpenAPI v1 | Development környezetben elérhető |
-| Tesztelés | xUnit, ASP.NET Core test host, EF InMemory | Kész; külön SQL Server teszt is előkészítve |
-| CI/CD | GitHub Actions | Backend, frontend és Docker ellenőrzés konfigurálva |
+| Réteg | Technológia | Megjegyzés |
+| :--- | :--- | :--- |
+| **Frontend** | React 19, TypeScript, Vite, Tailwind CSS, Lucide React | Modern SPA szerepkörös irányítópultokkal, JWT klienssel és modális nézetekkel. |
+| **Backend** | ASP.NET Core 8 Minimal API, C# | Erősen típusos, moduláris végpontok, BCrypt jelszókezelés, beépített RBAC házirendek. |
+| **Adatbázis** | Microsoft SQL Server 2022 | Konténerizált relációs adatbázis tranzakció- és zárkezeléssel. |
+| **ORM / Migráció** | Entity Framework Core 8 | Code-first megközelítés, automatikus séma-migrációk indításkor. |
+| **Hitelesítés** | JSON Web Token (JWT Bearer) + BCrypt | Állapotmentes, biztonságos token-kezelés claims-alapú szerepkör-ellenőrzéssel. |
+| **Dokumentáció** | Swagger / OpenAPI v1 | Fejlesztői módban interaktív tesztelő felület (`/swagger`). |
+| **Tesztelés & CI** | xUnit, WebApplicationFactory, GitHub Actions | Unit- és integrációs tesztek, linting, konténerkonfiguráció-ellenőrzés. |
 
-## Architektúra
+---
+
+## Rendszerarchitektúra
 
 ```mermaid
 flowchart LR
-    Browser["Böngésző"] --> Frontend["React + TypeScript + Vite<br/>localhost:3000"]
-    Frontend -->|REST / JSON + Bearer JWT| API["ASP.NET Core Web API<br/>localhost:8000"]
-    API --> Auth["JWT validáció<br/>RBAC policy-k"]
+    Browser["Böngésző / Felhasználó"] --> Frontend["React + Vite Kliens<br/>:3000"]
+    Frontend -->|REST API / JSON + Bearer JWT| API["ASP.NET Core Web API<br/>:8000"]
+    API --> Auth["Hitelesítés & RBAC Policy-k"]
+    API --> Services["Háttérszolgáltatások<br/>(NoShow, KeyClosing, Notifications)"]
     API --> EF["Entity Framework Core 8"]
-    EF --> DB[("SQL Server 2022<br/>KeyAndRoomDb")]
-    API --> Swagger["Swagger / OpenAPI<br/>Development"]
-    CI["GitHub Actions"] -.-> API
-    CI -.-> Frontend
+    EF --> DB[("Microsoft SQL Server 2022<br/>:1433 (KeyAndRoomDb)")]
+    DB --> Volume[("mssql-data perzisztens volume")]
 ```
 
-Docker Compose három szolgáltatást indít közös bridge hálózaton:
+---
 
-```mermaid
-flowchart TB
-    FE["frontend :3000"] --> BE["backend :8000"]
-    BE --> SQL[("mssql :1433")]
-    BE -. "startup: APPLY_MIGRATIONS=true" .-> SQL
-    SQL --> Volume[("mssql-data volume")]
-```
-
-## Elkészült backend
-
-### Hitelesítés és rendszer
-
-- `POST /api/auth/login` – felhasználónév/jelszó ellenőrzése és JWT kiadása.
-- `POST /api/auth/logout` – kliensoldali token-törléshez visszajelzés.
-- `GET /api/auth/me` – aktuális felhasználó adatai.
-- `GET /api/health` – API- és adatbázis-kapcsolat ellenőrzése.
-- JWT issuer, audience, élettartam és legalább 32 bájtos aláírókulcs validálása.
-- Üres adatbázisnál opcionális, egyszeri admin bootstrap BCrypt jelszóhash-sel.
-- `Adminisztrator`, `Portas`, `Oktato`, `UzemeltetesiIgazgato` szerepkörök és
-  ezekre épülő policy-k.
-
-### Üzleti végpontok
-
-| Modul | Végpontok | Állapot |
-|---|---|---|
-| Felhasználók | `/api/users` | Kész, adminisztrátori CRUD és szerepkörmódosítás |
-| Termek | `/api/rooms` | Kész, CRUD, elérhetőség és teremhez tartozó kulcsok |
-| Kulcsok | `/api/keys` | Kész, CRUD, státusz és mozgáslista |
-| Mesterkulcs-jogosultság | `/api/keys/{id}/master-access` | Kész, admin grant/revoke és egyediségvédelem |
-| Foglalások | `/api/bookings` | Kész, saját/listázás, CRUD, átfedés- és karbantartás-ellenőrzés |
-| Kulcsmozgások | `/api/key-movements` | Kész, kiadás, visszavétel, lista, részlet, overdue |
-| Hibajegyek | `/api/tickets` | Kész, létrehozás, listázás, részlet és státuszkezelés |
-| Karbantartás | `/api/maintenance` | Kész, admin CRUD és foglalásütközés-védelem |
-| Megbízhatóság | `/api/reliability` | Kész, pontszámok, események és admin korrekció |
-| Értesítések | `/api/notifications` | Kész, saját értesítések listázása és olvasottnak jelölése |
-| Rendszeradminisztráció | `/api/parameters`, `/api/audit` | Kész, paraméterek és auditnapló lekérdezése/módosítása |
-| Riportok | `/api/reports` | Kész, napi/heti, teremkihasználtsági, kulcsforgalmi és megbízhatósági riport |
-
-Az összes végpont részletes kérés-/válaszformátuma és jogosultsága a
-[docs/API_DESIGN.md](./docs/API_DESIGN.md) fájlban található. Development
-környezetben a Swagger UI a `http://localhost:8000/swagger` címen érhető el.
-
-### Adatmodell és integritás
+## Adatbázis ER-modell
 
 ```mermaid
 erDiagram
-    Felhasznalo ||--o{ Foglalas : letrehoz
-    Terem ||--o{ Foglalas : tartozik
-    Terem ||--o{ Kulcs : hasznal
-    Kulcs ||--o{ Kulcsmozgas : mozgas
-    Foglalas ||--o{ Kulcsmozgas : kapcsolodik
-    Kulcs ||--o{ MesterkulcsJogosultsag : jogosultsag
-    Felhasznalo ||--o{ MesterkulcsJogosultsag : kap
-    Terem ||--o{ KarbantartasiIdosav : zarva
-    Felhasznalo ||--o{ MegbizhatosagiEsemeny : pontoz
-    Felhasznalo ||--o{ AuditLog : vegrehajt
+
+    FELHASZNALOK {
+        int Id PK
+        string Username UK
+        string Email UK
+        string JelszoHash
+        string Nev
+        date SzuletesiDatum
+        string Role
+        datetime CreatedAt
+        datetime UpdatedAt
+    }
+
+    TERMEK {
+        int Id PK
+        string Nev
+        int Kapacitas
+        string Leiras
+        boolean Aktivalva
+    }
+
+    KULCSOK {
+        int Id PK
+        int TeremId FK
+        string Szam UK
+        string Tipus
+        boolean Aktivalva
+    }
+
+    KULCSTEREM {
+        int KulcsId PK, FK
+        int TeremId PK, FK
+    }
+
+    MESTERKULCS_JOGOSULTSAGOK {
+        int Id PK
+        int KulcsId FK
+        int FelhasznaloId FK
+    }
+
+    FOGLALASOK {
+        int Id PK
+        int FelhasznaloId FK
+        int TeremId FK
+        datetime StartTime
+        datetime EndTime
+        string Status
+    }
+
+    KULCSMOZGASOK {
+        int Id PK
+        int KulcsId FK
+        int FoglalasId FK
+        int AtvevoFelhasznaloId FK
+        int OperatorId FK
+        string MozgasTipus
+        datetime Idopont
+        string Megjegyzes
+    }
+
+    KARBANTARTASI_IDOSAVOK {
+        int Id PK
+        int TeremId FK
+        int FelhasznaloId FK
+        datetime StartTime
+        datetime EndTime
+        string Leiras
+    }
+
+    HIBAJEGYEK {
+        int Id PK
+        int TeremId FK
+        int FelhasznaloId FK
+        string Kategoria
+        string Leiras
+        string Statusz
+    }
+
+    MEGBIZHATOSAGI_ESEMENYEK {
+        int Id PK
+        int FelhasznaloId FK
+        int KulcsId FK
+        int FoglalasId FK
+        int KiadasiKulcsmozgasId FK
+        int LetrehozoFelhasznaloId FK
+        string EsemenyTipus
+        int Pont
+        boolean Automatikus
+        datetime EredetiHatarido
+        datetime TenylegesLeadasIdeje
+    }
+
+    AUDIT_LOGOK {
+        int Id PK
+        int FelhasznaloId FK
+        string MuveletTipus
+        string EntitasTipus
+        int EntitasId
+        string AutomationKey
+        string RegiErtek
+        string UjErtek
+        string Indoklas
+        datetime LetrehozasIdeje
+    }
+
+    ERTESITESEK {
+        int Id PK
+        int FoglalasId FK
+        string ErtesitesTipus
+        datetime IdoPont
+        string Allapot
+        string AutomationKey
+    }
+
+    RENDSZERPARAMETEREK {
+        string Kulcs PK
+        string Ertek
+        string Leiras
+        datetime ModositasIdeje
+    }
+
+    %% Felhasznalok es teremfoglalasok
+    FELHASZNALOK ||--o{ FOGLALASOK : "letrehozza"
+    TERMEK ||--o{ FOGLALASOK : "helyszine"
+
+    %% Termek es kulcsok
+    TERMEK ||--o{ KULCSOK : "rendelkezik"
+
+    %% Mesterkulcsok es az altaluk nyithato termek
+    KULCSOK ||--o{ KULCSTEREM : "hozzarendeles"
+    TERMEK ||--o{ KULCSTEREM : "megnyithato"
+
+    %% Mesterkulcs felveteli jogosultsagok
+    KULCSOK ||--o{ MESTERKULCS_JOGOSULTSAGOK : "jogosultsag"
+    FELHASZNALOK ||--o{ MESTERKULCS_JOGOSULTSAGOK : "rendelkezik"
+
+    %% Fizikai kulcsmozgások
+    KULCSOK ||--o{ KULCSMOZGASOK : "mozgasnaplo"
+    FOGLALASOK o|--o{ KULCSMOZGASOK : "kapcsolodo foglalas"
+    FELHASZNALOK o|--o{ KULCSMOZGASOK : "atvevo"
+    FELHASZNALOK ||--o{ KULCSMOZGASOK : "operator"
+
+    %% Karbantartasi idosavok
+    TERMEK ||--o{ KARBANTARTASI_IDOSAVOK : "karbantartas"
+    FELHASZNALOK ||--o{ KARBANTARTASI_IDOSAVOK : "rogziti"
+
+    %% Hibajegyek
+    TERMEK ||--o{ HIBAJEGYEK : "hibas terem"
+    FELHASZNALOK ||--o{ HIBAJEGYEK : "bejelenti"
+
+    %% Megbizhatosagi esemenyek
+    FELHASZNALOK ||--o{ MEGBIZHATOSAGI_ESEMENYEK : "erintett felhasznalo"
+    KULCSOK o|--o{ MEGBIZHATOSAGI_ESEMENYEK : "erintett kulcs"
+    FOGLALASOK o|--o{ MEGBIZHATOSAGI_ESEMENYEK : "kapcsolodo foglalas"
+    KULCSMOZGASOK o|--o{ MEGBIZHATOSAGI_ESEMENYEK : "kiadasi mozgas"
+    FELHASZNALOK ||--o{ MEGBIZHATOSAGI_ESEMENYEK : "letrehozo"
+
+    %% Audit naplozas
+    FELHASZNALOK o|--o{ AUDIT_LOGOK : "muveletet vegzi"
+    
+    %% Foglalasi ertesitesek
+    FOGLALASOK ||--o{ ERTESITESEK : "ertesiteseket kap"
 ```
 
-Az EF Core modell jelenleg 13 entitást tartalmaz: felhasználó, terem, kulcs,
-kulcs–terem kapcsolat, mesterkulcs-jogosultság, foglalás, kulcsmozgás,
-karbantartási idősáv, hibajegy, értesítés, megbízhatósági esemény, auditnapló
-és rendszerparaméter. A `SaveChanges` foglalás-átfedést és karbantartási
-ütközést ellenőriz; a felhasználónév, e-mail és mesterkulcs-hozzáférés egyedi.
+---
 
-## Üzleti szabályok, amelyek már a backendben vannak
+## Gyorsindítás (Docker Compose)
 
-- A foglalási idők egy napon belül, 08:00–20:00 között, 45 perces rácson
-  és 45 perces egységekben validálódnak.
-- Aktív foglalások nem fedhetik egymást; `Megszuntetve` és `NoShow` nem blokkol.
-- Karbantartási idősávval átfedő foglalás nem menthető.
-- A megbízhatósági események az aktuális tanévben 0–100 közé korlátozott
-  pontszámot adnak, az előzmények és auditbejegyzések megmaradnak.
-- A szerepkörök és a védett műveletek backend oldalon is ellenőrzöttek.
-- A rendszerparaméterek és adminisztrátori korrekciók auditálódnak.
-
-## Fejlesztési állapot és további feladatok
-
-| Tétel | Jelenlegi állapot | Következő munka |
-|---|---|---|
-| Frontend domainfelület | Vite starter képernyő látható | Login, szerepkörös navigáció és üzleti oldalak elkészítése |
-| Foglalás vége előtti értesítés | Backend oldali háttérfeldolgozás és értesítési API elérhető | Frontend megjelenítés és kézbesítési csatorna |
-| Automatikus no-show feldolgozás | Idempotens háttérfeldolgozás elérhető | Üzemeltetési megfigyelhetőség |
-| Napi kulcszárás | Háttérfeldolgozás elérhető | Üzemeltetési megfigyelhetőség |
-| Értesítési csatorna | In-app értesítések érhetők el az API-n keresztül; e-mail/push kézbesítés nincs | Kézbesítési stratégia és konfiguráció |
-| Production üzemeltetés | Compose fejlesztési/teszt futtatásra alkalmas | HTTPS, szűkített CORS, titokkezelés, monitoring és backup |
-| Swagger elérhetőség | Csak Development környezetben | Tudatos production policy és publikált API-specifikáció |
-| `/weatherforecast` | Template maradvány végpont | Törlés a backend takarításakor |
-
-## Indítás
-
-### Docker Compose
-
+### 1. Környezeti változók előkészítése
+Másold le a mellékelt minta-fájlt, és állíts be saját, biztonságos jelszavakat:
 ```bash
 cp .env.example .env
 ```
+*(Windows PowerShell esetén: `Copy-Item .env.example .env`)*
 
-Windows PowerShell alatt:
+A `.env` fájlban add meg a kulcsokat:
+- `MSSQL_SA_PASSWORD`: Erős adatbázis rendszergazda jelszó.
+- `JWT_SIGNING_KEY`: Legalább 32 bájtos véletlenszerű kulcs (pl. `openssl rand -base64 48`).
+- `BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD`: Az induló adminisztrátori fiók adatai.
+- *(Opcionális)* `BOOTSTRAP_DEMO_USERS_ENABLED=true`: Automatikus tesztfelhasználók generálása a 4 szerepkörhöz.
 
-```powershell
-Copy-Item .env.example .env
+### 2. Alkalmazás indítása konténerben
+```bash
+docker compose up --build -d
 ```
 
-A tényleges változóneveket és a kötelező értékeket a `.env.example` és a `docker-compose.yml` határozza meg. A `.env` fájlt ne töltsd fel a Git repositoryba, és valódi jelszót, tokent vagy egyéb titkot ne commitolj.
-
-A Docker Compose az `ASPNETCORE_ENVIRONMENT` változó hiányában `Production` környezetben indítja a backendet. Cseréld le az `.env.example` helyőrzőit az `.env` fájlban egyedi `MSSQL_SA_PASSWORD`, `JWT_ISSUER`, `JWT_AUDIENCE` és `JWT_SIGNING_KEY` értékekre. A JWT-aláírókulcs legalább 32 bájt legyen; például `openssl rand -base64 48` paranccsal állíthatsz elő véletlen értéket. A példafájlban lévő értékek csak helyőrzők, éles környezetben nem használhatók; hiányzó vagy rövid kulccsal az alkalmazás nem indul el.
-
-Helyi fejlesztéshez `ASPNETCORE_ENVIRONMENT=Development` használható. Ebben a környezetben a [backend/appsettings.Development.json](./backend/appsettings.Development.json) tartalmaz egy kizárólag fejlesztéshez használható JWT-kulcsot; ezt az értéket éles környezetben tilos használni. Az `appsettings.json` nem tartalmaz aláírókulcsot.
-
-### Első indítás: adminisztrátor inicializálása
-
-Üres adatbázis esetén a migrációk után a backend egyetlen adminisztrátori fiókot hoz létre a `BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD` változók alapján. A felhasználónév 3–50 ASCII betű, szám, pont, aláhúzás vagy kötőjel lehet; a jelszó legalább 12, legfeljebb 72 UTF-8 bájt legyen. A jelszó BCrypt hash-ként kerül mentésre. Hiányos vagy érvénytelen inicializáló adatokkal az üres adatbázisú alkalmazás egyértelmű hibával leáll.
-
-Az inicializálás csak akkor történik meg, ha az adatbázisban még nincs felhasználó. Az első sikeres indulás után vedd ki a bootstrap felhasználónevet és jelszót a `.env` fájlból, és ne tárold őket forráskódban vagy más nem biztonságos helyen. Nincs nyilvános admin-létrehozó API; a bejelentkezés a `POST /api/auth/login` végponton történik.
-
-A JWT `sub` claimje az adatbázisbeli felhasználóazonosító, a `role` claim pedig az alábbi kanonikus értékek egyike legyen: `Oktato`, `Portas`, `Adminisztrator`, `UzemeltetesiIgazgato`.
-
-A szerepkörneveket normalizáló migráció a korábban eltárolt értékeket ezekre a kanonikus ASCII értékekre alakítja át; a fiókok egyéb adatait nem módosítja.
-
-## Indítás Docker Compose segítségével
-
-A repository gyökérkönyvtárában futtasd:
-
+Az elindult szolgáltatások ellenőrzése:
 ```bash
-# töltsd ki egyedi MSSQL-, JWT- és szükség esetén bootstrap-admin értékekkel
-docker compose up --build -d
 docker compose ps
 curl http://localhost:8000/api/health
 ```
 
-Leállítás:
+### 3. Elérhetőségek és portok
 
+| Szolgáltatás | Elérési cím | Leírás |
+| :--- | :--- | :--- |
+| **Frontend UI** | `http://localhost:3000` | Webes felhasználói felület és bejelentkezés |
+| **Backend REST API** | `http://localhost:8000` | Fő API kiszolgáló |
+| **Swagger UI** | `http://localhost:8000/swagger` | API dokumentáció (Development környezetben) |
+| **MSSQL Adatbázis** | `localhost:1433` | SQL Server közvetlen elérés (DBeaver, Azure Data Studio stb.) |
+
+Leállítás az adatok megőrzésével:
 ```bash
 docker compose down
 ```
 
-A `mssql-data` volume megőrzéséhez ne használd a `docker compose down -v`
-parancsot. A kötelező és opcionális környezeti változókat az
-[.env.example](./.env.example) és a [docker-compose.yml](./docker-compose.yml)
-határozza meg.
+---
 
-### Helyi fejlesztés
+## Helyi fejlesztés és tesztelés
 
-#### Demo-fiókok a bemutatóhoz
-
-Az `.env` fájlban állíts be négy külön, erős jelszót, majd kifejezetten
-kapcsold be a demo-fiókok létrehozását:
-
-```dotenv
-BOOTSTRAP_DEMO_USERS_ENABLED=true
-DEMO_OKTATO_USERNAME=demo.oktato
-DEMO_OKTATO_PASSWORD=<egyedi, legalább 12 karakteres jelszó>
-DEMO_PORTAS_USERNAME=demo.portas
-DEMO_PORTAS_PASSWORD=<egyedi, legalább 12 karakteres jelszó>
-DEMO_ADMIN_USERNAME=demo.admin
-DEMO_ADMIN_PASSWORD=<egyedi, legalább 12 karakteres jelszó>
-DEMO_IGAZGATO_USERNAME=demo.igazgato
-DEMO_IGAZGATO_PASSWORD=<egyedi, legalább 12 karakteres jelszó>
-```
-
-Ezután indítsd újra a backendet (például `docker compose up --build -d
-backend`). A bootstrap kizárólag engedélyezéskor fut, mind a négy fiók
-konfigurációját megköveteli, a jelszavakat BCrypt hash-ként tárolja, és
-felhasználónévütközés esetén a meglévő fiókot változatlanul hagyja. A
-bootstrap nem ír jelszót a naplóba vagy a forráskódba. A jelszavak legfeljebb
-72 UTF-8 bájtosak legyenek. A jelszavakat ne használd újra valódi fiókoknál.
-
-A jelenlegi fejlesztői Compose-beállításban rögzített portkiosztás:
-
-| Szolgáltatás | Gazdagépen elérhető port | Konténerport | Megjegyzés |
-|---|---:|---:|---|
-| Frontend | `3000` | `3000` | Böngészőből: `http://localhost:3000` |
-| Backend API | `8000` | `8000` | Az API gazdagépről: `http://localhost:8000` |
-| Microsoft SQL Server | `1433` | `1433` | Adatbázis-kapcsolathoz; a hitelesítési adatokat a `.env` tartalmazza |
-
-A portok a `docker-compose.yml` fájlban ellenőrizhetők. Ha ott változnak, ezt a táblázatot is frissíteni kell.
-
-## API-ellenőrzés
-
-A backend az alábbi ellenőrző és adatlekérdező végpontokat biztosítja:
-
-### 1. Egészségellenőrzés (Health Check)
-
-```text
-GET http://localhost:8000/api/health
-```
-
-- **Sikeres válasz (HTTP 200 OK):**
-```json
-{
-  "status": "ok",
-  "database": "connected"
-}
-```
-- **Hiba esetén (HTTP 503 Service Unavailable):**
-```json
-{
-  "status": "unhealthy",
-  "database": "disconnected"
-}
-```
-
-### 2. Termek listázása (Rooms Query)
-
-```text
-GET http://localhost:8000/api/rooms
-```
-
-- **Válasz (HTTP 200 OK):** Termek listája DTO formátumban (üres lista, ha még nincs rögzített terem):
-```json
-[
-  {
-    "id": 1,
-    "nev": "I. előadó",
-    "kapacitas": 120,
-    "leiras": "Főépület 1. emelet",
-    "aktivalva": true
-  }
-]
-```
-
-### 3. Egy adott terem lekérdezése
-
-```text
-GET http://localhost:8000/api/rooms/{id}
-```
-
-- **Sikeres válasz (HTTP 200 OK):** A kiválasztott terem DTO adatai.
-- **Ha nem található (HTTP 404 Not Found):** `{"message": "A(z) {id} azonosítójú terem nem található."}`
-
-### Mesterkulcs-jogosultságok
-
-A jogosultságok kezeléséhez hitelesített, `Adminisztrator` szerepkörű felhasználó szükséges. A POST-kérés JSON-törzse:
-
-```json
-{ "userId": 123 }
-```
-
-| Metódus | Útvonal | Művelet |
-|---|---|---|
-| `GET` | `/api/keys/{id}/master-access` | A mesterkulcshoz jogosult oktatók listázása |
-| `POST` | `/api/keys/{id}/master-access` | Jogosultság adása egy oktatónak |
-| `DELETE` | `/api/keys/{id}/master-access/{userId}` | Jogosultság visszavonása |
-
-A végpontok csak `Mesterkulcs` típusú kulcsot fogadnak el; hozzárendeléskor a megadott felhasználónak `Oktato` szerepkörűnek kell lennie.
-
-## Karbantartási idősávok API
-
-- `GET /api/maintenance?teremId=1&startTime=2026-11-02T08:00:00Z&endTime=2026-11-02T18:00:00Z` – idősávok listázása; minden szűrő opcionális, az időtartomány az átfedő idősávokat adja vissza.
-- `GET /api/maintenance/{id}` – idősáv részletei.
-- `POST /api/maintenance` – új idősáv rögzítése.
-- `PUT /api/maintenance/{id}` – idősáv módosítása.
-- `DELETE /api/maintenance/{id}` – idősáv törlése.
-
-A karbantartási listázás és részletezés hitelesítést igényel, a létrehozás, módosítás és törlés pedig kizárólag `Adminisztrator` jogosultságú, adatbázisban is megfelelő szerepkörrel rendelkező felhasználónak engedélyezett. A létrehozási és módosítási kérések törzse: `teremId`, `startTime`, `endTime`, valamint opcionálisan `leiras`. A foglalással ütköző idősáv `409 Conflict` választ eredményez; a megszüntetett foglalások nem blokkolják a karbantartást.
-
-## Megbízhatósági pontozás API
-
-- `GET /api/reliability/users/{userId}` – az oktató aktuális tanévi pontszáma (0–100), valamint az aktuális következmény.
-- `GET /api/reliability/users/{userId}/events` – az oktató összes pontozási eseménye, beleértve a korábbi tanévek előzményeit.
-- `GET /api/reliability/my` – a bejelentkezett oktató saját aktuális tanévi pontszáma.
-- `POST /api/reliability/correction` – adminisztrátori pontkorrekció; törzse: `userId`, `pont` (nullától eltérő egész szám, negatív korrekció is lehetséges) és kötelező, legfeljebb 500 karakteres `indoklas`.
-
-A pontszámot a backend az eseményekből, időrendi sorrendben számítja, és minden esemény után 0–100 közé korlátozza. A tanév szeptember 1-jén kezdődik; a korábbi tanévek eseményei és auditbejegyzései megmaradnak. A 10–19 pontos érték figyelmeztetést, a 20–29 pontos kötelező elbeszélgetést, a 30 vagy több pont elbeszélgetést és kulcskezelési/biztonsági tréninget jelent. Az oktató csak a saját adatait kérheti le, az adminisztrátor és az üzemeltetési igazgató más oktató adatait is megtekintheti. A korrekció csak adatbázisban is adminisztrátori szerepkörű felhasználónak engedélyezett; a pontozási esemény és az auditbejegyzés egy tranzakcióban kerül mentésre.
-
-## Adatbázis és migrációk
-
-Az adatbázis sémáját Entity Framework Core migrációk verziózzák (`backend/Migrations`).
-A kezdeti migráció neve: `InitialCreate`.
-
-### Build és tesztelés
-
+### Backend fejlesztés és tesztek (.NET 8)
 ```bash
-dotnet build ProjektLabor.sln --configuration Release
+# Fordítás
+dotnet build ProjektLabor.sln
+
+# Automatikus egység- és integrációs tesztek futtatása
 dotnet test ProjektLabor.sln --configuration Release \
   --filter "FullyQualifiedName!~SqlServerIntegrationTests"
 ```
 
-Az SQL Server-integrációs teszt valódi SQL Serverhez csatlakozik, és a
-`SQLSERVER_TEST_CONNECTION` környezeti változóban megadott szerveren egyedi
-ideiglenes adatbázist hoz létre, majd a futás végén törli azt. Csak eldobható
-fejlesztői vagy teszt SQL Serveren futtasd, amelyen a tesztfelhasználónak
-adatbázis-létrehozási és -törlési jogosultsága van:
-
-```bash
-SQLSERVER_TEST_CONNECTION='Server=localhost,1433;Database=master;User Id=sa;Password=<jelszo>;TrustServerCertificate=True;Encrypt=False' \
-  dotnet test backend.Tests/backend.Tests.csproj
-```
-
-Frontend lint és build:
-
+### Frontend fejlesztés (Node.js 20+)
 ```bash
 cd frontend
 npm ci
@@ -340,59 +278,10 @@ npm run lint
 npm run build
 ```
 
-Az SQL Server-integrációs tesztet csak külön, eldobható SQL Serveren futtasd
-a `SQLSERVER_TEST_CONNECTION` változó megadásával; a teszt külön ideiglenes
-adatbázisokon futtatja a migrációkat, majd a demo-bootstrapot, BCrypt-hasheket
-és mind a négy szerepkör hitelesítését ellenőrzi. A normál CI ezt a tesztet
-szándékosan kihagyja. Példa:
+---
 
-```bash
-SQLSERVER_TEST_CONNECTION='Server=localhost,1433;Database=DisposableProjektLaborTest;User Id=sa;Password=<tesztjelszó>;TrustServerCertificate=True' \
-  dotnet test backend.Tests/backend.Tests.csproj --configuration Release \
-  --filter "FullyQualifiedName~SqlServerIntegrationTests"
-```
+## Kapcsolódó dokumentációk
 
-A tesztek a létrehozott ideiglenes adatbázisokat a futás végén törlik. A normál
-CI ezt a tesztet szándékosan kihagyja.
-
-## CI
-
-A [CI workflow](./.github/workflows/ci.yml) `main` push és pull request esetén:
-
-1. restore/build/test futtat a backendre,
-2. lintet és buildet futtat a frontendben,
-3. validálja a Compose konfigurációt és megkísérli a Docker buildet.
-
-## Kapcsolódó dokumentumok
-
-## Fejlesztési konvenciók
-
-A módosításokat külön brancheken készítsétek, majd Pull Requesten keresztül integráljátok a `main` ágba. A projektben használt commitprefixek:
-
-- `feat:` – új funkció
-- `fix:` – hibajavítás
-- `refactor:` – belső átszervezés
-- `test:` – tesztek hozzáadása vagy módosítása
-- `docs:` – dokumentáció
-
-A változtatás legyen kicsi, célzott, és a Pull Request írja le a módosítás célját, a tesztelés eredményét, illetve az esetleges ismert korlátokat.
-
-## Megvalósított funkciók és további terv
-
-- A backend megvalósítja a terem-, kulcs-, foglalás-, kulcsmozgás-, hibajegy-,
-  karbantartási, megbízhatósági, rendszeradminisztrációs és riport-végpontokat.
-- JWT-hitelesítés, kanonikus szerepkörök és endpoint-szintű RBAC-policyk
-  védik a backend műveleteit.
-- A foglalási végpontok ellenőrzik az időintervallumot, a terem állapotát,
-  valamint a foglalási és karbantartási ütközéseket.
-- A kulcsmozgásokhoz auditnaplózás és az adatbázisban tranzakciós zárolás
-  tartozik.
-- A frontend jelenleg Vite kezdőfelület; a domain felhasználói felület és az
-  értesítések felhasználói megjelenítése további fejlesztési terület.
-
-## Ismert korlátok / frissítendő adatok
-
-A README-t a repository tényleges állapotával együtt kell karbantartani. Az API pontos adatlekérdező útvonalát, az alkalmazott .NET-verziót, az EF Core provider/verziót, a migrációk futtatásának pontos módját és a CI workflow fájlnevét csak akkor szabad konkrét értékként feltüntetni, ha azokat a kódbázisban ellenőriztük.
-- [Projektterv és megvalósítási állapot](./projektterv.md)
-- [API-tervezési dokumentáció](./docs/API_DESIGN.md)
-- [Adatbázis- és migrációs megjegyzések](./database/README.md)
+- [Projektterv és részletes megvalósítási leírás](./projektterv.md) – célok, üzleti szabályok, komponens-architektúra és roadmap.
+- [REST API tervezési dokumentáció](./docs/API_DESIGN.md) – részletes végpont-leírások, kérés- és válaszformátumok (DTO-k).
+- [Adatbázis és migrációs segédlet](./database/README.md) – EF Core migrációs parancsok és adatbázis megjegyzések.
