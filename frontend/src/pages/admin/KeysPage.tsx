@@ -46,20 +46,29 @@ export default function KeysPage() {
   const [instructors, setInstructors] = useState<UserOption[]>([])
   const [selectedInstructorId, setSelectedInstructorId] = useState('')
 
-  const loadCatalog = useCallback(async () => {
+  const fetchCatalog = useCallback(async () => {
     const [keyResponse, roomResponse] = await Promise.all([
       client.get<KeyItem[]>('/keys'),
       client.get<RoomOption[]>('/rooms'),
     ])
-    setKeys(keyResponse.data)
-    setRooms(roomResponse.data)
+    return { keys: keyResponse.data, rooms: roomResponse.data }
   }, [])
+
+  const loadCatalog = useCallback(async () => {
+    const catalog = await fetchCatalog()
+    setKeys(catalog.keys)
+    setRooms(catalog.rooms)
+  }, [fetchCatalog])
 
   useEffect(() => {
     let ignore = false
-    loadCatalog()
-      .then(() => {
-        if (!ignore) setError('')
+    fetchCatalog()
+      .then((catalog) => {
+        if (!ignore) {
+          setKeys(catalog.keys)
+          setRooms(catalog.rooms)
+          setError('')
+        }
       })
       .catch((err: unknown) => {
         if (!ignore) {
@@ -73,7 +82,7 @@ export default function KeysPage() {
     return () => {
       ignore = true
     }
-  }, [loadCatalog])
+  }, [fetchCatalog])
 
   const openCreate = () => {
     setEditingKey(null)

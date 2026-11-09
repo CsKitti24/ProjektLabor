@@ -114,6 +114,9 @@ public sealed class SqlServerIntegrationTests
                     testDate.AddMinutes(1));
 
                 await db.Database.MigrateAsync();
+                instructor.PinHash = BCryptHasher.HashPassword("1234");
+                await db.SaveChangesAsync();
+
                 var oldRowsAfterMigration = await db.Kulcsmozgasok
                     .AsNoTracking()
                     .OrderBy(movement => movement.Id)

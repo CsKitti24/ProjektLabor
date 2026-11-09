@@ -21,6 +21,7 @@ interface UserOption {
 export default function KeyIssuePage() {
   const [keys, setKeys] = useState<KeyItem[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
+  const [recipientsForKeyId, setRecipientsForKeyId] = useState('')
   const [keyId, setKeyId] = useState('')
   const [userId, setUserId] = useState('')
   const [pin, setPin] = useState('')
@@ -30,6 +31,7 @@ export default function KeyIssuePage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const recipientOptions = recipientsForKeyId === keyId ? users : []
 
   const fetchKeys = useCallback(() => {
     client
@@ -56,22 +58,17 @@ export default function KeyIssuePage() {
   }, [fetchKeys])
 
   useEffect(() => {
-    if (!keyId) {
-      setUsers([])
-      setUserId('')
-      return
-    }
+    if (!keyId) return
 
     let ignore = false
-    setError('')
-    setUsers([])
-    setUserId('')
     client
       .get<UserOption[]>('/key-movements/recipients', { params: { kulcsId: Number(keyId) } })
       .then((res) => {
         if (!ignore) {
+          setError('')
           setUsers(res.data)
-          if (res.data.length > 0) setUserId(String(res.data[0].id))
+          setRecipientsForKeyId(keyId)
+          setUserId(res.data.length > 0 ? String(res.data[0].id) : '')
         }
       })
       .catch((err: unknown) => {
@@ -87,7 +84,8 @@ export default function KeyIssuePage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!keyId || !userId || !pin || !teremAllapot.trim()) {
+    if (!keyId || !userId || !recipientOptions.some((user) => String(user.id) === userId) ||
+      !pin || !teremAllapot.trim()) {
       setError('Válaszd ki a kulcsot és az átvevőt, add meg a PIN-kódot és a terem állapotát.')
       return
     }
@@ -175,7 +173,7 @@ export default function KeyIssuePage() {
             <label className="form-label" htmlFor="issue-user">
               Jogosult átvevő *
             </label>
-            {users.length > 0 ? (
+            {recipientOptions.length > 0 ? (
               <select
                 id="issue-user"
                 className="form-select"
@@ -183,7 +181,7 @@ export default function KeyIssuePage() {
                 onChange={(e) => setUserId(e.target.value)}
                 required
               >
-                {users.map((u) => (
+                {recipientOptions.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.nev ? `${u.nev} (${u.username})` : u.username}
                   </option>
@@ -232,7 +230,7 @@ export default function KeyIssuePage() {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={isLoading || keys.length === 0 || users.length === 0}
+              disabled={isLoading || keys.length === 0 || recipientOptions.length === 0}
             >
               {isLoading ? (
                 <>
