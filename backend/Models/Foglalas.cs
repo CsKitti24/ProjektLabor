@@ -27,6 +27,9 @@ namespace ProjektLabor.Models
         [Required]
         public string Status { get; set; } = string.Empty; // Expected values: Aktiv, NoShow, Megszuntetve, Kesz
 
+        [MaxLength(500)]
+        public string? SpecialisIgenyek { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

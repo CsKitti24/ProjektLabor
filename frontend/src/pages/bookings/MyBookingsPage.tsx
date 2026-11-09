@@ -12,6 +12,7 @@ interface Booking {
   endTime?: string
   date?: string
   status?: string
+  specialisIgenyek?: string
   note?: string
 }
 
@@ -131,6 +132,7 @@ export default function MyBookingsPage() {
                 <th>Terem</th>
                 <th>Dátum</th>
                 <th>Idősáv</th>
+                <th>Speciális igények</th>
                 <th>Státusz</th>
                 <th style={{ textAlign: 'right' }}>Művelet</th>
               </tr>
@@ -138,7 +140,7 @@ export default function MyBookingsPage() {
             <tbody>
               {bookings.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 36 }}>
+                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 36 }}>
                     Jelenleg nincs aktív foglalásod.
                   </td>
                 </tr>
@@ -154,6 +156,15 @@ export default function MyBookingsPage() {
                       <td style={{ fontWeight: 600, color: 'var(--color-gray-900)' }}>{roomName}</td>
                       <td>{dateStr}</td>
                       <td>{timeRangeStr}</td>
+                      <td style={{ color: 'var(--color-gray-600)', fontSize: 13 }}>
+                        {b.specialisIgenyek ? (
+                          <span style={{ background: 'var(--color-gray-100)', padding: '2px 8px', borderRadius: 4 }}>
+                            {b.specialisIgenyek}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td>{getStatusBadge(b.status)}</td>
                       <td style={{ textAlign: 'right' }}>
                         {isCancelable && (

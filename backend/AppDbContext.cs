@@ -108,16 +108,34 @@ namespace ProjektLabor.Data
             );
         }
 
+        private static readonly System.Threading.SemaphoreSlim _saveLock = new(1, 1);
+
         public override int SaveChanges(bool acceptAllChangesOnSuccess)
         {
-            ValidateBookings();
-            return base.SaveChanges(acceptAllChangesOnSuccess);
+            _saveLock.Wait();
+            try
+            {
+                ValidateBookings();
+                return base.SaveChanges(acceptAllChangesOnSuccess);
+            }
+            finally
+            {
+                _saveLock.Release();
+            }
         }
 
         public override async System.Threading.Tasks.Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, System.Threading.CancellationToken cancellationToken = default)
         {
-            ValidateBookings();
-            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            await _saveLock.WaitAsync(cancellationToken);
+            try
+            {
+                ValidateBookings();
+                return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            }
+            finally
+            {
+                _saveLock.Release();
+            }
         }
 
         private void ValidateBookings()

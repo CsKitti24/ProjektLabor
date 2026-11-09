@@ -65,52 +65,22 @@ public sealed class SqlServerIntegrationTests
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
 
-                var instructor = CreateUser("Oktato");
-                var keyOperator = CreateUser("Portas");
-                var room = new Terem
-                {
-                    Nev = $"Integration {Guid.NewGuid():N}",
-                    Kapacitas = 20,
-                    Aktivalva = true
-                };
-                db.Felhasznalok.AddRange(instructor, keyOperator);
-                db.Termek.Add(room);
-                await db.SaveChangesAsync();
-
-                var booking = new Foglalas
-                {
-                    FelhasznaloId = instructor.Id,
-                    TeremId = room.Id,
-                    StartTime = testDate.AddHours(-1),
-                    EndTime = testDate.AddHours(1),
-                    Status = "Aktiv"
-                };
-                var key = new Kulcs
-                {
-                    Szam = $"IT-{Guid.NewGuid():N}"[..20],
-                    Tipus = "Osztalykulcs",
-                    TeremId = room.Id,
-                    Aktivalva = true
-                };
-                db.Foglalasok.Add(booking);
-                db.Kulcsok.Add(key);
-                await db.SaveChangesAsync();
-
-                instructorId = instructor.Id;
-                operatorId = keyOperator.Id;
-                bookingId = booking.Id;
-                keyId = key.Id;
+                var legacyData = await InsertLegacySeedDataAsync(db, testDate);
+                instructorId = legacyData.InstructorId;
+                operatorId = legacyData.OperatorId;
+                bookingId = legacyData.BookingId;
+                keyId = legacyData.KeyId;
                 legacyBookingMovementId = await InsertLegacyMovementAsync(
                     db,
-                    key.Id,
-                    booking.Id,
-                    keyOperator.Id,
+                    keyId,
+                    bookingId,
+                    operatorId,
                     testDate);
                 unresolvedMovementId = await InsertLegacyMovementAsync(
                     db,
-                    key.Id,
+                    keyId,
                     null,
-                    keyOperator.Id,
+                    operatorId,
                     testDate.AddMinutes(1));
 
                 await db.Database.MigrateAsync();
@@ -428,6 +398,105 @@ public sealed class SqlServerIntegrationTests
             Role = role
         };
     }
+
+    private static async Task<LegacySeedData> InsertLegacySeedDataAsync(
+        AppDbContext db,
+        DateTime testDate)
+    {
+        var instructorId = await InsertLegacyRowAsync(
+            db,
+            """
+            INSERT INTO [Felhasznalok]
+                ([Username], [Email], [JelszoHash], [Nev], [Role], [CreatedAt], [UpdatedAt])
+            OUTPUT INSERTED.[Id]
+            VALUES
+                (@username, @email, N'integration-test-hash', N'Oktato', N'Oktato', @createdAt, @createdAt);
+            """,
+            ("@username", $"instructor_{Guid.NewGuid():N}"[..20]),
+            ("@email", $"{Guid.NewGuid():N}@test.hu"),
+            ("@createdAt", testDate));
+        var operatorId = await InsertLegacyRowAsync(
+            db,
+            """
+            INSERT INTO [Felhasznalok]
+                ([Username], [Email], [JelszoHash], [Nev], [Role], [CreatedAt], [UpdatedAt])
+            OUTPUT INSERTED.[Id]
+            VALUES
+                (@username, @email, N'integration-test-hash', N'Portas', N'Portas', @createdAt, @createdAt);
+            """,
+            ("@username", $"operator_{Guid.NewGuid():N}"[..20]),
+            ("@email", $"{Guid.NewGuid():N}@test.hu"),
+            ("@createdAt", testDate));
+        var roomId = await InsertLegacyRowAsync(
+            db,
+            """
+            INSERT INTO [Termek] ([Nev], [Kapacitas], [Leiras], [Aktivalva])
+            OUTPUT INSERTED.[Id]
+            VALUES (@name, 20, N'', 1);
+            """,
+            ("@name", $"Integration {Guid.NewGuid():N}"));
+        var bookingId = await InsertLegacyRowAsync(
+            db,
+            """
+            INSERT INTO [Foglalasok]
+                ([FelhasznaloId], [TeremId], [StartTime], [EndTime], [Status], [CreatedAt], [UpdatedAt])
+            OUTPUT INSERTED.[Id]
+            VALUES (@instructorId, @roomId, @startTime, @endTime, N'Aktiv', @createdAt, @createdAt);
+            """,
+            ("@instructorId", instructorId),
+            ("@roomId", roomId),
+            ("@startTime", testDate.AddHours(-1)),
+            ("@endTime", testDate.AddHours(1)),
+            ("@createdAt", testDate));
+        var keyId = await InsertLegacyRowAsync(
+            db,
+            """
+            INSERT INTO [Kulcsok] ([Szam], [Tipus], [Aktivalva], [TeremId])
+            OUTPUT INSERTED.[Id]
+            VALUES (@number, N'Osztalykulcs', 1, @roomId);
+            """,
+            ("@number", $"IT-{Guid.NewGuid():N}"[..20]),
+            ("@roomId", roomId));
+
+        return new LegacySeedData(instructorId, operatorId, bookingId, keyId);
+    }
+
+    private static async Task<int> InsertLegacyRowAsync(
+        AppDbContext db,
+        string commandText,
+        params (string Name, object Value)[] parameters)
+    {
+        var connection = db.Database.GetDbConnection();
+        var closeConnection = connection.State != ConnectionState.Open;
+        if (closeConnection)
+        {
+            await connection.OpenAsync();
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = commandText;
+            foreach (var (name, value) in parameters)
+            {
+                var parameter = command.CreateParameter();
+                parameter.ParameterName = name;
+                parameter.Value = value;
+                command.Parameters.Add(parameter);
+            }
+
+            return Convert.ToInt32(await command.ExecuteScalarAsync());
+        }
+        finally
+        {
+            if (closeConnection)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    private sealed record LegacySeedData(int InstructorId, int OperatorId, int BookingId, int KeyId);
 
     private static async Task<int> InsertLegacyMovementAsync(
         AppDbContext db,

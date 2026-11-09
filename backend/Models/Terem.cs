@@ -18,6 +18,9 @@ namespace ProjektLabor.Models
         [MaxLength(500)]
         public string? Leiras { get; set; }
 
+        [MaxLength(500)]
+        public string? Felszereltseg { get; set; }
+
         public bool Aktivalva { get; set; } = true;
 
         public ICollection<Foglalas> Foglalasok { get; set; } = new List<Foglalas>();

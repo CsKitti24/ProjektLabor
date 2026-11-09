@@ -14,6 +14,8 @@ namespace backend.Tests
 
         public SwaggerEndpointTests(WebApplicationFactory<Program> factory)
         {
+            TestJwtConfiguration.ConfigureEnvironment();
+
             var dbName = "SwaggerTestDb_" + Guid.NewGuid();
             _factory = factory.WithWebHostBuilder(builder =>
             {

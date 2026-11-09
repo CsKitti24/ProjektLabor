@@ -16,7 +16,12 @@ namespace ProjektLabor.Endpoints
                 .WithTags("Rooms");
 
             // R1 – GET /api/rooms
-            group.MapGet("/", async (bool? aktivalva, AppDbContext db, ILogger<Program> logger) =>
+            group.MapGet("/", async (
+                bool? aktivalva,
+                int? minKapacitas,
+                string? felszereltseg,
+                AppDbContext db,
+                ILogger<Program> logger) =>
             {
                 try
                 {
@@ -24,6 +29,19 @@ namespace ProjektLabor.Endpoints
                     if (aktivalva.HasValue)
                     {
                         query = query.Where(t => t.Aktivalva == aktivalva.Value);
+                    }
+
+                    if (minKapacitas.HasValue)
+                    {
+                        query = query.Where(t => t.Kapacitas >= minKapacitas.Value);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(felszereltseg))
+                    {
+                        var term = felszereltseg.Trim();
+                        query = query.Where(t =>
+                            (t.Felszereltseg != null && t.Felszereltseg.Contains(term)) ||
+                            (t.Leiras != null && t.Leiras.Contains(term)));
                     }
 
                     var rooms = await query
@@ -34,6 +52,7 @@ namespace ProjektLabor.Endpoints
                             Nev = t.Nev,
                             Kapacitas = t.Kapacitas,
                             Leiras = t.Leiras,
+                            Felszereltseg = t.Felszereltseg,
                             Aktivalva = t.Aktivalva
                         })
                         .ToListAsync();
@@ -72,6 +91,7 @@ namespace ProjektLabor.Endpoints
                             Nev = t.Nev,
                             Kapacitas = t.Kapacitas,
                             Leiras = t.Leiras,
+                            Felszereltseg = t.Felszereltseg,
                             Aktivalva = t.Aktivalva
                         })
                         .FirstOrDefaultAsync();
@@ -124,6 +144,7 @@ namespace ProjektLabor.Endpoints
                     Nev = request.Nev.Trim(),
                     Kapacitas = request.Kapacitas,
                     Leiras = request.Leiras?.Trim() ?? string.Empty,
+                    Felszereltseg = request.Felszereltseg?.Trim(),
                     Aktivalva = request.Aktivalva
                 };
 
@@ -135,7 +156,7 @@ namespace ProjektLabor.Endpoints
                     muveletTipus: "CREATE",
                     entitasTipus: "Terem",
                     entitasId: room.Id.ToString(),
-                    ujErtek: $"Nev: {room.Nev}, Kapacitas: {room.Kapacitas}, Aktivalva: {room.Aktivalva}");
+                    ujErtek: $"Nev: {room.Nev}, Kapacitas: {room.Kapacitas}, Felszereltseg: {room.Felszereltseg}, Aktivalva: {room.Aktivalva}");
 
                 var result = new RoomDto
                 {
@@ -143,6 +164,7 @@ namespace ProjektLabor.Endpoints
                     Nev = room.Nev,
                     Kapacitas = room.Kapacitas,
                     Leiras = room.Leiras,
+                    Felszereltseg = room.Felszereltseg,
                     Aktivalva = room.Aktivalva
                 };
 
@@ -196,6 +218,12 @@ namespace ProjektLabor.Endpoints
                     room.Leiras = request.Leiras.Trim();
                 }
 
+                if (request.Felszereltseg != null && request.Felszereltseg.Trim() != room.Felszereltseg)
+                {
+                    changes.Add($"Felszereltseg: '{room.Felszereltseg}' -> '{request.Felszereltseg.Trim()}'");
+                    room.Felszereltseg = request.Felszereltseg.Trim();
+                }
+
                 if (request.Aktivalva.HasValue && request.Aktivalva.Value != room.Aktivalva)
                 {
                     changes.Add($"Aktivalva: {room.Aktivalva} -> {request.Aktivalva.Value}");
@@ -220,6 +248,7 @@ namespace ProjektLabor.Endpoints
                     Nev = room.Nev,
                     Kapacitas = room.Kapacitas,
                     Leiras = room.Leiras,
+                    Felszereltseg = room.Felszereltseg,
                     Aktivalva = room.Aktivalva
                 };
 

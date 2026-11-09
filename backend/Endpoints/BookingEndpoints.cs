@@ -59,6 +59,7 @@ namespace ProjektLabor.Endpoints
                         StartTime = f.StartTime,
                         EndTime = f.EndTime,
                         Status = f.Status,
+                        SpecialisIgenyek = f.SpecialisIgenyek,
                         CreatedAt = f.CreatedAt,
                         UpdatedAt = f.UpdatedAt
                     })
@@ -135,6 +136,7 @@ namespace ProjektLabor.Endpoints
                         StartTime = f.StartTime,
                         EndTime = f.EndTime,
                         Status = f.Status,
+                        SpecialisIgenyek = f.SpecialisIgenyek,
                         CreatedAt = f.CreatedAt,
                         UpdatedAt = f.UpdatedAt
                     })
@@ -197,6 +199,7 @@ namespace ProjektLabor.Endpoints
                     StartTime = f.StartTime,
                     EndTime = f.EndTime,
                     Status = f.Status,
+                    SpecialisIgenyek = f.SpecialisIgenyek,
                     CreatedAt = f.CreatedAt,
                     UpdatedAt = f.UpdatedAt
                 };
@@ -275,19 +278,31 @@ namespace ProjektLabor.Endpoints
                     StartTime = request.StartTime,
                     EndTime = request.EndTime,
                     Status = "Aktiv",
+                    SpecialisIgenyek = string.IsNullOrWhiteSpace(request.SpecialisIgenyek) ? null : request.SpecialisIgenyek.Trim(),
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
 
                 db.Foglalasok.Add(booking);
-                await db.SaveChangesAsync();
+                try
+                {
+                    await db.SaveChangesAsync();
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("overlaps with an existing booking") || ex.Message.Contains("overlaps with a maintenance period"))
+                {
+                    if (transaction is not null)
+                    {
+                        await transaction.RollbackAsync();
+                    }
+                    return Results.Conflict(new { message = ex.Message });
+                }
 
                 await auditService.LogAsync(
                     caller,
                     muveletTipus: "CREATE",
                     entitasTipus: "Foglalas",
                     entitasId: booking.Id.ToString(),
-                    ujErtek: $"TeremId: {booking.TeremId}, Start: {booking.StartTime:O}, End: {booking.EndTime:O}");
+                    ujErtek: $"TeremId: {booking.TeremId}, Start: {booking.StartTime:O}, End: {booking.EndTime:O}, Igenyek: {booking.SpecialisIgenyek}");
                 if (transaction is not null)
                 {
                     await transaction.CommitAsync();
@@ -306,6 +321,7 @@ namespace ProjektLabor.Endpoints
                     StartTime = booking.StartTime,
                     EndTime = booking.EndTime,
                     Status = booking.Status,
+                    SpecialisIgenyek = booking.SpecialisIgenyek,
                     CreatedAt = booking.CreatedAt,
                     UpdatedAt = booking.UpdatedAt
                 };
@@ -384,18 +400,34 @@ namespace ProjektLabor.Endpoints
                     booking.Status = canonicalStatus;
                 }
 
+                if (request.SpecialisIgenyek != null)
+                {
+                    booking.SpecialisIgenyek = string.IsNullOrWhiteSpace(request.SpecialisIgenyek) ? null : request.SpecialisIgenyek.Trim();
+                }
+
                 booking.StartTime = newStart;
                 booking.EndTime = newEnd;
                 booking.UpdatedAt = DateTime.UtcNow;
 
-                await db.SaveChangesAsync();
+                try
+                {
+                    await db.SaveChangesAsync();
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("overlaps with an existing booking") || ex.Message.Contains("overlaps with a maintenance period"))
+                {
+                    if (transaction is not null)
+                    {
+                        await transaction.RollbackAsync();
+                    }
+                    return Results.Conflict(new { message = ex.Message });
+                }
 
                 await auditService.LogAsync(
                     caller,
                     muveletTipus: "UPDATE",
                     entitasTipus: "Foglalas",
                     entitasId: id.ToString(),
-                    ujErtek: $"Start: {booking.StartTime:O}, End: {booking.EndTime:O}, Status: {booking.Status}");
+                    ujErtek: $"Start: {booking.StartTime:O}, End: {booking.EndTime:O}, Status: {booking.Status}, Igenyek: {booking.SpecialisIgenyek}");
                 if (transaction is not null)
                 {
                     await transaction.CommitAsync();
@@ -412,6 +444,7 @@ namespace ProjektLabor.Endpoints
                     StartTime = booking.StartTime,
                     EndTime = booking.EndTime,
                     Status = booking.Status,
+                    SpecialisIgenyek = booking.SpecialisIgenyek,
                     CreatedAt = booking.CreatedAt,
                     UpdatedAt = booking.UpdatedAt
                 };

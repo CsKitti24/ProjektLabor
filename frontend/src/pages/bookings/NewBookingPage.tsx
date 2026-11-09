@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { PlusCircle, ArrowLeft, Check, AlertCircle, Calendar } from 'lucide-react'
+import { PlusCircle, ArrowLeft, Check, AlertCircle, Calendar, Filter, Sparkles } from 'lucide-react'
 import client from '../../api/client'
 
 interface Room {
@@ -8,6 +8,8 @@ interface Room {
   nev?: string
   name?: string
   kapacitas?: number
+  leiras?: string
+  felszereltseg?: string
   aktivalva?: boolean
 }
 
@@ -19,6 +21,14 @@ const DEFAULT_SLOTS = [
   { start: '15:00', end: '16:30', label: '5. sáv (15:00 – 16:30)' },
   { start: '16:45', end: '18:15', label: '6. sáv (16:45 – 18:15)' },
   { start: '18:30', end: '20:00', label: '7. sáv (18:30 – 20:00)' },
+]
+
+const COMMON_SPECIAL_NEEDS = [
+  'Projektor',
+  'Számítógépes labor',
+  'Hangosítás / Mikrofon',
+  'Interaktív tábla',
+  'Előadói laptop',
 ]
 
 export default function NewBookingPage() {
@@ -33,22 +43,62 @@ export default function NewBookingPage() {
   const [customStart, setCustomStart] = useState('08:00')
   const [customEnd, setCustomEnd] = useState('09:30')
   const [useCustomTime, setUseCustomTime] = useState(false)
+
+  // Speciális igények állapota
+  const [specialisIgenyek, setSpecialisIgenyek] = useState('')
+
+  // Termek szűrése férőhely és felszereltség szerint
+  const [minCapacityFilter, setMinCapacityFilter] = useState<string>('')
+  const [equipmentFilter, setEquipmentFilter] = useState<string>('')
+
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-  useEffect(() => {
+  const loadRooms = () => {
+    const params: Record<string, string | number | boolean> = { aktivalva: true }
+    if (minCapacityFilter && Number(minCapacityFilter) > 0) {
+      params.minKapacitas = Number(minCapacityFilter)
+    }
+    if (equipmentFilter.trim()) {
+      params.felszereltseg = equipmentFilter.trim()
+    }
+
     client
-      .get<Room[]>('/rooms')
+      .get<Room[]>('/rooms', { params })
       .then((r) => {
         const activeRooms = r.data.filter((rm) => rm.aktivalva !== false)
         setRooms(activeRooms)
         if (activeRooms.length > 0) {
-          setRoomId(String(activeRooms[0].id))
+          if (!activeRooms.some((rm) => String(rm.id) === roomId)) {
+            setRoomId(String(activeRooms[0].id))
+          }
+        } else {
+          setRoomId('')
         }
       })
       .catch(() => {})
-  }, [])
+  }
+
+  useEffect(() => {
+    loadRooms()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [minCapacityFilter, equipmentFilter])
+
+  const toggleSpecialNeed = (need: string) => {
+    const currentNeeds = specialisIgenyek
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+    if (currentNeeds.includes(need)) {
+      const updated = currentNeeds.filter((n) => n !== need)
+      setSpecialisIgenyek(updated.join(', '))
+    } else {
+      currentNeeds.push(need)
+      setSpecialisIgenyek(currentNeeds.join(', '))
+    }
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -76,9 +126,10 @@ export default function NewBookingPage() {
         teremId: Number(roomId),
         startTime: startIso,
         endTime: endIso,
+        specialisIgenyek: specialisIgenyek.trim() || undefined,
       })
 
-      setSuccess('A foglalás sikeresen rögzítve a rendszerben!')
+      setSuccess('A foglalás azonnal és sikeresen aktiválva a rendszerben!')
       setTimeout(() => navigate('/my-bookings'), 1200)
     } catch (err: unknown) {
       const axErr = err as { response?: { data?: { message?: string } } }
@@ -88,6 +139,8 @@ export default function NewBookingPage() {
     }
   }
 
+  const selectedRoomObj = rooms.find((r) => String(r.id) === roomId)
+
   return (
     <div>
       <div className="page-header">
@@ -96,7 +149,7 @@ export default function NewBookingPage() {
             <PlusCircle size={20} strokeWidth={1.5} color="var(--color-primary)" />
             <span>Új teremfoglalás</span>
           </h1>
-          <p className="page-subtitle">Idősáv és terem lefoglalása oktatási célra</p>
+          <p className="page-subtitle">Idősáv és terem lefoglalása oktatói szerepkörből</p>
         </div>
 
         <Link to="/my-bookings" className="btn btn-secondary btn-sm">
@@ -105,7 +158,7 @@ export default function NewBookingPage() {
         </Link>
       </div>
 
-      <div className="card" style={{ maxWidth: 540 }}>
+      <div className="card" style={{ maxWidth: 620 }}>
         {error && (
           <div className="alert alert-error">
             <AlertCircle size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
@@ -120,6 +173,55 @@ export default function NewBookingPage() {
           </div>
         )}
 
+        {/* Termek szűrése férőhely és felszereltség szerint */}
+        <div style={{ background: 'var(--color-gray-50)', padding: 14, borderRadius: 8, marginBottom: 20, border: '1px solid var(--color-gray-200)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: 'var(--color-gray-700)', marginBottom: 10 }}>
+            <Filter size={14} strokeWidth={1.5} />
+            <span>Termek szűrése férőhelyszám és felszereltség alapján</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label className="form-label" style={{ fontSize: 11.5 }}>Min. férőhely (fő)</label>
+              <input
+                type="number"
+                min={1}
+                placeholder="pl. 25"
+                className="form-input"
+                value={minCapacityFilter}
+                onChange={(e) => setMinCapacityFilter(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="form-label" style={{ fontSize: 11.5 }}>Keresett felszereltség / típus</label>
+              <input
+                type="text"
+                placeholder="pl. projektor, labor, pc..."
+                className="form-input"
+                value={equipmentFilter}
+                onChange={(e) => setEquipmentFilter(e.target.value)}
+              />
+            </div>
+          </div>
+          {(minCapacityFilter || equipmentFilter) && (
+            <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: 'var(--color-gray-500)' }}>
+                Találatok: <strong>{rooms.length} terem</strong>
+              </span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ fontSize: 11.5, padding: '2px 6px' }}
+                onClick={() => {
+                  setMinCapacityFilter('')
+                  setEquipmentFilter('')
+                }}
+              >
+                Szűrők törlése
+              </button>
+            </div>
+          )}
+        </div>
+
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label className="form-label" htmlFor="booking-room">
@@ -132,13 +234,24 @@ export default function NewBookingPage() {
               onChange={(e) => setRoomId(e.target.value)}
               required
             >
-              {rooms.length === 0 && <option value="">Termek betöltése…</option>}
-              {rooms.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.nev || r.name} {r.kapacitas ? `(${r.kapacitas} fő)` : ''}
-                </option>
-              ))}
+              {rooms.length === 0 && <option value="">Nincs megfelelő aktív terem…</option>}
+              {rooms.map((r) => {
+                const equip = r.felszereltseg || r.leiras
+                return (
+                  <option key={r.id} value={r.id}>
+                    {r.nev || r.name} {r.kapacitas ? `(${r.kapacitas} fős)` : ''} {equip ? `– ${equip}` : ''}
+                  </option>
+                )
+              })}
             </select>
+            {selectedRoomObj && (
+              <div style={{ fontSize: 12, color: 'var(--color-gray-500)', marginTop: 4 }}>
+                Férőhely: <strong>{selectedRoomObj.kapacitas} fő</strong>
+                {(selectedRoomObj.felszereltseg || selectedRoomObj.leiras) && (
+                  <span> | Felszereltség: <em>{selectedRoomObj.felszereltseg || selectedRoomObj.leiras}</em></span>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="form-group">
@@ -210,7 +323,50 @@ export default function NewBookingPage() {
             )}
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 28 }}>
+          {/* Speciális igények kezelése */}
+          <div className="form-group" style={{ marginTop: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <Sparkles size={15} strokeWidth={1.5} color="var(--color-primary)" />
+              <label className="form-label" style={{ marginBottom: 0 }}>
+                Speciális igények (labor, projektor, egyéb technikai eszközök)
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+              {COMMON_SPECIAL_NEEDS.map((need) => {
+                const isSelected = specialisIgenyek
+                  .split(',')
+                  .map((s) => s.trim())
+                  .includes(need)
+                return (
+                  <button
+                    key={need}
+                    type="button"
+                    className={`btn btn-sm ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: 12, padding: '3px 8px' }}
+                    onClick={() => toggleSpecialNeed(need)}
+                  >
+                    {isSelected ? '✓ ' : '+ '}
+                    {need}
+                  </button>
+                )
+              })}
+            </div>
+
+            <textarea
+              className="form-input"
+              rows={2}
+              placeholder="pl. Projektor, laboratóriumi szoftverek, beépített hangosítás, egyéb technikai igény..."
+              value={specialisIgenyek}
+              onChange={(e) => setSpecialisIgenyek(e.target.value)}
+              maxLength={500}
+            />
+            <div style={{ fontSize: 11, color: 'var(--color-gray-400)', textAlign: 'right', marginTop: 2 }}>
+              {specialisIgenyek.length}/500 karakter
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
             <Link to="/my-bookings" className="btn btn-secondary">
               Mégse
             </Link>
