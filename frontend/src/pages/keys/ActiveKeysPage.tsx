@@ -19,6 +19,7 @@ interface OverdueKey {
   birtokosNev?: string
   birtokosEmail?: string
   késésPercekben: number
+  hatarido?: string
 }
 
 export default function ActiveKeysPage() {
@@ -31,7 +32,7 @@ export default function ActiveKeysPage() {
     setIsLoading(true)
     Promise.all([
       client.get<KeyItem[]>('/keys'),
-      client.get<OverdueKey[]>('/key-movements/overdue').catch(() => ({ data: [] })),
+      client.get<OverdueKey[]>('/key-movements/overdue'),
     ])
       .then(([keysRes, overdueRes]) => {
         setKeys(keysRes.data)
@@ -51,7 +52,7 @@ export default function ActiveKeysPage() {
     let ignore = false
     Promise.all([
       client.get<KeyItem[]>('/keys'),
-      client.get<OverdueKey[]>('/key-movements/overdue').catch(() => ({ data: [] })),
+      client.get<OverdueKey[]>('/key-movements/overdue'),
     ])
       .then(([keysRes, overdueRes]) => {
         if (!ignore) {
@@ -104,11 +105,28 @@ export default function ActiveKeysPage() {
 
       {/* Késedelmes kulcsok figyelmeztető doboz (ha van) */}
       {overdueKeys.length > 0 && (
-        <div className="alert alert-error" style={{ marginBottom: 20 }}>
-          <Clock size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-          <span>
-            <strong>Figyelem:</strong> {overdueKeys.length} db kulcs leadási határideje lejárt!
-          </span>
+        <div style={{ marginBottom: 20 }}>
+          <div className="alert alert-error">
+            <Clock size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+            <span><strong>Figyelem:</strong> {overdueKeys.length} db kulcs leadási határideje lejárt!</span>
+          </div>
+          <div className="table-container">
+            <table className="data-table">
+              <thead>
+                <tr><th>Kulcs</th><th>Terem</th><th>Átvevő</th><th>Késés</th></tr>
+              </thead>
+              <tbody>
+                {overdueKeys.map((key) => (
+                  <tr key={key.kulcsId}>
+                    <td>#{key.kulcsSzam}</td>
+                    <td>{key.teremNev}</td>
+                    <td>{key.birtokosNev || key.birtokosEmail || 'Ismeretlen átvevő'}</td>
+                    <td>{Math.max(1, Math.round(key.késésPercekben))} perc</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

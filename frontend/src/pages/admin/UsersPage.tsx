@@ -34,6 +34,7 @@ export default function UsersPage() {
   const [successMsg, setSuccessMsg] = useState('')
   const [editingId, setEditingId] = useState<string | number | null>(null)
   const [editRole, setEditRole] = useState('')
+  const [editPin, setEditPin] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
@@ -65,6 +66,28 @@ export default function UsersPage() {
   const handleEditStart = (user: UserItem) => {
     setEditingId(user.id)
     setEditRole(user.role)
+    setEditPin('')
+  }
+
+  const handleSavePin = async (id: string | number) => {
+    if (!/^[0-9]{4,8}$/.test(editPin)) {
+      setError('A PIN-kód 4–8 számjegyből állhat.')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      await client.put(`/users/${id}/pin`, { pin: editPin })
+      setEditPin('')
+      setError('')
+      setSuccessMsg('A kulcsátvételi PIN sikeresen beállítva.')
+      setTimeout(() => setSuccessMsg(''), 3000)
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { message?: string } } }
+      setError(axErr.response?.data?.message || 'A PIN-kód beállítása sikertelen.')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleSave = async (id: string | number) => {
@@ -149,18 +172,31 @@ export default function UsersPage() {
                     <td style={{ color: 'var(--color-gray-600)' }}>{user.email ?? '—'}</td>
                     <td>
                       {editingId === user.id ? (
-                        <select
-                          className="form-select"
-                          style={{ padding: '4px 8px', fontSize: 13, maxWidth: 200 }}
-                          value={editRole}
-                          onChange={(e) => setEditRole(e.target.value)}
-                        >
-                          {ROLES.map((r) => (
-                            <option key={r} value={r}>
-                              {getRoleLabel(r)}
-                            </option>
-                          ))}
-                        </select>
+                        <div style={{ display: 'grid', gap: 8, maxWidth: 220 }}>
+                          <select
+                            className="form-select"
+                            style={{ padding: '4px 8px', fontSize: 13 }}
+                            value={editRole}
+                            onChange={(e) => setEditRole(e.target.value)}
+                          >
+                            {ROLES.map((r) => (
+                              <option key={r} value={r}>{getRoleLabel(r)}</option>
+                            ))}
+                          </select>
+                          <input
+                            aria-label={`${user.nev || user.username} kulcsátvételi PIN`}
+                            className="form-input"
+                            type="password"
+                            inputMode="numeric"
+                            pattern="[0-9]{4,8}"
+                            minLength={4}
+                            maxLength={8}
+                            placeholder="Új PIN (4–8 számjegy)"
+                            autoComplete="new-password"
+                            value={editPin}
+                            onChange={(e) => setEditPin(e.target.value)}
+                          />
+                        </div>
                       ) : (
                         <span className="badge badge-primary">
                           <Shield size={11} strokeWidth={1.5} style={{ marginRight: 2 }} />
@@ -178,6 +214,14 @@ export default function UsersPage() {
                             onClick={() => handleSave(user.id)}
                           >
                             {isSaving ? 'Mentés…' : 'Mentés'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={isSaving || !editPin}
+                            onClick={() => handleSavePin(user.id)}
+                          >
+                            PIN mentése
                           </button>
                           <button
                             type="button"

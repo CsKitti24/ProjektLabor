@@ -67,5 +67,7 @@ namespace ProjektLabor.DTOs.Keys
         public int OperatorId { get; set; }
         public string OperatorNev { get; set; } = string.Empty;
         public string Megjegyzes { get; set; } = string.Empty;
+        public string? TeremAllapot { get; set; }
+        public string? SerulesLeiras { get; set; }
     }
 }

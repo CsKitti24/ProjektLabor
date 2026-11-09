@@ -14,6 +14,8 @@ interface KeyMovement {
   userName?: string
   operatorNev?: string
   megjegyzes?: string
+  teremAllapot?: string
+  serulesLeiras?: string
 }
 
 function formatDate(isoString?: string): string {
@@ -120,13 +122,14 @@ export default function KeyMovementsPage() {
                 <th>Kulcs</th>
                 <th>Átvevő személy</th>
                 <th>Kiadó portás</th>
+                <th>Terem állapota / sérülés</th>
                 <th>Megjegyzés</th>
               </tr>
             </thead>
             <tbody>
               {movements.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 36 }}>
+                  <td colSpan={7} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 36 }}>
                     Még nem történt kulcsmozgás a rendszerben.
                   </td>
                 </tr>
@@ -150,6 +153,10 @@ export default function KeyMovementsPage() {
                       </td>
                       <td>{m.atvevoNev || m.userName || '—'}</td>
                       <td>{m.operatorNev || 'Porta'}</td>
+                      <td style={{ color: 'var(--color-gray-600)', fontSize: 13 }}>
+                        {m.teremAllapot || '—'}
+                        {m.serulesLeiras && <div style={{ color: 'var(--color-danger)' }}>{m.serulesLeiras}</div>}
+                      </td>
                       <td style={{ color: 'var(--color-gray-500)', fontSize: 13 }}>
                         {m.megjegyzes || '—'}
                       </td>

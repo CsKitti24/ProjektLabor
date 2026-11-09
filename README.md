@@ -22,7 +22,7 @@ A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikál
 | Réteg | Technológia | Megjegyzés |
 | :--- | :--- | :--- |
 | **Frontend** | React 19, TypeScript, Vite, Tailwind CSS, Lucide React | Modern SPA szerepkörös irányítópultokkal, JWT klienssel és modális nézetekkel. |
-| **Backend** | ASP.NET Core 8 Minimal API, C# | Erősen típusos, moduláris végpontok, BCrypt jelszókezelés, beépített RBAC házirendek. |
+| **Backend** | ASP.NET Core 8 Minimal API, C# | Erősen típusos, moduláris végpontok, BCrypt jelszó- és kulcsátvételi PIN-kezelés, beépített RBAC házirendek. |
 | **Adatbázis** | Microsoft SQL Server 2022 | Konténerizált relációs adatbázis tranzakció- és zárkezeléssel. |
 | **ORM / Migráció** | Entity Framework Core 8 | Code-first megközelítés, automatikus séma-migrációk indításkor. |
 | **Hitelesítés** | JSON Web Token (JWT Bearer) + BCrypt | Állapotmentes, biztonságos token-kezelés claims-alapú szerepkör-ellenőrzéssel. |

@@ -18,6 +18,31 @@ interface MaintenanceItem {
   leiras?: string
 }
 
+interface BookingConflict {
+  foglalasId: number
+  felhasznaloId: number
+  felhasznaloNev: string
+  teremId: number
+  teremNev: string
+  startTime: string
+  endTime: string
+  status: string
+}
+
+type ConflictAction = 'cancel' | 'move'
+
+function toLocalDateTimeInput(value: string): string {
+  const date = new Date(value)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+  return local.toISOString().slice(0, 16)
+}
+
+function addMinutes(value: string, minutes: number): string {
+  const date = new Date(value)
+  date.setMinutes(date.getMinutes() + minutes)
+  return toLocalDateTimeInput(date.toISOString())
+}
+
 function formatDateRange(start?: string, end?: string): string {
   if (!start) return '—'
   try {
@@ -48,6 +73,10 @@ export default function MaintenancePage() {
   const [leiras, setLeiras] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [modalError, setModalError] = useState('')
+  const [conflicts, setConflicts] = useState<BookingConflict[]>([])
+  const [conflictActions, setConflictActions] = useState<Record<number, ConflictAction | ''>>({})
+  const [moveStartTimes, setMoveStartTimes] = useState<Record<number, string>>({})
+  const [moveRoomIds, setMoveRoomIds] = useState<Record<number, string>>({})
 
   const loadData = () => {
     setIsLoading(true)
@@ -108,25 +137,94 @@ export default function MaintenancePage() {
     setModalError('')
     setIsSaving(true)
 
+    try {
+      await createMaintenance()
+    } catch (err: unknown) {
+      showCreateError(err)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const createMaintenance = async () => {
     const startIso = `${startDate}T${startTime}:00`
     const endIso = `${startDate}T${endTime}:00`
+    await client.post('/maintenance', {
+      teremId: Number(teremId),
+      startTime: startIso,
+      endTime: endIso,
+      leiras: leiras.trim() || undefined,
+    })
+    setShowModal(false)
+    setConflicts([])
+    setConflictActions({})
+    setLeiras('')
+    setSuccessMsg('Karbantartási idősáv sikeresen ütemezve!')
+    setTimeout(() => setSuccessMsg(''), 4000)
+    loadData()
+  }
 
+  const showCreateError = (err: unknown) => {
+    const axErr = err as { response?: { data?: { message?: string; conflicts?: BookingConflict[] } } }
+    const payload = axErr.response?.data
+    const newConflicts = payload?.conflicts ?? []
+    setConflicts(newConflicts)
+    setConflictActions(Object.fromEntries(newConflicts.map((item) => [item.foglalasId, ''])))
+    setMoveStartTimes(Object.fromEntries(newConflicts.map((item) => {
+      const maintenanceEnd = new Date(`${startDate}T${endTime}:00`)
+      const bookingEnd = new Date(item.endTime)
+      const proposed = maintenanceEnd > bookingEnd ? maintenanceEnd : bookingEnd
+      return [item.foglalasId, toLocalDateTimeInput(proposed.toISOString())]
+    })))
+    setMoveRoomIds(Object.fromEntries(newConflicts.map((item) => [
+      item.foglalasId,
+      String(rooms.find((room) => room.id !== item.teremId)?.id ?? item.teremId),
+    ])))
+    setModalError(payload?.message || 'Nem sikerült rögzíteni a karbantartást.')
+  }
+
+  const resolveConflictsAndCreate = async () => {
+    if (conflicts.some((item) => !conflictActions[item.foglalasId])) {
+      setModalError('Minden ütköző foglalásnál válaszd ki a törlést vagy az áthelyezést.')
+      return
+    }
+    if (conflicts.some((item) =>
+      conflictActions[item.foglalasId] === 'move' &&
+      (!moveStartTimes[item.foglalasId] || !moveRoomIds[item.foglalasId]))) {
+      setModalError('Az áthelyezéshez új terem és kezdési időpont megadása kötelező.')
+      return
+    }
+
+    setIsSaving(true)
+    setModalError('')
     try {
-      await client.post('/maintenance', {
-        teremId: Number(teremId),
-        startTime: startIso,
-        endTime: endIso,
-        leiras: leiras.trim() || undefined,
-      })
+      for (const booking of conflicts) {
+        const action = conflictActions[booking.foglalasId]
+        if (action === 'cancel') {
+          await client.put(`/bookings/${booking.foglalasId}`, { status: 'Megszuntetve' })
+          setConflicts((current) => current.filter((item) => item.foglalasId !== booking.foglalasId))
+          continue
+        }
 
-      setShowModal(false)
-      setLeiras('')
-      setSuccessMsg('Karbantartási idősáv sikeresen ütemezve!')
-      setTimeout(() => setSuccessMsg(''), 4000)
-      loadData()
+        const start = moveStartTimes[booking.foglalasId]
+        const startDateTime = new Date(start)
+        const duration = (new Date(booking.endTime).getTime() - new Date(booking.startTime).getTime()) / 60000
+        const end = addMinutes(startDateTime.toISOString(), duration)
+        await client.put(`/bookings/${booking.foglalasId}`, {
+          teremId: Number(moveRoomIds[booking.foglalasId]),
+          startTime: `${start}:00`,
+          endTime: `${end}:00`,
+        })
+        setConflicts((current) => current.filter((item) => item.foglalasId !== booking.foglalasId))
+      }
+      await createMaintenance()
     } catch (err: unknown) {
-      const axErr = err as { response?: { data?: { message?: string } } }
-      setModalError(axErr.response?.data?.message || 'Nem sikerült rögzíteni a karbantartást.')
+      const axErr = err as { response?: { data?: { message?: string; conflicts?: BookingConflict[] } } }
+      if (axErr.response?.data?.conflicts) {
+        showCreateError(err)
+      } else {
+        setModalError(`${axErr.response?.data?.message || 'A döntés feldolgozása sikertelen.'} A korábbi módosítások részben már mentődhettek; ellenőrizd a foglalásokat.`)
+      }
     } finally {
       setIsSaving(false)
     }
@@ -272,6 +370,67 @@ export default function MaintenancePage() {
                   ))}
                 </select>
               </div>
+
+              {conflicts.length > 0 && (
+                <section className="card" style={{ margin: '16px 0', padding: 16 }}>
+                  <h3 style={{ marginBottom: 8 }}>Ütköző foglalások — döntés szükséges</h3>
+                  <p style={{ marginBottom: 12 }}>
+                    A karbantartás nem kerül mentésre, amíg az ütközéseket nem rendezed.
+                    Foglalásonként választhatsz törlést vagy új időpontot/termet.
+                  </p>
+                  {conflicts.map((booking) => (
+                    <div key={booking.foglalasId} style={{ borderTop: '1px solid var(--color-gray-200)', padding: '12px 0' }}>
+                      <strong>#{booking.foglalasId} · {booking.felhasznaloNev} · {booking.teremNev}</strong>
+                      <div>{formatDateRange(booking.startTime, booking.endTime)} · {booking.status}</div>
+                      <div className="form-group" style={{ marginTop: 8 }}>
+                        <label className="form-label" htmlFor={`conflict-${booking.foglalasId}`}>Teendő</label>
+                        <select
+                          id={`conflict-${booking.foglalasId}`}
+                          className="form-select"
+                          value={conflictActions[booking.foglalasId] ?? ''}
+                          onChange={(event) => setConflictActions((current) => ({
+                            ...current,
+                            [booking.foglalasId]: event.target.value as ConflictAction | '',
+                          }))}
+                        >
+                          <option value="">Válassz…</option>
+                          <option value="cancel">Foglalás törlése</option>
+                          <option value="move">Másik időpontba/terembe áthelyezés</option>
+                        </select>
+                      </div>
+                      {conflictActions[booking.foglalasId] === 'move' && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          <div className="form-group">
+                            <label className="form-label" htmlFor={`move-room-${booking.foglalasId}`}>Új terem</label>
+                            <select
+                              id={`move-room-${booking.foglalasId}`}
+                              className="form-select"
+                              value={moveRoomIds[booking.foglalasId] ?? String(booking.teremId)}
+                              onChange={(event) => setMoveRoomIds((current) => ({ ...current, [booking.foglalasId]: event.target.value }))}
+                            >
+                              {rooms.map((room) => <option key={room.id} value={room.id}>{room.nev}</option>)}
+                            </select>
+                          </div>
+                          <div className="form-group">
+                            <label className="form-label" htmlFor={`move-start-${booking.foglalasId}`}>Új kezdés</label>
+                            <input
+                              id={`move-start-${booking.foglalasId}`}
+                              className="form-input"
+                              type="datetime-local"
+                              value={moveStartTimes[booking.foglalasId] ?? ''}
+                              onChange={(event) => setMoveStartTimes((current) => ({ ...current, [booking.foglalasId]: event.target.value }))}
+                              required
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button" className="btn btn-primary" onClick={resolveConflictsAndCreate} disabled={isSaving}>
+                    {isSaving ? 'Foglalások kezelése…' : 'Döntések végrehajtása és karbantartás mentése'}
+                  </button>
+                </section>
+              )}
 
               <div className="form-group">
                 <label className="form-label">Dátum *</label>

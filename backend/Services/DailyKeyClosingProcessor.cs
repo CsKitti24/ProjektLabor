@@ -45,15 +45,11 @@ public sealed class DailyKeyClosingProcessor
         foreach (var movement in issuedMovements)
         {
             var issuedAtUtc = AsUtc(movement.Idopont);
-            var localIssuedAt = TimeZoneInfo.ConvertTimeFromUtc(issuedAtUtc, timeZone);
-            var deadlineDate = DateOnly.FromDateTime(localIssuedAt);
-            if (TimeOnly.FromDateTime(localIssuedAt) > closingTime)
-            {
-                deadlineDate = deadlineDate.AddDays(1);
-            }
-
-            var localDeadline = deadlineDate.ToDateTime(closingTime, DateTimeKind.Unspecified);
-            var deadlineUtc = TimeZoneInfo.ConvertTimeToUtc(localDeadline, timeZone);
+            var deadlineUtc = KeyReturnDeadlineCalculator.GetDeadlineUtc(
+                issuedAtUtc,
+                null,
+                closingTime,
+                timeZone);
             if (nowUtc < deadlineUtc)
             {
                 continue;

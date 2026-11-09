@@ -19,13 +19,60 @@ namespace ProjektLabor.Endpoints
                 .WithTags("KeyMovements")
                 .RequireAuthorization("AdminOrPortasOrIgazgato");
 
+            group.MapGet("/recipients", async (
+                int kulcsId,
+                AppDbContext db,
+                CancellationToken cancellationToken) =>
+            {
+                var key = await db.Kulcsok
+                    .AsNoTracking()
+                    .Where(item => item.Id == kulcsId && item.Aktivalva)
+                    .Select(item => new { item.Id, item.Tipus })
+                    .SingleOrDefaultAsync(cancellationToken);
+                if (key is null)
+                {
+                    return Results.NotFound(new { message = "A kulcs nem található vagy nem aktív." });
+                }
+
+                var recipients = db.Felhasznalok
+                    .AsNoTracking()
+                    .Where(user => user.Role == RoleNames.Oktato);
+                if (key.Tipus == "Mesterkulcs")
+                {
+                    recipients = recipients.Where(user => db.MesterkulcsJogosultsagok.Any(
+                        access => access.KulcsId == key.Id && access.FelhasznaloId == user.Id));
+                }
+
+                var results = await recipients
+                    .OrderBy(user => user.Nev)
+                    .Select(user => new KeyRecipientDto(user.Id, user.Nev, user.Username))
+                    .ToListAsync(cancellationToken);
+
+                return Results.Ok(results);
+            })
+            .WithName("GetKeyRecipients")
+            .WithSummary("A kiválasztott kulcs átvevőjeként jogosult oktatók")
+            .RequireAuthorization("Portas")
+            .Produces<List<KeyRecipientDto>>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .WithOpenApi();
+
             // KM1 – POST /api/key-movements/issue
             group.MapPost("/issue", async (
                 IssueKeyRequestDto request,
                 AppDbContext db,
                 AuditService auditService,
-                ClaimsPrincipal caller) =>
+                ClaimsPrincipal caller,
+                TimeProvider timeProvider) =>
             {
+                var validationError = ValidateMovementRequest(request.Pin, request.TeremAllapot, request.SerulesLeiras);
+                if (validationError is not null)
+                {
+                    return Results.BadRequest(new { message = validationError });
+                }
+
                 var operatorId = GetCallerId(caller);
                 if (operatorId is null ||
                     !await db.Felhasznalok.AnyAsync(user => user.Id == operatorId.Value))
@@ -55,6 +102,7 @@ namespace ProjektLabor.Endpoints
                 // Check if key is already issued
                 var lastMovement = key.Kulcsmozgasok?
                     .OrderByDescending(m => m.Idopont)
+                    .ThenByDescending(m => m.Id)
                     .FirstOrDefault();
 
                 if (lastMovement != null && (lastMovement.MozgasTipus == "Kiadás" || lastMovement.MozgasTipus == "Kiadas"))
@@ -64,6 +112,7 @@ namespace ProjektLabor.Endpoints
 
                 int recipientId;
                 string recipientName;
+                string? recipientPinHash;
                 if (request.FoglalasId.HasValue)
                 {
                     var booking = await db.Foglalasok
@@ -76,6 +125,10 @@ namespace ProjektLabor.Endpoints
                     if (booking.Status != "Aktiv")
                     {
                         return Results.BadRequest(new { message = $"A foglalás nem aktív (jelenlegi státusz: {booking.Status})." });
+                    }
+                    if (booking.Felhasznalo.Role != RoleNames.Oktato)
+                    {
+                        return Results.BadRequest(new { message = "Kulcs átvevője csak oktató lehet." });
                     }
                     if (request.AtvevoFelhasznaloId.HasValue &&
                         request.AtvevoFelhasznaloId.Value != booking.FelhasznaloId)
@@ -90,6 +143,7 @@ namespace ProjektLabor.Endpoints
 
                     recipientId = booking.FelhasznaloId;
                     recipientName = booking.Felhasznalo.Nev;
+                    recipientPinHash = booking.Felhasznalo.PinHash;
                 }
                 else
                 {
@@ -103,7 +157,7 @@ namespace ProjektLabor.Endpoints
 
                     var recipient = await db.Felhasznalok
                         .Where(user => user.Id == request.AtvevoFelhasznaloId.Value)
-                        .Select(user => new { user.Id, user.Nev, user.Role })
+                        .Select(user => new { user.Id, user.Nev, user.Role, user.PinHash })
                         .SingleOrDefaultAsync();
                     if (recipient is null)
                     {
@@ -122,21 +176,46 @@ namespace ProjektLabor.Endpoints
 
                     recipientId = recipient.Id;
                     recipientName = recipient.Nev;
+                    recipientPinHash = recipient.PinHash;
                 }
 
+                if (string.IsNullOrWhiteSpace(recipientPinHash))
+                {
+                    return Results.Conflict(new { message = "Az átvevő még nem állított be PIN-kódot." });
+                }
+                if (!BCrypt.Net.BCrypt.Verify(request.Pin, recipientPinHash))
+                {
+                    return Results.Forbid();
+                }
+                if (key.Tipus == "Mesterkulcs" &&
+                    !await db.MesterkulcsJogosultsagok.AnyAsync(access =>
+                        access.KulcsId == key.Id && access.FelhasznaloId == recipientId))
+                {
+                    return Results.Forbid();
+                }
+
+                var now = timeProvider.GetUtcNow().UtcDateTime;
                 var movement = new Kulcsmozgas
                 {
                     KulcsId = key.Id,
                     FoglalasId = request.FoglalasId,
                     AtvevoFelhasznaloId = recipientId,
                     MozgasTipus = "Kiadás",
-                    Idopont = DateTime.UtcNow,
+                    Idopont = now,
                     OperátorId = operatorId.Value,
                     Megjegyzes = request.Megjegyzes ?? string.Empty,
-                    CreatedAt = DateTime.UtcNow
+                    TeremAllapot = request.TeremAllapot.Trim(),
+                    SerulesLeiras = NormalizeDamageDescription(request.SerulesLeiras),
+                    CreatedAt = now
                 };
 
                 db.Kulcsmozgasok.Add(movement);
+                var conditionTicket = AddConditionTicket(
+                    db,
+                    operatorId.Value,
+                    key.TeremId,
+                    movement.SerulesLeiras,
+                    now);
                 await db.SaveChangesAsync();
 
                 await auditService.LogAsync(
@@ -144,7 +223,13 @@ namespace ProjektLabor.Endpoints
                     muveletTipus: "KEY_ISSUE",
                     entitasTipus: "Kulcsmozgas",
                     entitasId: movement.Id.ToString(),
-                    ujErtek: $"KulcsId: {key.Id}, FoglalasId: {request.FoglalasId}");
+                    ujErtek: $"KulcsId: {key.Id}, FoglalasId: {request.FoglalasId}, AtvevoFelhasznaloId: {recipientId}, TeremAllapot: {movement.TeremAllapot}, SerulesLeiras: {movement.SerulesLeiras}");
+                if (conditionTicket is not null)
+                {
+                    await auditService.LogAsync(
+                        caller, "CREATE", "Hibajegy", conditionTicket.Id.ToString(),
+                        ujErtek: $"TeremId: {conditionTicket.TeremId}; Kategoria: {conditionTicket.Kategoria}; KulcsmozgasId: {movement.Id}");
+                }
                 if (transaction is not null)
                 {
                     await transaction.CommitAsync();
@@ -165,7 +250,9 @@ namespace ProjektLabor.Endpoints
                     AtvevoNev = recipientName,
                     OperatorId = operatorId.Value,
                     OperatorNev = opUser?.Nev ?? string.Empty,
-                    Megjegyzes = movement.Megjegyzes
+                    Megjegyzes = movement.Megjegyzes,
+                    TeremAllapot = movement.TeremAllapot,
+                    SerulesLeiras = movement.SerulesLeiras
                 };
 
                 return Results.Created($"/api/key-movements/{movement.Id}", result);
@@ -186,8 +273,15 @@ namespace ProjektLabor.Endpoints
                 ReturnKeyRequestDto request,
                 AppDbContext db,
                 AuditService auditService,
-                ClaimsPrincipal caller) =>
+                ClaimsPrincipal caller,
+                TimeProvider timeProvider) =>
             {
+                var validationError = ValidateMovementRequest(request.Pin, request.TeremAllapot, request.SerulesLeiras);
+                if (validationError is not null)
+                {
+                    return Results.BadRequest(new { message = validationError });
+                }
+
                 var operatorId = GetCallerId(caller);
                 if (operatorId is null ||
                     !await db.Felhasznalok.AnyAsync(user => user.Id == operatorId.Value))
@@ -211,6 +305,7 @@ namespace ProjektLabor.Endpoints
 
                 var lastMovement = key.Kulcsmozgasok?
                     .OrderByDescending(m => m.Idopont)
+                    .ThenByDescending(m => m.Id)
                     .FirstOrDefault();
 
                 if (lastMovement == null || (lastMovement.MozgasTipus != "Kiadás" && lastMovement.MozgasTipus != "Kiadas"))
@@ -227,19 +322,45 @@ namespace ProjektLabor.Endpoints
                         .SingleOrDefaultAsync();
                 }
 
+                if (!recipientId.HasValue)
+                {
+                    return Results.Conflict(new { message = "A kulcs korábbi átvevője nem azonosítható, ezért PIN-ellenőrzéssel nem vehető vissza." });
+                }
+                var recipientPinHash = await db.Felhasznalok
+                    .Where(user => user.Id == recipientId.Value)
+                    .Select(user => user.PinHash)
+                    .SingleOrDefaultAsync();
+                if (string.IsNullOrWhiteSpace(recipientPinHash))
+                {
+                    return Results.Conflict(new { message = "Az átvevő még nem állított be PIN-kódot." });
+                }
+                if (!BCrypt.Net.BCrypt.Verify(request.Pin, recipientPinHash))
+                {
+                    return Results.Forbid();
+                }
+
+                var now = timeProvider.GetUtcNow().UtcDateTime;
                 var returnMovement = new Kulcsmozgas
                 {
                     KulcsId = key.Id,
                     FoglalasId = lastMovement.FoglalasId,
                     AtvevoFelhasznaloId = recipientId,
                     MozgasTipus = "Visszavétel",
-                    Idopont = DateTime.UtcNow,
+                    Idopont = now,
                     OperátorId = operatorId.Value,
                     Megjegyzes = request.Megjegyzes ?? string.Empty,
-                    CreatedAt = DateTime.UtcNow
+                    TeremAllapot = request.TeremAllapot.Trim(),
+                    SerulesLeiras = NormalizeDamageDescription(request.SerulesLeiras),
+                    CreatedAt = now
                 };
 
                 db.Kulcsmozgasok.Add(returnMovement);
+                var conditionTicket = AddConditionTicket(
+                    db,
+                    operatorId.Value,
+                    key.TeremId,
+                    returnMovement.SerulesLeiras,
+                    now);
                 await db.SaveChangesAsync();
 
                 await auditService.LogAsync(
@@ -247,7 +368,13 @@ namespace ProjektLabor.Endpoints
                     muveletTipus: "KEY_RETURN",
                     entitasTipus: "Kulcsmozgas",
                     entitasId: returnMovement.Id.ToString(),
-                    ujErtek: $"KulcsId: {key.Id}");
+                    ujErtek: $"KulcsId: {key.Id}, AtvevoFelhasznaloId: {recipientId}, TeremAllapot: {returnMovement.TeremAllapot}, SerulesLeiras: {returnMovement.SerulesLeiras}");
+                if (conditionTicket is not null)
+                {
+                    await auditService.LogAsync(
+                        caller, "CREATE", "Hibajegy", conditionTicket.Id.ToString(),
+                        ujErtek: $"TeremId: {conditionTicket.TeremId}; Kategoria: {conditionTicket.Kategoria}; KulcsmozgasId: {returnMovement.Id}");
+                }
                 if (transaction is not null)
                 {
                     await transaction.CommitAsync();
@@ -272,7 +399,9 @@ namespace ProjektLabor.Endpoints
                     AtvevoNev = recipientName,
                     OperatorId = operatorId.Value,
                     OperatorNev = opUser?.Nev ?? string.Empty,
-                    Megjegyzes = returnMovement.Megjegyzes
+                    Megjegyzes = returnMovement.Megjegyzes,
+                    TeremAllapot = returnMovement.TeremAllapot,
+                    SerulesLeiras = returnMovement.SerulesLeiras
                 };
 
                 return Results.Ok(result);
@@ -354,7 +483,9 @@ namespace ProjektLabor.Endpoints
                                 : null,
                         OperatorId = km.OperátorId,
                         OperatorNev = km.Operátor != null ? km.Operátor.Nev : string.Empty,
-                        Megjegyzes = km.Megjegyzes ?? string.Empty
+                        Megjegyzes = km.Megjegyzes ?? string.Empty,
+                        TeremAllapot = km.TeremAllapot,
+                        SerulesLeiras = km.SerulesLeiras
                     })
                     .ToListAsync();
 
@@ -406,7 +537,9 @@ namespace ProjektLabor.Endpoints
                     AtvevoNev = km.AtvevoFelhasznalo?.Nev ?? km.Foglalas?.Felhasznalo?.Nev,
                     OperatorId = km.OperátorId,
                     OperatorNev = km.Operátor != null ? km.Operátor.Nev : string.Empty,
-                    Megjegyzes = km.Megjegyzes ?? string.Empty
+                    Megjegyzes = km.Megjegyzes ?? string.Empty,
+                    TeremAllapot = km.TeremAllapot,
+                    SerulesLeiras = km.SerulesLeiras
                 };
 
                 return Results.Ok(dto);
@@ -421,9 +554,17 @@ namespace ProjektLabor.Endpoints
             .WithOpenApi();
 
             // KM5 – GET /api/key-movements/overdue
-            group.MapGet("/overdue", async (AppDbContext db) =>
+            group.MapGet("/overdue", async (
+                AppDbContext db,
+                IConfiguration configuration,
+                ILogger<Program> logger,
+                TimeProvider timeProvider,
+                CancellationToken cancellationToken) =>
             {
-                var now = DateTime.UtcNow;
+                var now = timeProvider.GetUtcNow().UtcDateTime;
+                var closingTime = await AutomationParameterReader.GetClosingTimeAsync(
+                    db, logger, cancellationToken);
+                var timeZone = AutomationParameterReader.GetTimeZone(configuration, logger);
 
                 // Load all active keys with their movements, room and bookings
                 var keysWithLastMovement = await db.Kulcsok
@@ -443,31 +584,17 @@ namespace ProjektLabor.Endpoints
                 {
                     var last = key.Kulcsmozgasok?
                         .OrderByDescending(m => m.Idopont)
+                        .ThenByDescending(m => m.Id)
                         .FirstOrDefault();
 
                     if (last != null && (last.MozgasTipus == "Kiadás" || last.MozgasTipus == "Kiadas"))
                     {
-                        bool isOverdue = false;
-                        DateTime deadline = last.Idopont.Date.AddHours(22); // Default closing time: 22:00
-
-                        if (last.Foglalas != null)
-                        {
-                            deadline = last.Foglalas.EndTime;
-                            if (now > deadline)
-                            {
-                                isOverdue = true;
-                            }
-                        }
-                        else
-                        {
-                            // If issued without booking, overdue if after 22:00 of the issue day
-                            if (now > deadline)
-                            {
-                                isOverdue = true;
-                            }
-                        }
-
-                        if (isOverdue)
+                        var deadline = KeyReturnDeadlineCalculator.GetDeadlineUtc(
+                            last.Idopont,
+                            last.Foglalas?.EndTime,
+                            closingTime,
+                            timeZone);
+                        if (now > deadline)
                         {
                             overdueList.Add(new OverdueKeyDto
                             {
@@ -509,5 +636,61 @@ namespace ProjektLabor.Endpoints
                 ? userId
                 : null;
         }
+
+        private static string? ValidateMovementRequest(
+            string? pin,
+            string? roomCondition,
+            string? damageDescription)
+        {
+            if (string.IsNullOrWhiteSpace(pin) ||
+                pin.Length is < 4 or > 8 ||
+                pin.Any(character => character is < '0' or > '9'))
+            {
+                return "Érvényes, 4–8 számjegyű PIN-kód szükséges.";
+            }
+
+            if (string.IsNullOrWhiteSpace(roomCondition) || roomCondition.Trim().Length > 500)
+            {
+                return "A terem állapotának rögzítése kötelező, legfeljebb 500 karakterben.";
+            }
+
+            if (damageDescription?.Length > 1000)
+            {
+                return "A sérülés leírása legfeljebb 1000 karakter lehet.";
+            }
+
+            return null;
+        }
+
+        private static string? NormalizeDamageDescription(string? damageDescription) =>
+            string.IsNullOrWhiteSpace(damageDescription) ? null : damageDescription.Trim();
+
+        private static Hibajegy? AddConditionTicket(
+            AppDbContext db,
+            int operatorId,
+            int roomId,
+            string? damageDescription,
+            DateTime createdAt)
+        {
+            if (string.IsNullOrWhiteSpace(damageDescription))
+            {
+                return null;
+            }
+
+            var ticket = new Hibajegy
+            {
+                FelhasznaloId = operatorId,
+                TeremId = roomId,
+                Kategoria = "Sérülés",
+                Leiras = damageDescription,
+                Statusz = "Nyitva",
+                CreatedAt = createdAt,
+                UpdatedAt = createdAt
+            };
+            db.Hibajegyek.Add(ticket);
+            return ticket;
+        }
+
+        private sealed record KeyRecipientDto(int Id, string Nev, string Username);
     }
 }

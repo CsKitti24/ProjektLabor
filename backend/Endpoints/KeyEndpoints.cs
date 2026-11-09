@@ -51,6 +51,7 @@ namespace ProjektLabor.Endpoints
                 {
                     var lastMovement = k.Kulcsmozgasok?
                         .OrderByDescending(km => km.Idopont)
+                        .ThenByDescending(km => km.Id)
                         .FirstOrDefault();
 
                     string allapot;
@@ -105,6 +106,7 @@ namespace ProjektLabor.Endpoints
 
                 var lastMovement = k.Kulcsmozgasok?
                     .OrderByDescending(km => km.Idopont)
+                    .ThenByDescending(km => km.Id)
                     .FirstOrDefault();
 
                 string allapot = !k.Aktivalva
@@ -342,6 +344,7 @@ namespace ProjektLabor.Endpoints
                         .ThenInclude(f => f!.Felhasznalo)
                     .Where(km => km.KulcsId == id)
                     .OrderByDescending(km => km.Idopont)
+                    .ThenByDescending(km => km.Id)
                     .FirstOrDefaultAsync();
 
                 string allapot = !key.Aktivalva
@@ -392,6 +395,7 @@ namespace ProjektLabor.Endpoints
                         .ThenInclude(f => f!.Felhasznalo)
                     .Where(km => km.KulcsId == id)
                     .OrderByDescending(km => km.Idopont)
+                    .ThenByDescending(km => km.Id)
                     .Select(km => new KeyMovementItemDto
                     {
                         Id = km.Id,
@@ -411,7 +415,9 @@ namespace ProjektLabor.Endpoints
                                 : null,
                         OperatorId = km.OperátorId,
                         OperatorNev = km.Operátor != null ? km.Operátor.Nev : string.Empty,
-                        Megjegyzes = km.Megjegyzes ?? string.Empty
+                        Megjegyzes = km.Megjegyzes ?? string.Empty,
+                        TeremAllapot = km.TeremAllapot,
+                        SerulesLeiras = km.SerulesLeiras
                     })
                     .ToListAsync();
 

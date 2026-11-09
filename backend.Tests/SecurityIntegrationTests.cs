@@ -347,7 +347,13 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
 
         var issue = await porter.PostAsJsonAsync(
             "/api/key-movements/issue",
-            new { kulcsId = 11, atvevoFelhasznaloId = 1 });
+            new
+            {
+                kulcsId = 11,
+                atvevoFelhasznaloId = 1,
+                pin = "1234",
+                teremAllapot = "Rendben"
+            });
         Assert.Equal(System.Net.HttpStatusCode.Created, issue.StatusCode);
         using (var scope = _factory.Services.CreateScope())
         {
@@ -368,7 +374,7 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
 
         var returned = await porter.PostAsJsonAsync(
             "/api/key-movements/return",
-            new { kulcsId = 11 });
+            new { kulcsId = 11, pin = "1234", teremAllapot = "Rendben" });
         Assert.Equal(System.Net.HttpStatusCode.OK, returned.StatusCode);
     }
 
@@ -689,7 +695,8 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
         Email = $"user{id}@example.test",
         JelszoHash = "not-used",
         Nev = $"Teszt Felhasználó {id}",
-        Role = role
+        Role = role,
+        PinHash = role == RoleNames.Oktato ? BCryptHasher.HashPassword("1234") : null
     };
 
     private static string FindRepositoryRoot()

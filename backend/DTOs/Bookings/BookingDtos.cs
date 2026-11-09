@@ -37,6 +37,7 @@ namespace ProjektLabor.DTOs.Bookings
 
     public class UpdateBookingRequestDto
     {
+        public int? TeremId { get; set; }
         public DateTime? StartTime { get; set; }
         public DateTime? EndTime { get; set; }
         public string? Status { get; set; } // Aktiv | NoShow | Megszuntetve | Kesz

@@ -78,6 +78,7 @@ namespace backend.Tests
                 Email = $"{suffix}@test.hu",
                 Role = "Oktato",
                 JelszoHash = BCrypt.Net.BCrypt.HashPassword("TestPass123!"),
+                PinHash = BCrypt.Net.BCrypt.HashPassword("1234"),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
@@ -86,7 +87,9 @@ namespace backend.Tests
             return instructor.Id;
         }
 
-        private async Task<(int RoomId, int KeyId)> SeedRoomAndKeyAsync(string keyNumber)
+        private async Task<(int RoomId, int KeyId)> SeedRoomAndKeyAsync(
+            string keyNumber,
+            string keyType = "Osztalykulcs")
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -98,7 +101,7 @@ namespace backend.Tests
             var key = new Kulcs
             {
                 Szam = keyNumber,
-                Tipus = "Osztalykulcs",
+                Tipus = keyType,
                 TeremId = room.Id,
                 Aktivalva = true
             };
@@ -152,6 +155,8 @@ namespace backend.Tests
             {
                 KulcsId = keyId,
                 AtvevoFelhasznaloId = recipientId,
+                Pin = "1234",
+                TeremAllapot = "Rendben, tiszta",
                 Megjegyzes = "Átadva órára"
             });
             Assert.Equal(HttpStatusCode.Created, issueResponse.StatusCode);
@@ -159,6 +164,8 @@ namespace backend.Tests
             Assert.NotNull(issue);
             Assert.Equal(recipientId, issue.AtvevoFelhasznaloId);
             Assert.Equal(portasUserId, issue.OperatorId);
+            Assert.Equal("Rendben, tiszta", issue.TeremAllapot);
+            Assert.InRange(issue.Idopont, DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow.AddMinutes(1));
 
             // 3. Check state is now Kiadva
             var statusIssued = await portasClient.GetFromJsonAsync<KeyStatusDto>($"/api/keys/{keyId}/status");
@@ -168,7 +175,10 @@ namespace backend.Tests
             // 4. Try issuing again -> should Conflict (409)
             var doubleIssue = await portasClient.PostAsJsonAsync("/api/key-movements/issue", new IssueKeyRequestDto
             {
-                KulcsId = keyId
+                KulcsId = keyId,
+                AtvevoFelhasznaloId = recipientId,
+                Pin = "1234",
+                TeremAllapot = "Rendben"
             });
             Assert.Equal(HttpStatusCode.Conflict, doubleIssue.StatusCode);
 
@@ -176,12 +186,16 @@ namespace backend.Tests
             var returnResponse = await portasClient.PostAsJsonAsync("/api/key-movements/return", new ReturnKeyRequestDto
             {
                 KulcsId = keyId,
+                Pin = "1234",
+                TeremAllapot = "Burkolatsérülést észleltem",
+                SerulesLeiras = "A projektor burkolata repedt.",
                 Megjegyzes = "Visszahozva sértetlenül"
             });
             Assert.Equal(HttpStatusCode.OK, returnResponse.StatusCode);
             var returned = await returnResponse.Content.ReadFromJsonAsync<KeyMovementItemDto>();
             Assert.NotNull(returned);
             Assert.Equal(portasUserId, returned.OperatorId);
+            Assert.Equal("A projektor burkolata repedt.", returned.SerulesLeiras);
 
             using (var scope = _factory.Services.CreateScope())
             {
@@ -189,6 +203,15 @@ namespace backend.Tests
                 Assert.All(
                     await db.Kulcsmozgasok.OrderBy(movement => movement.Id).ToListAsync(),
                     movement => Assert.Equal(portasUserId, movement.OperátorId));
+                var issuedMovement = await db.Kulcsmozgasok.SingleAsync(movement =>
+                    movement.KulcsId == keyId && movement.MozgasTipus == "Kiadás");
+                Assert.Equal(issuedMovement.Idopont, issuedMovement.CreatedAt);
+                Assert.Equal(2, await db.AuditLogok.CountAsync(entry =>
+                    entry.EntitasTipus == "Kulcsmozgas" &&
+                    (entry.MuveletTipus == "KEY_ISSUE" || entry.MuveletTipus == "KEY_RETURN")));
+                var ticket = await db.Hibajegyek.SingleAsync();
+                Assert.Equal("Sérülés", ticket.Kategoria);
+                Assert.Equal("A projektor burkolata repedt.", ticket.Leiras);
             }
 
             // 6. Check state is Szabad again
@@ -213,9 +236,108 @@ namespace backend.Tests
                 new IssueKeyRequestDto
                 {
                     KulcsId = keyId,
-                    AtvevoFelhasznaloId = portasUserId
+                    AtvevoFelhasznaloId = portasUserId,
+                    Pin = "1234",
+                    TeremAllapot = "Rendben"
                 });
             Assert.Equal(HttpStatusCode.BadRequest, staffAsRecipient.StatusCode);
+        }
+
+        [Fact]
+        public async Task MasterKeyIssue_RequiresGrantAndValidRecipientPin()
+        {
+            var (portasClient, _) = await CreateClientWithRoleAsync("Portas");
+            var (adminClient, _) = await CreateClientWithRoleAsync("Adminisztrator");
+            var (roomId, keyId) = await SeedRoomAndKeyAsync("MK-01", "Mesterkulcs");
+            var recipientId = await SeedInstructorAsync();
+            int bookingId;
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var booking = new Foglalas
+                {
+                    FelhasznaloId = recipientId,
+                    TeremId = roomId,
+                    StartTime = DateTime.UtcNow.AddHours(1),
+                    EndTime = DateTime.UtcNow.AddHours(2),
+                    Status = "Aktiv"
+                };
+                db.Foglalasok.Add(booking);
+                await db.SaveChangesAsync();
+                bookingId = booking.Id;
+            }
+
+            var issueRequest = new IssueKeyRequestDto
+            {
+                KulcsId = keyId,
+                FoglalasId = bookingId,
+                Pin = "1234",
+                TeremAllapot = "Rendben"
+            };
+            var denied = await portasClient.PostAsJsonAsync("/api/key-movements/issue", issueRequest);
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+            var grant = await adminClient.PostAsJsonAsync(
+                $"/api/keys/{keyId}/master-access",
+                new { userId = recipientId });
+            Assert.Equal(HttpStatusCode.Created, grant.StatusCode);
+
+            issueRequest.Pin = "9999";
+            var wrongPin = await portasClient.PostAsJsonAsync("/api/key-movements/issue", issueRequest);
+            Assert.Equal(HttpStatusCode.Forbidden, wrongPin.StatusCode);
+
+            issueRequest.Pin = "1234";
+            var allowed = await portasClient.PostAsJsonAsync("/api/key-movements/issue", issueRequest);
+            Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
+        }
+
+        [Fact]
+        public async Task OverdueEndpoint_FindsUnreturnedKeyAfterConfiguredDailyClosing()
+        {
+            var (portasClient, operatorId) = await CreateClientWithRoleAsync("Portas");
+            var (_, keyId) = await SeedRoomAndKeyAsync("K-OVERDUE");
+            var recipientId = await SeedInstructorAsync();
+            var issuedAt = DateTime.UtcNow.AddDays(-2);
+
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                db.Kulcsmozgasok.Add(new Kulcsmozgas
+                {
+                    KulcsId = keyId,
+                    AtvevoFelhasznaloId = recipientId,
+                    MozgasTipus = "Kiadás",
+                    Idopont = issuedAt,
+                    OperátorId = operatorId,
+                    CreatedAt = issuedAt
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var overdue = await portasClient.GetFromJsonAsync<List<OverdueKeyDto>>("/api/key-movements/overdue");
+            Assert.NotNull(overdue);
+            var key = Assert.Single(overdue);
+            Assert.Equal(keyId, key.KulcsId);
+            Assert.Equal("Teszt oktató", key.BirtokosNev);
+            Assert.True(key.KésésPercekben > 0);
+        }
+
+        [Fact]
+        public async Task AdminCanSetAHashedUserPin()
+        {
+            var (adminClient, _) = await CreateClientWithRoleAsync("Adminisztrator");
+            var userId = await SeedInstructorAsync();
+
+            var response = await adminClient.PutAsJsonAsync(
+                $"/api/users/{userId}/pin",
+                new { pin = "9876" });
+
+            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await db.Felhasznalok.FindAsync(userId);
+            Assert.NotNull(user?.PinHash);
+            Assert.True(BCrypt.Net.BCrypt.Verify("9876", user.PinHash));
         }
     }
 }

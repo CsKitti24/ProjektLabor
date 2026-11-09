@@ -1,6 +1,6 @@
 # API_DESIGN.md – Egyetemi Kulcs- és Teremnyilvántartó Rendszer
 
-> **Implementációs állapot (2026-11-02):** Ez a dokumentum a jelenlegi backendhez igazodik. A korábbi tervezeti megjegyzések nem írhatják felül a tényleges útvonalakat, jogosultságokat vagy státuszkódokat.
+> **Implementációs állapot (2026-11-09):** Ez a dokumentum a jelenlegi backendhez igazodik. A korábbi tervezeti megjegyzések nem írhatják felül a tényleges útvonalakat, jogosultságokat vagy státuszkódokat.
 
 ## Aktuális backend-összefoglaló
 
@@ -11,7 +11,14 @@ Az API ASP.NET Core Minimal API, JWT-hitelesítéssel és szerepkör-alapú poli
 - Foglalási idő: egy naptári napon belül 08:00–20:00; kezdés és hossz 45 perces rácshoz igazodik.
 - A foglalás létrehozása és módosítása ugyanazt az idő-, aktív terem-, ütközés- és karbantartási validációt használja; a lemondott és `NoShow` státuszú foglalások nem blokkolnak.
 - Az automatizált `NoShow`, foglalásvége előtti értesítés és napi kulcszárási folyamatok idempotens háttérfeldolgozókkal futnak.
-- Kulcskiadás és -visszavétel: `POST /api/key-movements/issue` és `POST /api/key-movements/return`, `Portas` jogosultsággal. A kiadás sorosítható adatbázis-tranzakciót, kulcs–terem megfeleltetést és a foglaló jogosultságának ellenőrzését használja.
+- Kulcskiadás és -visszavétel: `POST /api/key-movements/issue` és `POST /api/key-movements/return`, `Portas` jogosultsággal. Mindkét kérés 4–8 számjegyű átvevői PIN-t és rögzített teremállapotot igényel; a PIN bcrypt hashként tárolódik, és a backend állítja elő a mozgás időbélyegét.
+- A `PUT /api/users/{id}/pin` adminisztrátori végponttal állítható be az átvevő PIN-je. A PIN nem része a felhasználói válasz DTO-knak és nem kerül az auditnaplóba.
+- A kulcsmozgás a teremállapotot és opcionális sérülésleírást tárolja. Sérülés leírásakor a kulcsmozgással együtt automatikus, auditált `Sérülés` hibajegy készül.
+- A mesterkulcs jogosultságát a rendszer mind foglalásos, mind foglalás nélküli kiadásnál ellenőrzi; a portás csak jogosult átvevőnek adhatja át. A mozgás és a hozzá tartozó auditbejegyzés egy tranzakcióban készül.
+- A `GET /api/key-movements/recipients?kulcsId={id}` kizárólag az adott kulcs átvételére jogosult oktatókat adja vissza a portás felületének.
+- A késedelmi lista (`GET /api/key-movements/overdue`) a napi zárási paramétert, az automatizálás időzónáját és foglalás esetén annak végét használja; a portás aktívkulcs-oldalán a késedelmes tételek egyenként látszanak.
+- A karbantartás foglalási ütközéskor `409 Conflict` választ és az összes érintett foglalás részleteit adja, foglalást nem töröl. Az adminisztrátor ezután a meglévő `PUT /api/bookings/{id}` végponttal törölheti (`status: "Megszuntetve"`) vagy áthelyezheti (`teremId`, `startTime`, `endTime`) a foglalást, majd újra rögzítheti a karbantartást.
+- Az EF Core `AddKeyPinsAndMovementCondition` migráció hozzáadja a felhasználói PIN hash és a kulcsmozgás teremállapot/sérülés mezőit.
 - A `Portas` szerepkör adhat ki és vehet vissza kulcsot; listázni a `Portas`, `Adminisztrator` és `UzemeltetesiIgazgato` szerepkörök tudnak.
 - Production környezetben a JWT issuer, audience és legalább 32 bájtos aláírókulcs konfigurálása kötelező; a forráskódbeli és minta kulcsokkal a backend nem indul el.
 
