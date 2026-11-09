@@ -116,6 +116,7 @@ namespace ProjektLabor.Data
             try
             {
                 ValidateBookings();
+                ValidateAuditLogAppendOnly();
                 return base.SaveChanges(acceptAllChangesOnSuccess);
             }
             finally
@@ -130,11 +131,22 @@ namespace ProjektLabor.Data
             try
             {
                 ValidateBookings();
+                ValidateAuditLogAppendOnly();
                 return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
             }
             finally
             {
                 _saveLock.Release();
+            }
+        }
+
+        private void ValidateAuditLogAppendOnly()
+        {
+            if (ChangeTracker.Entries<AuditLog>().Any(entry =>
+                    entry.State is Microsoft.EntityFrameworkCore.EntityState.Modified or
+                        Microsoft.EntityFrameworkCore.EntityState.Deleted))
+            {
+                throw new InvalidOperationException("Audit log entries are append-only and cannot be changed or deleted.");
             }
         }
 

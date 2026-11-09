@@ -4,8 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.Auth;
-using ProjektLabor.Models;
 using ProjektLabor.Security;
+using ProjektLabor.Models;
 
 namespace ProjektLabor.Services
 {
@@ -15,17 +15,20 @@ namespace ProjektLabor.Services
         private readonly JwtSettings _jwtSettings;
         private readonly IConfiguration _config;
         private readonly ILogger<AuthService> _logger;
+        private readonly AuditService _auditService;
 
         public AuthService(
             AppDbContext db,
             IConfiguration config,
             JwtSettings jwtSettings,
-            ILogger<AuthService> logger)
+            ILogger<AuthService> logger,
+            AuditService auditService)
         {
             _db = db;
             _config = config;
             _jwtSettings = jwtSettings;
             _logger = logger;
+            _auditService = auditService;
         }
 
         /// <summary>
@@ -41,6 +44,11 @@ namespace ProjektLabor.Services
             if (user is null)
             {
                 _logger.LogWarning("Bejelentkezési kísérlet nem létező felhasználóval: {Username}", request.Username);
+                await _auditService.LogForUserAsync(
+                    null,
+                    "LOGIN_FAILED",
+                    "Authentication",
+                    entitasId: request.Username);
                 return null;
             }
 
@@ -48,6 +56,11 @@ namespace ProjektLabor.Services
             if (!passwordValid)
             {
                 _logger.LogWarning("Sikertelen bejelentkezés hibás jelszóval: {Username}", request.Username);
+                await _auditService.LogForUserAsync(
+                    null,
+                    "LOGIN_FAILED",
+                    "Authentication",
+                    entitasId: request.Username);
                 return null;
             }
 
@@ -55,6 +68,11 @@ namespace ProjektLabor.Services
             var expiresAt = DateTime.UtcNow.AddHours(GetExpiresInHours());
 
             _logger.LogInformation("Sikeres bejelentkezés: {Username} (Role: {Role})", user.Username, user.Role);
+            await _auditService.LogForUserAsync(
+                user.Id,
+                "LOGIN_SUCCESS",
+                "Authentication",
+                entitasId: user.Id.ToString());
 
             return new LoginResponseDto
             {

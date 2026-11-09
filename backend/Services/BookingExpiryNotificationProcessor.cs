@@ -45,6 +45,16 @@ public sealed class BookingExpiryNotificationProcessor
             AutomationKey = $"{NotificationType}:{booking.Id}",
             CreatedAt = nowUtc
         }));
+        _db.AuditLogok.AddRange(bookings.Select(booking => new AuditLog
+        {
+            MuveletTipus = "AUTOMATIC_NOTIFICATION",
+            EntitasTipus = "Foglalas",
+            EntitasId = booking.Id.ToString(),
+            AutomationKey = $"BeforeEndNotification:{booking.Id}",
+            UjErtek = NotificationType,
+            Indoklas = "Automatikus foglalás-végi értesítés létrehozása",
+            LetrehozasIdeje = nowUtc
+        }));
 
         await _db.SaveChangesAsync(cancellationToken);
         _logger.LogInformation(

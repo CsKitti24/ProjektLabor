@@ -149,6 +149,56 @@ namespace backend.Tests
         }
 
         [Fact]
+        public async Task AuthenticationAttempts_AreAuditedWithoutRecordingCredentialsOrTokens()
+        {
+            const string username = "audit_login";
+            const string password = "Audit-test-password-2026";
+            await SeedUserAsync(username, password);
+            var client = _factory.CreateClient();
+
+            var failedLogin = await client.PostAsJsonAsync("/api/auth/login", new LoginRequestDto
+            {
+                Username = username,
+                Jelszo = "incorrect-password"
+            });
+            Assert.Equal(HttpStatusCode.Unauthorized, failedLogin.StatusCode);
+
+            var successfulLogin = await client.PostAsJsonAsync("/api/auth/login", new LoginRequestDto
+            {
+                Username = username,
+                Jelszo = password
+            });
+            Assert.Equal(HttpStatusCode.OK, successfulLogin.StatusCode);
+            var login = await successfulLogin.Content.ReadFromJsonAsync<LoginResponseDto>();
+            Assert.NotNull(login);
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", login.Token);
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/auth/logout", null)).StatusCode);
+
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var auditEntries = await db.AuditLogok
+                .Where(entry => entry.EntitasTipus == "Authentication")
+                .OrderBy(entry => entry.Id)
+                .ToListAsync();
+            Assert.Collection(
+                auditEntries,
+                failed => Assert.Equal("LOGIN_FAILED", failed.MuveletTipus),
+                succeeded => Assert.Equal("LOGIN_SUCCESS", succeeded.MuveletTipus),
+                logout => Assert.Equal("LOGOUT", logout.MuveletTipus));
+            Assert.All(auditEntries, entry =>
+            {
+                Assert.DoesNotContain(password, entry.RegiErtek ?? string.Empty, StringComparison.Ordinal);
+                Assert.DoesNotContain(password, entry.UjErtek ?? string.Empty, StringComparison.Ordinal);
+                Assert.DoesNotContain(login.Token, entry.RegiErtek ?? string.Empty, StringComparison.Ordinal);
+                Assert.DoesNotContain(login.Token, entry.UjErtek ?? string.Empty, StringComparison.Ordinal);
+            });
+            Assert.Null(auditEntries[0].FelhasznaloId);
+            Assert.NotNull(auditEntries[1].FelhasznaloId);
+            Assert.Equal(auditEntries[1].FelhasznaloId, auditEntries[2].FelhasznaloId);
+        }
+
+        [Fact]
         public async Task Login_WithEmptyCredentials_ReturnsBadRequest()
         {
             // Arrange

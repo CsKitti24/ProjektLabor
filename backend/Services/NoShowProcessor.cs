@@ -78,7 +78,6 @@ public sealed class NoShowProcessor
 
             booking.Status = "NoShow";
             booking.UpdatedAt = nowUtc;
-
             var automationKey = $"NoShow:{booking.Id}";
             var alreadyAudited = await _db.AuditLogok.AnyAsync(a => a.AutomationKey == automationKey, cancellationToken);
             if (!alreadyAudited)
@@ -89,13 +88,12 @@ public sealed class NoShowProcessor
                     EntitasTipus = "Foglalas",
                     EntitasId = booking.Id.ToString(),
                     AutomationKey = automationKey,
-                    RegiErtek = "Status: Aktiv",
-                    UjErtek = "Status: NoShow",
+                    RegiErtek = "Aktiv",
+                    UjErtek = "NoShow",
                     Indoklas = "Automatikus No-Show státuszváltás: a türelmi időn belül nem történt kulcsfelvétel.",
                     LetrehozasIdeje = nowUtc
                 });
             }
-
             updatedCount++;
         }
 
