@@ -143,6 +143,75 @@ public class SystemAdministrationEndpointTests : IClassFixture<WebApplicationFac
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Fact]
+    public async Task AuditAccess_IsLimitedToAdministratorsAndDirector_AndDeniedRequestsAreLogged()
+    {
+        using var anonymousClient = _factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymousClient.GetAsync("/api/audit")).StatusCode);
+
+        var (instructorClient, instructor) = await CreateAuthenticatedClientAsync("Oktato");
+        Assert.Equal(HttpStatusCode.Forbidden, (await instructorClient.GetAsync("/api/audit")).StatusCode);
+
+        using var invalidTokenClient = _factory.CreateClient();
+        invalidTokenClient.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "invalid-token");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await invalidTokenClient.GetAsync("/api/audit")).StatusCode);
+
+        var (administratorClient, _) = await CreateAuthenticatedClientAsync("Adminisztrator");
+        Assert.Equal(HttpStatusCode.OK, (await administratorClient.GetAsync("/api/audit")).StatusCode);
+
+        var (directorClient, _) = await CreateAuthenticatedClientAsync("UzemeltetesiIgazgato");
+        Assert.Equal(HttpStatusCode.OK, (await directorClient.GetAsync("/api/audit")).StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var accessEvents = await db.AuditLogok
+            .Where(entry => entry.EntitasTipus == "API")
+            .OrderBy(entry => entry.Id)
+            .ToListAsync();
+        Assert.Collection(
+            accessEvents,
+            unauthenticated =>
+            {
+                Assert.Equal("ACCESS_UNAUTHENTICATED", unauthenticated.MuveletTipus);
+                Assert.Null(unauthenticated.FelhasznaloId);
+            },
+            forbidden =>
+            {
+                Assert.Equal("ACCESS_FORBIDDEN", forbidden.MuveletTipus);
+                Assert.Equal(instructor.Id, forbidden.FelhasznaloId);
+                Assert.Equal("/api/audit", forbidden.EntitasId);
+            },
+            invalidToken =>
+            {
+                Assert.Equal("ACCESS_UNAUTHENTICATED", invalidToken.MuveletTipus);
+                Assert.Null(invalidToken.FelhasznaloId);
+            });
+    }
+
+    [Fact]
+    public async Task RejectedMutation_IsAuditedWithoutRequestBody()
+    {
+        var (client, administrator) = await CreateAuthenticatedClientAsync("Adminisztrator");
+        const string sensitiveInput = "do-not-copy-this-value";
+
+        var response = await client.PutAsJsonAsync(
+            "/api/parameters/napi_kulcsleadasi_zarasi_idopont",
+            new SystemAdministrationEndpoints.UpdateParameterRequest(sensitiveInput, null));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var audit = await db.AuditLogok.SingleAsync(entry =>
+            entry.MuveletTipus == "OPERATION_REJECTED");
+        Assert.Equal(administrator.Id, audit.FelhasznaloId);
+        Assert.Equal("/api/parameters/napi_kulcsleadasi_zarasi_idopont", audit.EntitasId);
+        Assert.DoesNotContain(sensitiveInput, audit.RegiErtek ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain(sensitiveInput, audit.UjErtek ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain(sensitiveInput, audit.Indoklas ?? string.Empty, StringComparison.Ordinal);
+    }
+
     private async Task<(HttpClient Client, Felhasznalo User)> CreateAuthenticatedClientAsync(string role)
     {
         using var scope = _factory.Services.CreateScope();

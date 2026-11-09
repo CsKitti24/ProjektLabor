@@ -50,7 +50,8 @@ public sealed class DemoUserSeedTests
             db,
             authConfiguration,
             new JwtSettings("test-issuer", "test-audience", "test-signing-key-with-at-least-32-bytes"),
-            NullLogger<AuthService>.Instance);
+            NullLogger<AuthService>.Instance,
+            new AuditService(db, NullLogger<AuditService>.Instance));
 
         foreach (var (username, password, role) in DemoUsers())
         {

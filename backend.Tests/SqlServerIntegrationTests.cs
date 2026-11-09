@@ -608,7 +608,12 @@ public sealed class SqlServerIntegrationTests
                 "sql-server-integration-tests",
                 "sql-server-integration-tests-api",
                 Convert.ToBase64String(RandomNumberGenerator.GetBytes(48)));
-            var authService = new AuthService(db, configuration, jwtSettings, NullLogger<AuthService>.Instance);
+            var authService = new AuthService(
+                db,
+                configuration,
+                jwtSettings,
+                NullLogger<AuthService>.Instance,
+                new AuditService(db, NullLogger<AuditService>.Instance));
             foreach (var role in RoleNames.All)
             {
                 var user = Assert.Single(users, account => account.Role == role);

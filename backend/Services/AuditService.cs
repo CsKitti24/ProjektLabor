@@ -30,20 +30,39 @@ namespace ProjektLabor.Services
                     userId = parsedId;
                 }
 
-            var log = new AuditLog
-            {
+                await LogForUserAsync(
+                    userId,
+                    muveletTipus,
+                    entitasTipus,
+                    entitasId,
+                    regiErtek,
+                    ujErtek,
+                    indoklas);
+        }
+
+        public async Task LogForUserAsync(
+                int? userId,
+                string muveletTipus,
+                string entitasTipus,
+                string? entitasId = null,
+                string? regiErtek = null,
+                string? ujErtek = null,
+                string? indoklas = null)
+        {
+                var log = new AuditLog
+                {
                     FelhasznaloId = userId,
                     MuveletTipus = muveletTipus,
                     EntitasTipus = entitasTipus,
-                    EntitasId = entitasId,
+                    EntitasId = entitasId is { Length: > 50 } ? entitasId[..50] : entitasId,
                     RegiErtek = regiErtek,
                     UjErtek = ujErtek,
                     Indoklas = indoklas,
                     LetrehozasIdeje = DateTime.UtcNow
                 };
 
-            _db.AuditLogok.Add(log);
-            await _db.SaveChangesAsync();
+                _db.AuditLogok.Add(log);
+                await _db.SaveChangesAsync();
         }
     }
 }

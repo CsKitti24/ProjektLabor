@@ -49,6 +49,11 @@ public class BackgroundAutomationTests
         Assert.Equal("Aktiv", booking.Status);
         Assert.Equal(1, await processor.ProcessAsync(new DateTime(2026, 4, 4, 10, 15, 0, DateTimeKind.Utc), default));
         Assert.Equal("NoShow", booking.Status);
+        var audit = await db.AuditLogok.SingleAsync();
+        Assert.Equal("UPDATE", audit.MuveletTipus);
+        Assert.Equal(booking.Id.ToString(), audit.EntitasId);
+        Assert.Equal("Aktiv", audit.RegiErtek);
+        Assert.Equal("NoShow", audit.UjErtek);
     }
 
     [Fact]
@@ -215,6 +220,10 @@ public class BackgroundAutomationTests
         Assert.Equal(now, notification.IdoPont);
         Assert.DoesNotContain(await db.Ertesitesek.ToListAsync(), item => item.FoglalasId == cancelledBooking.Id);
         Assert.DoesNotContain(await db.Ertesitesek.ToListAsync(), item => item.FoglalasId == expiredBooking.Id);
+        var audit = await db.AuditLogok.SingleAsync();
+        Assert.Equal("AUTOMATIC_NOTIFICATION", audit.MuveletTipus);
+        Assert.Equal(activeBooking.Id.ToString(), audit.EntitasId);
+        Assert.Equal($"BeforeEndNotification:{activeBooking.Id}", audit.AutomationKey);
     }
 
     [Fact]

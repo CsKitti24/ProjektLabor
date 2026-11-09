@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ProjektLabor.Data;
@@ -20,6 +21,15 @@ namespace backend.Tests
             _factory = factory.WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Development");
+                builder.ConfigureAppConfiguration((_, configuration) =>
+                {
+                    configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Authentication:Jwt:Issuer"] = TestJwtConfiguration.Issuer,
+                        ["Authentication:Jwt:Audience"] = TestJwtConfiguration.Audience,
+                        ["Authentication:Jwt:SigningKey"] = TestJwtConfiguration.SigningKey
+                    });
+                });
                 builder.ConfigureServices(services =>
                 {
                     var descriptor = services.SingleOrDefault(
@@ -103,6 +113,15 @@ namespace backend.Tests
             var prodFactory = _factory.WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Production");
+                builder.ConfigureAppConfiguration((_, configuration) =>
+                {
+                    configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Authentication:Jwt:Issuer"] = TestJwtConfiguration.Issuer,
+                        ["Authentication:Jwt:Audience"] = TestJwtConfiguration.Audience,
+                        ["Authentication:Jwt:SigningKey"] = TestJwtConfiguration.SigningKey
+                    });
+                });
             });
             var client = prodFactory.CreateClient(new WebApplicationFactoryClientOptions
             {

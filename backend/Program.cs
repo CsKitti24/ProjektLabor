@@ -151,6 +151,49 @@ var app = builder.Build();
 
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    await next();
+
+    var statusCode = context.Response.StatusCode;
+    var accessDenied = statusCode is StatusCodes.Status401Unauthorized or StatusCodes.Status403Forbidden;
+    var rejectedMutation =
+        context.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE" &&
+        statusCode is >= StatusCodes.Status400BadRequest and < StatusCodes.Status500InternalServerError;
+    if ((!accessDenied && !rejectedMutation) ||
+        context.Request.Path.StartsWithSegments("/api/auth/login"))
+    {
+        return;
+    }
+
+    var dbContext = context.RequestServices.GetRequiredService<AppDbContext>();
+    int? userId = null;
+    var subject = context.User.Identity?.IsAuthenticated == true
+        ? context.User.FindFirst("sub")?.Value
+        : null;
+    if (int.TryParse(subject, out var parsedUserId) &&
+        parsedUserId > 0 &&
+        await dbContext.Felhasznalok.AnyAsync(user => user.Id == parsedUserId, context.RequestAborted))
+    {
+        userId = parsedUserId;
+    }
+
+    var path = context.Request.Path.Value ?? "/";
+    dbContext.AuditLogok.Add(new ProjektLabor.Models.AuditLog
+    {
+        FelhasznaloId = userId,
+        MuveletTipus = accessDenied
+            ? statusCode == StatusCodes.Status401Unauthorized
+                ? "ACCESS_UNAUTHENTICATED"
+                : "ACCESS_FORBIDDEN"
+            : "OPERATION_REJECTED",
+        EntitasTipus = "API",
+        EntitasId = path.Length > 50 ? path[..50] : path,
+        Indoklas = $"{context.Request.Method} request returned {statusCode}.",
+        LetrehozasIdeje = DateTime.UtcNow
+    });
+    await dbContext.SaveChangesAsync(context.RequestAborted);
+});
 app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
@@ -244,10 +287,16 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
 app.MapPost("/api/auth/login", async (
     LoginRequestDto request,
     AuthService authService,
+    AuditService auditService,
     ILogger<Program> logger) =>
 {
     if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Jelszo))
     {
+        await auditService.LogForUserAsync(
+            null,
+            "LOGIN_INVALID",
+            "Authentication",
+            entitasId: request.Username);
         return Results.BadRequest(new { message = "A felhasználónév és a jelszó megadása kötelező." });
     }
 
@@ -270,7 +319,11 @@ app.MapPost("/api/auth/login", async (
 .Produces(StatusCodes.Status401Unauthorized)
 .WithOpenApi();
 
-app.MapPost("/api/auth/logout", () => Results.Ok(new { message = "Sikeres kijelentkezés." }))
+app.MapPost("/api/auth/logout", async (HttpContext context, AuditService auditService) =>
+{
+    await auditService.LogAsync(context.User, "LOGOUT", "Authentication");
+    return Results.Ok(new { message = "Sikeres kijelentkezés." });
+})
     .WithName("Logout")
     .WithSummary("Kijelentkezés; a kliens törli a JWT tokent.")
     .WithTags("Auth")
