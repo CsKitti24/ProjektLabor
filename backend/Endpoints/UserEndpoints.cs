@@ -380,7 +380,50 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status403Forbidden)
             .WithOpenApi();
 
+            group.MapPut("/{id:int}/pin", async (
+                int id,
+                SetPinRequest request,
+                AppDbContext db,
+                AuditService auditService,
+                ClaimsPrincipal caller) =>
+            {
+                if (string.IsNullOrWhiteSpace(request.Pin) ||
+                    request.Pin.Length is < 4 or > 8 ||
+                    request.Pin.Any(character => character is < '0' or > '9'))
+                {
+                    return Results.BadRequest(new { message = "A PIN-kód 4–8 számjegyből állhat." });
+                }
+
+                var user = await db.Felhasznalok.FindAsync(id);
+                if (user is null)
+                {
+                    return Results.NotFound(new { message = "A felhasználó nem található." });
+                }
+
+                user.PinHash = BCrypt.Net.BCrypt.HashPassword(request.Pin);
+                user.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+                await auditService.LogAsync(
+                    caller,
+                    "PIN_CHANGE",
+                    "Felhasznalo",
+                    id.ToString(),
+                    ujErtek: "PIN beállítva");
+
+                return Results.NoContent();
+            })
+            .WithName("SetUserPin")
+            .WithSummary("Felhasználói PIN beállítása kulcsátvételhez")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .WithOpenApi();
+
             return group;
         }
+
+        public sealed record SetPinRequest(string Pin);
     }
 }

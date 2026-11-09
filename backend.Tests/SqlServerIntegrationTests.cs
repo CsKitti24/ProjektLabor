@@ -262,7 +262,13 @@ public sealed class SqlServerIntegrationTests
 
         using var issueResponse = await client.PostAsJsonAsync(
             "/api/key-movements/issue",
-            new IssueKeyRequestDto { KulcsId = endpointKey.Id, AtvevoFelhasznaloId = instructorId });
+            new IssueKeyRequestDto
+            {
+                KulcsId = endpointKey.Id,
+                AtvevoFelhasznaloId = instructorId,
+                Pin = "1234",
+                TeremAllapot = "Rendben"
+            });
         Assert.Equal(HttpStatusCode.Created, issueResponse.StatusCode);
         var issuedMovement = await issueResponse.Content.ReadFromJsonAsync<KeyMovementItemDto>();
         Assert.NotNull(issuedMovement);
@@ -271,7 +277,12 @@ public sealed class SqlServerIntegrationTests
 
         using var returnResponse = await client.PostAsJsonAsync(
             "/api/key-movements/return",
-            new ReturnKeyRequestDto { KulcsId = endpointKey.Id });
+            new ReturnKeyRequestDto
+            {
+                KulcsId = endpointKey.Id,
+                Pin = "1234",
+                TeremAllapot = "Rendben"
+            });
         Assert.Equal(HttpStatusCode.OK, returnResponse.StatusCode);
         var returnedMovement = await returnResponse.Content.ReadFromJsonAsync<KeyMovementItemDto>();
         Assert.NotNull(returnedMovement);
@@ -425,7 +436,8 @@ public sealed class SqlServerIntegrationTests
             Email = $"{suffix}@test.hu",
             JelszoHash = "integration-test-hash",
             Nev = role,
-            Role = role
+            Role = role,
+            PinHash = role == RoleNames.Oktato ? BCryptHasher.HashPassword("1234") : null
         };
     }
 

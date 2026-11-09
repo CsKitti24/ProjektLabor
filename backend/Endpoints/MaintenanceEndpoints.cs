@@ -122,9 +122,15 @@ public static class MaintenanceEndpoints
             return Results.NotFound(new { message = "A megadott terem nem található." });
         }
 
-        if (await HasBookingConflictAsync(db, request, cancellationToken))
+        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+            ? null
+            : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+        await SqlServerLocking.AcquireAsync(db, $"room-booking:{request.TeremId}", cancellationToken);
+
+        var conflicts = await GetBookingConflictsAsync(db, request, cancellationToken);
+        if (conflicts.Count > 0)
         {
-            return BookingConflict();
+            return BookingConflict(conflicts);
         }
 
         var item = new KarbantartasiIdosav
@@ -136,9 +142,6 @@ public static class MaintenanceEndpoints
             Leiras = request.Leiras
         };
 
-        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
-            ? null
-            : await db.Database.BeginTransactionAsync(cancellationToken);
         db.KarbantartasiIdosavok.Add(item);
         await db.SaveChangesAsync(cancellationToken);
         await auditService.LogAsync(user, "CREATE", "KarbantartasiIdosav", item.Id.ToString(),
@@ -183,18 +186,24 @@ public static class MaintenanceEndpoints
             return Results.NotFound(new { message = "A megadott terem nem található." });
         }
 
-        if (await HasBookingConflictAsync(db, request, cancellationToken))
+        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+            ? null
+            : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+        foreach (var roomId in new[] { item.TeremId, request.TeremId }.Distinct().Order())
         {
-            return BookingConflict();
+            await SqlServerLocking.AcquireAsync(db, $"room-booking:{roomId}", cancellationToken);
+        }
+
+        var conflicts = await GetBookingConflictsAsync(db, request, cancellationToken);
+        if (conflicts.Count > 0)
+        {
+            return BookingConflict(conflicts);
         }
 
         item.TeremId = request.TeremId;
         item.StartTime = request.StartTime;
         item.EndTime = request.EndTime;
         item.Leiras = request.Leiras;
-        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
-            ? null
-            : await db.Database.BeginTransactionAsync(cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await auditService.LogAsync(user, "UPDATE", "KarbantartasiIdosav", item.Id.ToString(),
             ujErtek: $"TeremId: {item.TeremId}; Start: {item.StartTime:O}; End: {item.EndTime:O}");
@@ -277,19 +286,36 @@ public static class MaintenanceEndpoints
         return null;
     }
 
-    private static Task<bool> HasBookingConflictAsync(
+    private static Task<List<BookingConflictResponse>> GetBookingConflictsAsync(
         AppDbContext db,
         MaintenanceRequest request,
         CancellationToken cancellationToken) =>
-        db.Foglalasok.AnyAsync(
-            booking => booking.TeremId == request.TeremId &&
-                       booking.Status != CancelledBookingStatus &&
-                       booking.StartTime < request.EndTime &&
-                       booking.EndTime > request.StartTime,
-            cancellationToken);
+        db.Foglalasok
+            .AsNoTracking()
+            .Where(booking =>
+                booking.TeremId == request.TeremId &&
+                booking.Status != CancelledBookingStatus &&
+                booking.Status != "NoShow" &&
+                booking.StartTime < request.EndTime &&
+                booking.EndTime > request.StartTime)
+            .OrderBy(booking => booking.StartTime)
+            .Select(booking => new BookingConflictResponse(
+                booking.Id,
+                booking.FelhasznaloId,
+                booking.Felhasznalo.Nev,
+                booking.TeremId,
+                booking.Terem.Nev,
+                booking.StartTime,
+                booking.EndTime,
+                booking.Status))
+            .ToListAsync(cancellationToken);
 
-    private static IResult BookingConflict() =>
-        Results.Conflict(new { message = "A karbantartási idősáv ütközik egy teremfoglalással." });
+    private static IResult BookingConflict(IReadOnlyList<BookingConflictResponse> conflicts) =>
+        Results.Conflict(new
+        {
+            message = "A karbantartási idősáv ütközik az alábbi foglalásokkal. A foglalásokat törölni vagy áthelyezni kell.",
+            conflicts
+        });
 
     private static Task<MaintenanceResponse?> FindResponseAsync(
         AppDbContext db,
@@ -317,4 +343,14 @@ public static class MaintenanceEndpoints
         DateTime EndTime,
         string? Leiras,
         DateTime CreatedAt);
+
+    public sealed record BookingConflictResponse(
+        int FoglalasId,
+        int FelhasznaloId,
+        string FelhasznaloNev,
+        int TeremId,
+        string TeremNev,
+        DateTime StartTime,
+        DateTime EndTime,
+        string Status);
 }

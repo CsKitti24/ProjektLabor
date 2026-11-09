@@ -32,6 +32,12 @@ namespace ProjektLabor.Models
 
         public string? Megjegyzes { get; set; }
 
+        [MaxLength(500)]
+        public string? TeremAllapot { get; set; }
+
+        [MaxLength(1000)]
+        public string? SerulesLeiras { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

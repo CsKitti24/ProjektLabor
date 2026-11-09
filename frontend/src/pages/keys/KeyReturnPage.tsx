@@ -14,6 +14,9 @@ interface KeyItem {
 export default function KeyReturnPage() {
   const [issuedKeys, setIssuedKeys] = useState<KeyItem[]>([])
   const [keyId, setKeyId] = useState('')
+  const [pin, setPin] = useState('')
+  const [teremAllapot, setTeremAllapot] = useState('')
+  const [serulesLeiras, setSerulesLeiras] = useState('')
   const [megjegyzes, setMegjegyzes] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -32,7 +35,10 @@ export default function KeyReturnPage() {
           setKeyId('')
         }
       })
-      .catch(() => {})
+      .catch((err: unknown) => {
+        const axErr = err as { response?: { data?: { message?: string } } }
+        setError(axErr.response?.data?.message || 'Nem sikerült betölteni a kint lévő kulcsokat.')
+      })
   }
 
   useEffect(() => {
@@ -41,8 +47,8 @@ export default function KeyReturnPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!keyId) {
-      setError('Kérjük, válaszd ki a visszavenni kívánt kulcsot!')
+    if (!keyId || !pin || !teremAllapot.trim()) {
+      setError('Válaszd ki a kulcsot, add meg az átvevő PIN-kódját és a terem állapotát.')
       return
     }
 
@@ -52,10 +58,16 @@ export default function KeyReturnPage() {
     try {
       await client.post('/key-movements/return', {
         kulcsId: Number(keyId),
+        pin,
+        teremAllapot: teremAllapot.trim(),
+        serulesLeiras: serulesLeiras.trim() || undefined,
         megjegyzes: megjegyzes.trim() || undefined,
       })
 
       setSuccess('A kulcs sikeresen visszavételezve a portára!')
+      setPin('')
+      setTeremAllapot('')
+      setSerulesLeiras('')
       setMegjegyzes('')
       fetchIssuedKeys()
       setTimeout(() => setSuccess(''), 4000)
@@ -75,7 +87,7 @@ export default function KeyReturnPage() {
             <ArrowDownLeft size={20} strokeWidth={1.5} color="var(--color-primary)" />
             <span>Kulcsvisszavétel</span>
           </h1>
-          <p className="page-subtitle">Kiadott kulcs visszavétele és lezárása</p>
+          <p className="page-subtitle">Kiadott kulcs visszavétele PIN-ellenőrzéssel és állapotrögzítéssel</p>
         </div>
       </div>
 
@@ -116,6 +128,26 @@ export default function KeyReturnPage() {
                 ))
               )}
             </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="return-pin">Az átvevő PIN-kódja *</label>
+            <input id="return-pin" className="form-input" type="password" inputMode="numeric"
+              pattern="[0-9]{4,8}" minLength={4} maxLength={8} autoComplete="off"
+              value={pin} onChange={(e) => setPin(e.target.value)} required />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="return-condition">Terem állapota *</label>
+            <textarea id="return-condition" className="form-textarea" rows={2} maxLength={500}
+              placeholder="pl. Rendben, tiszta, felszerelés működik"
+              value={teremAllapot} onChange={(e) => setTeremAllapot(e.target.value)} required />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="return-damage">Sérülés vagy rendellenesség (opcionális)</label>
+            <textarea id="return-damage" className="form-textarea" rows={2} maxLength={1000}
+              value={serulesLeiras} onChange={(e) => setSerulesLeiras(e.target.value)} />
           </div>
 
           <div className="form-group">

@@ -12,6 +12,16 @@ namespace ProjektLabor.DTOs.KeyMovements
 
         public int? AtvevoFelhasznaloId { get; set; }
 
+        [Required]
+        [RegularExpression("^[0-9]{4,8}$", ErrorMessage = "A PIN-kód 4–8 számjegyből állhat.")]
+        public string Pin { get; set; } = string.Empty;
+
+        [Required, MaxLength(500)]
+        public string TeremAllapot { get; set; } = string.Empty;
+
+        [MaxLength(1000)]
+        public string? SerulesLeiras { get; set; }
+
         [MaxLength(500, ErrorMessage = "A megjegyzés legfeljebb 500 karakter lehet.")]
         public string? Megjegyzes { get; set; }
     }
@@ -20,6 +30,16 @@ namespace ProjektLabor.DTOs.KeyMovements
     {
         [Required(ErrorMessage = "A kulcs azonosítójának megadása kötelező.")]
         public int KulcsId { get; set; }
+
+        [Required]
+        [RegularExpression("^[0-9]{4,8}$", ErrorMessage = "A PIN-kód 4–8 számjegyből állhat.")]
+        public string Pin { get; set; } = string.Empty;
+
+        [Required, MaxLength(500)]
+        public string TeremAllapot { get; set; } = string.Empty;
+
+        [MaxLength(1000)]
+        public string? SerulesLeiras { get; set; }
 
         [MaxLength(500, ErrorMessage = "A megjegyzés legfeljebb 500 karakter lehet.")]
         public string? Megjegyzes { get; set; }

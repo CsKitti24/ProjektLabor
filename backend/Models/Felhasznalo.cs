@@ -18,6 +18,9 @@ namespace ProjektLabor.Models
         [Required, MaxLength(256)]
         public string JelszoHash { get; set; } = string.Empty;
 
+        [MaxLength(256)]
+        public string? PinHash { get; set; }
+
         [Required, MaxLength(100)]
         public string Nev { get; set; } = string.Empty;
 

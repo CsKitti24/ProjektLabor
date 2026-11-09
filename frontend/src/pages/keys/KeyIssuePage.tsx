@@ -23,6 +23,9 @@ export default function KeyIssuePage() {
   const [users, setUsers] = useState<UserOption[]>([])
   const [keyId, setKeyId] = useState('')
   const [userId, setUserId] = useState('')
+  const [pin, setPin] = useState('')
+  const [teremAllapot, setTeremAllapot] = useState('')
+  const [serulesLeiras, setSerulesLeiras] = useState('')
   const [megjegyzes, setMegjegyzes] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -41,29 +44,51 @@ export default function KeyIssuePage() {
           setKeyId((prev) => (prev ? prev : String(available[0].id)))
         }
       })
-      .catch(() => {})
+      .catch((err: unknown) => {
+        const axErr = err as { response?: { data?: { message?: string } } }
+        setError(axErr.response?.data?.message || 'Nem sikerült betölteni a kiadható kulcsokat.')
+      })
   }, [])
 
   useEffect(() => {
     fetchKeys()
 
-    // Oktatók / felhasználók lekérése az átvevő kiválasztásához
+  }, [fetchKeys])
+
+  useEffect(() => {
+    if (!keyId) {
+      setUsers([])
+      setUserId('')
+      return
+    }
+
+    let ignore = false
+    setError('')
+    setUsers([])
+    setUserId('')
     client
-      .get<{ items?: UserOption[] } | UserOption[]>('/users')
+      .get<UserOption[]>('/key-movements/recipients', { params: { kulcsId: Number(keyId) } })
       .then((res) => {
-        const userList = Array.isArray(res.data) ? res.data : (res.data?.items ?? [])
-        setUsers(userList)
-        if (userList.length > 0) {
-          setUserId((prev) => (prev ? prev : String(userList[0].id)))
+        if (!ignore) {
+          setUsers(res.data)
+          if (res.data.length > 0) setUserId(String(res.data[0].id))
         }
       })
-      .catch(() => {})
-  }, [fetchKeys])
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const axErr = err as { response?: { data?: { message?: string } } }
+          setError(axErr.response?.data?.message || 'Nem sikerült betölteni a kulcsra jogosult átvevőket.')
+        }
+      })
+    return () => {
+      ignore = true
+    }
+  }, [keyId])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!keyId || !userId) {
-      setError('Kérjük, válaszd ki a kulcsot és az átvevő személyt!')
+    if (!keyId || !userId || !pin || !teremAllapot.trim()) {
+      setError('Válaszd ki a kulcsot és az átvevőt, add meg a PIN-kódot és a terem állapotát.')
       return
     }
 
@@ -74,10 +99,16 @@ export default function KeyIssuePage() {
       await client.post('/key-movements/issue', {
         kulcsId: Number(keyId),
         atvevoFelhasznaloId: Number(userId),
+        pin,
+        teremAllapot: teremAllapot.trim(),
+        serulesLeiras: serulesLeiras.trim() || undefined,
         megjegyzes: megjegyzes.trim() || undefined,
       })
 
       setSuccess('A kulcs kiadása sikeresen rögzítve a rendszerben!')
+      setPin('')
+      setTeremAllapot('')
+      setSerulesLeiras('')
       setMegjegyzes('')
       fetchKeys()
       setTimeout(() => setSuccess(''), 4000)
@@ -97,7 +128,7 @@ export default function KeyIssuePage() {
             <ArrowUpRight size={20} strokeWidth={1.5} color="var(--color-primary)" />
             <span>Kulcskiadás rögzítése</span>
           </h1>
-          <p className="page-subtitle">Kulcs átadása oktatónak vagy jogosult személynek</p>
+          <p className="page-subtitle">Kulcs átadása PIN-ellenőrzéssel és a terem állapotának rögzítésével</p>
         </div>
       </div>
 
@@ -142,7 +173,7 @@ export default function KeyIssuePage() {
 
           <div className="form-group">
             <label className="form-label" htmlFor="issue-user">
-              Átvevő személy *
+              Jogosult átvevő *
             </label>
             {users.length > 0 ? (
               <select
@@ -159,16 +190,28 @@ export default function KeyIssuePage() {
                 ))}
               </select>
             ) : (
-              <input
-                id="issue-user"
-                type="number"
-                className="form-input"
-                placeholder="Átvevő felhasználó azonosítója (ID)"
-                value={userId}
-                onChange={(e) => setUserId(e.target.value)}
-                required
-              />
+              <p className="form-hint">Ehhez a kulcshoz nincs beállított átvevői jogosultság.</p>
             )}
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="issue-pin">Az átvevő PIN-kódja *</label>
+            <input id="issue-pin" className="form-input" type="password" inputMode="numeric"
+              pattern="[0-9]{4,8}" minLength={4} maxLength={8} autoComplete="off"
+              value={pin} onChange={(e) => setPin(e.target.value)} required />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="issue-condition">Terem állapota *</label>
+            <textarea id="issue-condition" className="form-textarea" rows={2} maxLength={500}
+              placeholder="pl. Rendben, tiszta, felszerelés működik"
+              value={teremAllapot} onChange={(e) => setTeremAllapot(e.target.value)} required />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="issue-damage">Sérülés vagy rendellenesség (opcionális)</label>
+            <textarea id="issue-damage" className="form-textarea" rows={2} maxLength={1000}
+              value={serulesLeiras} onChange={(e) => setSerulesLeiras(e.target.value)} />
           </div>
 
           <div className="form-group">
@@ -189,7 +232,7 @@ export default function KeyIssuePage() {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={isLoading || keys.length === 0}
+              disabled={isLoading || keys.length === 0 || users.length === 0}
             >
               {isLoading ? (
                 <>

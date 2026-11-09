@@ -348,14 +348,30 @@ namespace ProjektLabor.Endpoints
                 {
                     return Results.Forbid();
                 }
+                if (!isAdmin && request.TeremId.HasValue)
+                {
+                    return Results.Forbid();
+                }
 
                 await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
                     ? null
                     : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-                await SqlServerLocking.AcquireAsync(db, $"room-booking:{booking.TeremId}");
+                var requestedRoomId = request.TeremId ?? booking.TeremId;
+                foreach (var roomId in new[] { booking.TeremId, requestedRoomId }.Distinct().Order())
+                {
+                    await SqlServerLocking.AcquireAsync(db, $"room-booking:{roomId}");
+                }
 
                 var newStart = request.StartTime ?? booking.StartTime;
                 var newEnd = request.EndTime ?? booking.EndTime;
+                var newRoomId = requestedRoomId;
+                var targetRoom = newRoomId == booking.TeremId
+                    ? booking.Terem
+                    : await db.Termek.SingleOrDefaultAsync(room => room.Id == newRoomId);
+                if (targetRoom is null)
+                {
+                    return Results.NotFound(new { message = "A megadott terem nem található." });
+                }
 
                 var timeError = BookingRules.ValidateTimeRange(newStart, newEnd);
                 if (timeError is not null)
@@ -364,7 +380,7 @@ namespace ProjektLabor.Endpoints
                 }
 
                 var validationError = await BookingRules.ValidateAsync(
-                    db, booking.TeremId, newStart, newEnd, id);
+                    db, newRoomId, newStart, newEnd, id);
                 if (validationError is not null)
                 {
                     return Results.Conflict(new { message = validationError });
@@ -386,6 +402,8 @@ namespace ProjektLabor.Endpoints
 
                 booking.StartTime = newStart;
                 booking.EndTime = newEnd;
+                booking.TeremId = newRoomId;
+                booking.Terem = targetRoom;
                 booking.UpdatedAt = DateTime.UtcNow;
 
                 await db.SaveChangesAsync();
