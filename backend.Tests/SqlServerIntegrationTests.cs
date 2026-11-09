@@ -114,7 +114,9 @@ public sealed class SqlServerIntegrationTests
                     testDate.AddMinutes(1));
 
                 await db.Database.MigrateAsync();
-                instructor.PinHash = BCryptHasher.HashPassword("1234");
+                var instructorForPin = await db.Felhasznalok
+                    .SingleAsync(user => user.Id == instructorId);
+                instructorForPin.PinHash = BCryptHasher.HashPassword("1234");
                 await db.SaveChangesAsync();
 
                 var oldRowsAfterMigration = await db.Kulcsmozgasok
