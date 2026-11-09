@@ -109,6 +109,86 @@ public class BackgroundAutomationTests
     }
 
     [Fact]
+    public async Task NoShow_DoesNotMarkNoShow_WhenKeyWasCollectedBeforeStartTime()
+    {
+        await using var db = CreateDb();
+        var startTime = new DateTime(2026, 4, 4, 10, 0, 0, DateTimeKind.Utc);
+        var (booking, operatorUser) = await SeedBookingAsync(db, "Aktiv", startTime);
+
+        var key = await AddKeyAsync(db, booking.TeremId, "NS-EARLY");
+        // Key collected 10 minutes BEFORE start time (09:50)
+        await AddMovementAsync(
+            db,
+            key.Id,
+            booking.Id,
+            operatorUser.Id,
+            "Kiadás",
+            startTime.AddMinutes(-10),
+            booking.FelhasznaloId);
+
+        var processor = new NoShowProcessor(db, NullLogger<NoShowProcessor>.Instance);
+        // Run processor at 10:20 (well past the 15-minute grace period)
+        var count = await processor.ProcessAsync(startTime.AddMinutes(20), default);
+
+        Assert.Equal(0, count);
+        Assert.Equal("Aktiv", booking.Status);
+    }
+
+    [Fact]
+    public async Task NoShow_DoesNotMarkNoShow_WhenRoomHasActiveUnreturnedKeyMovement()
+    {
+        await using var db = CreateDb();
+        var startTime = new DateTime(2026, 4, 4, 10, 0, 0, DateTimeKind.Utc);
+        var (booking, operatorUser) = await SeedBookingAsync(db, "Aktiv", startTime);
+
+        var key = await AddKeyAsync(db, booking.TeremId, "NS-ACTIVE-KEY");
+        // Active key checkout on the room (without explicit FoglalasId link, e.g. ad-hoc or previous)
+        await AddMovementAsync(
+            db,
+            key.Id,
+            bookingId: null,
+            operatorUser.Id,
+            "Kiadás",
+            startTime.AddMinutes(5),
+            booking.FelhasznaloId);
+
+        var processor = new NoShowProcessor(db, NullLogger<NoShowProcessor>.Instance);
+        // At 10:25, past the grace window, but room key is actively issued!
+        var count = await processor.ProcessAsync(startTime.AddMinutes(25), default);
+
+        Assert.Equal(0, count);
+        Assert.Equal("Aktiv", booking.Status);
+    }
+
+    [Fact]
+    public async Task NoShow_SetsAuditLogAndAllowsRebooking()
+    {
+        await using var db = CreateDb();
+        var startTime = new DateTime(2026, 4, 4, 8, 45, 0, DateTimeKind.Utc); // 08:45 is a valid slot
+        var endTime = startTime.AddMinutes(45);
+        var (booking, _) = await SeedBookingAsync(db, "Aktiv", startTime);
+        booking.EndTime = endTime;
+        await db.SaveChangesAsync();
+
+        var processor = new NoShowProcessor(db, NullLogger<NoShowProcessor>.Instance);
+        var count = await processor.ProcessAsync(startTime.AddMinutes(16), default);
+
+        Assert.Equal(1, count);
+        Assert.Equal("NoShow", booking.Status);
+
+        // Verify AuditLog
+        var audit = await db.AuditLogok.SingleOrDefaultAsync(a => a.AutomationKey == $"NoShow:{booking.Id}");
+        Assert.NotNull(audit);
+        Assert.Equal("UPDATE", audit.MuveletTipus);
+        Assert.Equal("Foglalas", audit.EntitasTipus);
+        Assert.Equal(booking.Id.ToString(), audit.EntitasId);
+
+        // Verify that after NoShow, the room is released and BookingRules allows new booking for the same slot
+        var validationResult = await BookingRules.ValidateAsync(db, booking.TeremId, startTime, endTime);
+        Assert.Null(validationResult);
+    }
+
+    [Fact]
     public async Task BookingExpiryNotification_IsCreatedOnceForActiveBooking()
     {
         await using var db = CreateDb();

@@ -13,6 +13,7 @@ namespace ProjektLabor.DTOs.Bookings
         public DateTime StartTime { get; set; }
         public DateTime EndTime { get; set; }
         public string Status { get; set; } = string.Empty;
+        public string? SpecialisIgenyek { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }
@@ -29,6 +30,9 @@ namespace ProjektLabor.DTOs.Bookings
 
         [Required(ErrorMessage = "A befejezési időpont megadása kötelező.")]
         public DateTime EndTime { get; set; }
+
+        [MaxLength(500, ErrorMessage = "A speciális igények legfeljebb 500 karakter lehet.")]
+        public string? SpecialisIgenyek { get; set; }
     }
 
     public class UpdateBookingRequestDto
@@ -36,6 +40,9 @@ namespace ProjektLabor.DTOs.Bookings
         public DateTime? StartTime { get; set; }
         public DateTime? EndTime { get; set; }
         public string? Status { get; set; } // Aktiv | NoShow | Megszuntetve | Kesz
+
+        [MaxLength(500, ErrorMessage = "A speciális igények legfeljebb 500 karakter lehet.")]
+        public string? SpecialisIgenyek { get; set; }
     }
 
     public class BookingListDto

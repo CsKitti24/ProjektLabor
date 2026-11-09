@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ProjektLabor.Data;
 using Xunit;
@@ -101,6 +102,15 @@ namespace backend.Tests
             var prodFactory = _factory.WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Production");
+                builder.ConfigureAppConfiguration((context, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Authentication:Jwt:Issuer"] = "prod-test-issuer",
+                        ["Authentication:Jwt:Audience"] = "prod-test-audience",
+                        ["Authentication:Jwt:SigningKey"] = "production-test-signing-key-32-chars-long!"
+                    });
+                });
             });
             var client = prodFactory.CreateClient(new WebApplicationFactoryClientOptions
             {

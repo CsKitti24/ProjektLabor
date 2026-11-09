@@ -188,5 +188,182 @@ namespace backend.Tests
             Assert.NotNull(updated);
             Assert.Equal("Megszuntetve", updated.Status);
         }
+
+        [Fact]
+        public async Task CreateBooking_WithSpecialNeeds_SavesAndReturnsSpecialNeeds()
+        {
+            // Arrange
+            var (client, _) = await CreateAuthenticatedUserAsync("Oktato");
+            var roomId = await SeedRoomAsync("Speciális Igény Terem");
+
+            var start = DateTime.UtcNow.Date.AddDays(4).AddHours(8).AddMinutes(45);
+            var end = start.AddMinutes(90);
+            var specialNeeds = "Projektor, laboratóriumi szoftverek, beépített hangosítás";
+
+            // Act
+            var createRes = await client.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
+            {
+                TeremId = roomId,
+                StartTime = start,
+                EndTime = end,
+                SpecialisIgenyek = specialNeeds
+            });
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Created, createRes.StatusCode);
+            var created = await createRes.Content.ReadFromJsonAsync<BookingDto>();
+            Assert.NotNull(created);
+            Assert.Equal(specialNeeds, created.SpecialisIgenyek);
+
+            // Query by ID
+            var getRes = await client.GetAsync($"/api/bookings/{created.Id}");
+            Assert.Equal(HttpStatusCode.OK, getRes.StatusCode);
+            var fetched = await getRes.Content.ReadFromJsonAsync<BookingDto>();
+            Assert.NotNull(fetched);
+            Assert.Equal(specialNeeds, fetched.SpecialisIgenyek);
+
+            // Query /my
+            var myRes = await client.GetAsync("/api/bookings/my");
+            Assert.Equal(HttpStatusCode.OK, myRes.StatusCode);
+            var myBookings = await myRes.Content.ReadFromJsonAsync<List<BookingDto>>();
+            Assert.NotNull(myBookings);
+            var myItem = myBookings.FirstOrDefault(b => b.Id == created.Id);
+            Assert.NotNull(myItem);
+            Assert.Equal(specialNeeds, myItem.SpecialisIgenyek);
+        }
+
+        [Fact]
+        public async Task CreateBooking_AutomaticActivation_DirectlyActiveWithoutAdminApproval()
+        {
+            // Arrange
+            var (client, _) = await CreateAuthenticatedUserAsync("Oktato");
+            var roomId = await SeedRoomAsync("Auto Aktiv Terem");
+
+            var start = DateTime.UtcNow.Date.AddDays(5).AddHours(8).AddMinutes(45); // 08:45 is a valid 45-min slot
+            var end = start.AddMinutes(45);
+
+            // Act - Instructor creates booking
+            var createRes = await client.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
+            {
+                TeremId = roomId,
+                StartTime = start,
+                EndTime = end
+            });
+
+            // Assert - booking is immediately 'Aktiv' without any admin approval required
+            Assert.Equal(HttpStatusCode.Created, createRes.StatusCode);
+            var created = await createRes.Content.ReadFromJsonAsync<BookingDto>();
+            Assert.NotNull(created);
+            Assert.Equal("Aktiv", created.Status);
+        }
+
+        [Fact]
+        public async Task CreateBooking_AdjacentConsecutiveSlots_SucceedsWithoutConflict()
+        {
+            // Arrange
+            var (client1, _) = await CreateAuthenticatedUserAsync("Oktato");
+            var (client2, _) = await CreateAuthenticatedUserAsync("Oktato");
+            var roomId = await SeedRoomAsync("Szomszédos Sáv Terem");
+
+            var startSlot1 = DateTime.UtcNow.Date.AddDays(6).AddHours(8);
+            var endSlot1 = startSlot1.AddMinutes(45); // 08:00 - 08:45
+
+            var startSlot2 = endSlot1; // 08:45 - 09:30 (starts exactly when previous ends)
+            var endSlot2 = startSlot2.AddMinutes(45);
+
+            // Act - slot 1
+            var res1 = await client1.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
+            {
+                TeremId = roomId,
+                StartTime = startSlot1,
+                EndTime = endSlot1
+            });
+
+            // Act - slot 2
+            var res2 = await client2.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
+            {
+                TeremId = roomId,
+                StartTime = startSlot2,
+                EndTime = endSlot2
+            });
+
+            // Assert - both consecutive non-overlapping bookings must succeed
+            Assert.Equal(HttpStatusCode.Created, res1.StatusCode);
+            Assert.Equal(HttpStatusCode.Created, res2.StatusCode);
+        }
+
+        [Fact]
+        public async Task CreateBooking_ConcurrentRequests_OnlyOneSucceedsAndOtherGetsConflict()
+        {
+            // Arrange
+            var (client1, _) = await CreateAuthenticatedUserAsync("Oktato");
+            var (client2, _) = await CreateAuthenticatedUserAsync("Oktato");
+            var roomId = await SeedRoomAsync("Konkurens Terem");
+
+            var start = DateTime.UtcNow.Date.AddDays(7).AddHours(11);
+            var end = start.AddMinutes(45);
+
+            var req1 = new CreateBookingRequestDto { TeremId = roomId, StartTime = start, EndTime = end };
+            var req2 = new CreateBookingRequestDto { TeremId = roomId, StartTime = start, EndTime = end };
+
+            // Act - Run two booking requests concurrently
+            var task1 = client1.PostAsJsonAsync("/api/bookings", req1);
+            var task2 = client2.PostAsJsonAsync("/api/bookings", req2);
+
+            var responses = await Task.WhenAll(task1, task2);
+
+            // Assert - Exactly one must be Created (201) and the other Conflict (409)
+            var statuses = responses.Select(r => r.StatusCode).ToList();
+            Assert.Contains(HttpStatusCode.Created, statuses);
+            Assert.Contains(HttpStatusCode.Conflict, statuses);
+        }
+
+        [Fact]
+        public async Task NoShow_ReleasesRoom_AllowsNewBookingForSameSlot()
+        {
+            // Arrange
+            var (client1, _) = await CreateAuthenticatedUserAsync("Oktato");
+            var (client2, _) = await CreateAuthenticatedUserAsync("Oktato");
+            var roomId = await SeedRoomAsync("NoShow Felszabadítás Terem");
+
+            var start = DateTime.UtcNow.Date.AddDays(8).AddHours(14);
+            var end = start.AddMinutes(90);
+
+            // 1. Create first booking
+            var res1 = await client1.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
+            {
+                TeremId = roomId,
+                StartTime = start,
+                EndTime = end
+            });
+            Assert.Equal(HttpStatusCode.Created, res1.StatusCode);
+            var b1 = await res1.Content.ReadFromJsonAsync<BookingDto>();
+            Assert.NotNull(b1);
+
+            // 2. Booking transitions to NoShow
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var bookingEntity = await db.Foglalasok.FindAsync(b1.Id);
+                Assert.NotNull(bookingEntity);
+                bookingEntity.Status = "NoShow";
+                bookingEntity.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+            }
+
+            // 3. New booking for the EXACT same room and slot should succeed because NoShow released the room
+            var res2 = await client2.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
+            {
+                TeremId = roomId,
+                StartTime = start,
+                EndTime = end
+            });
+
+            Assert.Equal(HttpStatusCode.Created, res2.StatusCode);
+            var b2 = await res2.Content.ReadFromJsonAsync<BookingDto>();
+            Assert.NotNull(b2);
+            Assert.Equal("Aktiv", b2.Status);
+            Assert.NotEqual(b1.Id, b2.Id);
+        }
     }
 }

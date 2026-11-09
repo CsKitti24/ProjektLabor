@@ -13,6 +13,7 @@ interface Booking {
   endTime?: string
   date?: string
   status?: string
+  specialisIgenyek?: string
 }
 
 function formatDate(isoString?: string): string {
@@ -132,13 +133,14 @@ export default function BookingsPage() {
                 <th>Lefoglaló oktató</th>
                 <th>Dátum</th>
                 <th>Idősáv</th>
+                <th>Speciális igények</th>
                 <th>Státusz</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 36 }}>
+                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 36 }}>
                     Nincs a feltételeknek megfelelő foglalás.
                   </td>
                 </tr>
@@ -151,6 +153,15 @@ export default function BookingsPage() {
                     <td>{b.felhasznaloNev ?? b.userName ?? '—'}</td>
                     <td>{formatDate(b.startTime || b.date)}</td>
                     <td>{formatTimeRange(b.startTime, b.endTime)}</td>
+                    <td style={{ color: 'var(--color-gray-600)', fontSize: 13 }}>
+                      {b.specialisIgenyek ? (
+                        <span style={{ background: 'var(--color-gray-100)', padding: '2px 8px', borderRadius: 4 }}>
+                          {b.specialisIgenyek}
+                        </span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                     <td>{getStatusBadge(b.status)}</td>
                   </tr>
                 ))

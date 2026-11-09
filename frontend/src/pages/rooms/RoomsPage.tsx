@@ -11,6 +11,7 @@ interface Room {
   capacity?: number
   leiras?: string
   description?: string
+  felszereltseg?: string
   aktivalva?: boolean
   isActive?: boolean
   active?: boolean
@@ -22,6 +23,7 @@ export default function RoomsPage() {
 
   const [rooms, setRooms] = useState<Room[]>([])
   const [search, setSearch] = useState('')
+  const [minKapacitasFilter, setMinKapacitasFilter] = useState('')
   const [filterActiveOnly, setFilterActiveOnly] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
@@ -32,6 +34,7 @@ export default function RoomsPage() {
   const [newNev, setNewNev] = useState('')
   const [newKapacitas, setNewKapacitas] = useState(30)
   const [newLeiras, setNewLeiras] = useState('')
+  const [newFelszereltseg, setNewFelszereltseg] = useState('')
   const [newAktivalva, setNewAktivalva] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [modalError, setModalError] = useState('')
@@ -94,6 +97,7 @@ export default function RoomsPage() {
         nev: newNev.trim(),
         kapacitas: Number(newKapacitas),
         leiras: newLeiras.trim() || undefined,
+        felszereltseg: newFelszereltseg.trim() || undefined,
         aktivalva: newAktivalva,
       })
 
@@ -101,6 +105,7 @@ export default function RoomsPage() {
       setNewNev('')
       setNewKapacitas(30)
       setNewLeiras('')
+      setNewFelszereltseg('')
       setNewAktivalva(true)
       setSuccessMsg('A terem sikeresen létrehozva.')
       setTimeout(() => setSuccessMsg(''), 4000)
@@ -130,13 +135,18 @@ export default function RoomsPage() {
   const filtered = rooms.filter((r) => {
     const roomName = r.nev || r.name || ''
     const roomDesc = r.leiras || r.description || ''
+    const roomEquip = r.felszereltseg || ''
+    const roomCap = r.kapacitas ?? r.capacity ?? 0
     const isAct = r.aktivalva ?? r.isActive ?? r.active ?? true
 
     const matchesSearch =
       roomName.toLowerCase().includes(search.toLowerCase()) ||
-      roomDesc.toLowerCase().includes(search.toLowerCase())
+      roomDesc.toLowerCase().includes(search.toLowerCase()) ||
+      roomEquip.toLowerCase().includes(search.toLowerCase())
 
     if (filterActiveOnly && !isAct) return false
+    if (minKapacitasFilter && roomCap < Number(minKapacitasFilter)) return false
+
     return matchesSearch
   })
 
@@ -180,14 +190,27 @@ export default function RoomsPage() {
       )}
 
       {/* Szűrősáv */}
-      <div className="rooms-filter-bar">
-        <div className="search-bar">
+      <div className="rooms-filter-bar" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="search-bar" style={{ flex: 1, minWidth: 220 }}>
           <Search size={15} color="var(--color-gray-400)" strokeWidth={1.5} />
           <input
             type="text"
-            placeholder="Keresés terem neve vagy leírás szerint…"
+            placeholder="Keresés név, leírás vagy felszereltség szerint…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 13, color: 'var(--color-gray-600)', whiteSpace: 'nowrap' }}>Min. férőhely:</span>
+          <input
+            type="number"
+            min={1}
+            placeholder="pl. 20"
+            className="form-input"
+            style={{ width: 85, padding: '6px 10px', height: 36 }}
+            value={minKapacitasFilter}
+            onChange={(e) => setMinKapacitasFilter(e.target.value)}
           />
         </div>
 
@@ -211,18 +234,19 @@ export default function RoomsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th style={{ width: '22%' }}>Terem neve</th>
-                <th style={{ width: '15%' }}>Kapacitás</th>
-                <th style={{ width: '40%' }}>Leírás / Megjegyzés</th>
-                <th style={{ width: '13%' }}>Állapot</th>
-                {isAdmin && <th style={{ width: '10%', textAlign: 'right' }}>Művelet</th>}
+                <th style={{ width: '20%' }}>Terem neve</th>
+                <th style={{ width: '12%' }}>Kapacitás</th>
+                <th style={{ width: '25%' }}>Felszereltség</th>
+                <th style={{ width: '28%' }}>Leírás / Megjegyzés</th>
+                <th style={{ width: '10%' }}>Állapot</th>
+                {isAdmin && <th style={{ width: '5%', textAlign: 'right' }}>Művelet</th>}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={isAdmin ? 5 : 4}
+                    colSpan={isAdmin ? 6 : 5}
                     style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 36 }}
                   >
                     Nincs a keresési feltételeknek megfelelő terem.
@@ -232,6 +256,7 @@ export default function RoomsPage() {
                 filtered.map((room) => {
                   const roomName = room.nev || room.name || 'Névtelen terem'
                   const roomCap = room.kapacitas ?? room.capacity ?? '—'
+                  const roomEquip = room.felszereltseg ?? '—'
                   const roomDesc = room.leiras ?? room.description ?? '—'
                   const isAct = room.aktivalva ?? room.isActive ?? room.active ?? true
 
@@ -241,6 +266,15 @@ export default function RoomsPage() {
                         {roomName}
                       </td>
                       <td>{roomCap} fő</td>
+                      <td>
+                        {roomEquip !== '—' ? (
+                          <span style={{ background: 'var(--color-gray-100)', padding: '2px 8px', borderRadius: 4, fontSize: 13 }}>
+                            {roomEquip}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td style={{ color: 'var(--color-gray-600)' }}>{roomDesc}</td>
                       <td>
                         {isAct ? (
@@ -327,11 +361,22 @@ export default function RoomsPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Leírás / Felszereltség</label>
+                <label className="form-label">Felszereltség</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="pl. Projektor, 30 PC, Labor, Hangosítás..."
+                  value={newFelszereltseg}
+                  onChange={(e) => setNewFelszereltseg(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Leírás / Megjegyzés</label>
                 <textarea
                   className="form-input"
                   rows={3}
-                  placeholder="pl. Projektor, hangosítás, 40 számítógép..."
+                  placeholder="pl. Északi szárny 2. emelet..."
                   value={newLeiras}
                   onChange={(e) => setNewLeiras(e.target.value)}
                 />

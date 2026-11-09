@@ -184,6 +184,10 @@ namespace backend.Migrations
                     b.Property<int>("FelhasznaloId")
                         .HasColumnType("int");
 
+                    b.Property<string>("SpecialisIgenyek")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<DateTime>("StartTime")
                         .HasColumnType("datetime2");
 
@@ -525,6 +529,10 @@ namespace backend.Migrations
 
                     b.Property<bool>("Aktivalva")
                         .HasColumnType("bit");
+
+                    b.Property<string>("Felszereltseg")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<int>("Kapacitas")
                         .HasColumnType("int");

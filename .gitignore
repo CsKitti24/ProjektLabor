@@ -25,3 +25,5 @@ obj/
 *.sln.xcworkspace
 .DS_Store
 Thumbs.db
+.local/
+Library/

@@ -6,6 +6,7 @@ namespace ProjektLabor.DTOs
         public string Nev { get; set; } = string.Empty;
         public int Kapacitas { get; set; }
         public string? Leiras { get; set; }
+        public string? Felszereltseg { get; set; }
         public bool Aktivalva { get; set; }
     }
 }

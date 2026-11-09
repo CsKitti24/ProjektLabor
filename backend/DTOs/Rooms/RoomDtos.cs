@@ -15,6 +15,9 @@ namespace ProjektLabor.DTOs.Rooms
         [MaxLength(500, ErrorMessage = "A leírás legfeljebb 500 karakter lehet.")]
         public string? Leiras { get; set; }
 
+        [MaxLength(500, ErrorMessage = "A felszereltség legfeljebb 500 karakter lehet.")]
+        public string? Felszereltseg { get; set; }
+
         public bool Aktivalva { get; set; } = true;
     }
 
@@ -28,6 +31,9 @@ namespace ProjektLabor.DTOs.Rooms
 
         [MaxLength(500, ErrorMessage = "A leírás legfeljebb 500 karakter lehet.")]
         public string? Leiras { get; set; }
+
+        [MaxLength(500, ErrorMessage = "A felszereltség legfeljebb 500 karakter lehet.")]
+        public string? Felszereltseg { get; set; }
 
         public bool? Aktivalva { get; set; }
     }

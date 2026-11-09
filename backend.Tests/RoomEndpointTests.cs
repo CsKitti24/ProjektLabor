@@ -184,5 +184,96 @@ namespace backend.Tests
             Assert.Equal(roomId, avail.TeremId);
             Assert.NotEmpty(avail.Szabad);
         }
+
+        [Fact]
+        public async Task CreateAndUpdateRoom_SupportsFelszereltseg()
+        {
+            // Arrange
+            var client = await CreateClientWithRoleAsync("Adminisztrator");
+
+            // Act - Create room with equipment
+            var createRes = await client.PostAsJsonAsync("/api/rooms", new CreateRoomRequestDto
+            {
+                Nev = "Robotika Labor",
+                Kapacitas = 24,
+                Felszereltseg = "Robotkarok, ipari PLC-k, projektor",
+                Leiras = "Informatikai és automatizálási szárny"
+            });
+
+            Assert.Equal(HttpStatusCode.Created, createRes.StatusCode);
+            var created = await createRes.Content.ReadFromJsonAsync<RoomDto>();
+            Assert.NotNull(created);
+            Assert.Equal("Robotkarok, ipari PLC-k, projektor", created.Felszereltseg);
+
+            // Act - Update equipment
+            var updateRes = await client.PutAsJsonAsync($"/api/rooms/{created.Id}", new UpdateRoomRequestDto
+            {
+                Felszereltseg = "Bővített robotkarok, 3D nyomtatók, projektor"
+            });
+
+            Assert.Equal(HttpStatusCode.OK, updateRes.StatusCode);
+            var updated = await updateRes.Content.ReadFromJsonAsync<RoomDto>();
+            Assert.NotNull(updated);
+            Assert.Equal("Bővített robotkarok, 3D nyomtatók, projektor", updated.Felszereltseg);
+        }
+
+        [Fact]
+        public async Task GetRooms_FiltersByCapacityAndEquipment()
+        {
+            // Arrange
+            var adminClient = await CreateClientWithRoleAsync("Adminisztrator");
+            var oktatoClient = await CreateClientWithRoleAsync("Oktato");
+
+            // Create distinctive rooms for testing filters
+            var prefix = "FilterTest_" + Guid.NewGuid().ToString("N")[..6];
+
+            await adminClient.PostAsJsonAsync("/api/rooms", new CreateRoomRequestDto
+            {
+                Nev = $"{prefix}_SmallLab",
+                Kapacitas = 15,
+                Felszereltseg = "PC labor, projektor"
+            });
+
+            await adminClient.PostAsJsonAsync("/api/rooms", new CreateRoomRequestDto
+            {
+                Nev = $"{prefix}_BigLecture",
+                Kapacitas = 120,
+                Felszereltseg = "Projektor, mikrofon, hangrendszer"
+            });
+
+            await adminClient.PostAsJsonAsync("/api/rooms", new CreateRoomRequestDto
+            {
+                Nev = $"{prefix}_BigLab",
+                Kapacitas = 50,
+                Felszereltseg = "Számítógépes labor, projektor, 3D nyomtató"
+            });
+
+            // 1. Filter by minKapacitas = 50
+            var capRes = await oktatoClient.GetAsync("/api/rooms?minKapacitas=50");
+            Assert.Equal(HttpStatusCode.OK, capRes.StatusCode);
+            var capRooms = await capRes.Content.ReadFromJsonAsync<List<RoomDto>>();
+            Assert.NotNull(capRooms);
+            var testCapRooms = capRooms.Where(r => r.Nev.StartsWith(prefix)).ToList();
+            Assert.Equal(2, testCapRooms.Count);
+            Assert.DoesNotContain(testCapRooms, r => r.Nev.Contains("SmallLab"));
+
+            // 2. Filter by felszereltseg = "labor"
+            var equipRes = await oktatoClient.GetAsync("/api/rooms?felszereltseg=labor");
+            Assert.Equal(HttpStatusCode.OK, equipRes.StatusCode);
+            var equipRooms = await equipRes.Content.ReadFromJsonAsync<List<RoomDto>>();
+            Assert.NotNull(equipRooms);
+            var testEquipRooms = equipRooms.Where(r => r.Nev.StartsWith(prefix)).ToList();
+            Assert.Equal(2, testEquipRooms.Count);
+            Assert.DoesNotContain(testEquipRooms, r => r.Nev.Contains("BigLecture"));
+
+            // 3. Combined filter: minKapacitas = 50 AND felszereltseg = "labor"
+            var combinedRes = await oktatoClient.GetAsync("/api/rooms?minKapacitas=50&felszereltseg=labor");
+            Assert.Equal(HttpStatusCode.OK, combinedRes.StatusCode);
+            var combinedRooms = await combinedRes.Content.ReadFromJsonAsync<List<RoomDto>>();
+            Assert.NotNull(combinedRooms);
+            var testCombinedRooms = combinedRooms.Where(r => r.Nev.StartsWith(prefix)).ToList();
+            Assert.Single(testCombinedRooms);
+            Assert.Equal($"{prefix}_BigLab", testCombinedRooms[0].Nev);
+        }
     }
 }
