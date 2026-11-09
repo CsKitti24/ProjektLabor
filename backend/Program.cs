@@ -166,7 +166,10 @@ app.Use(async (context, next) =>
         return;
     }
 
-    var dbContext = context.RequestServices.GetRequiredService<AppDbContext>();
+    await using var auditScope = context.RequestServices
+        .GetRequiredService<IServiceScopeFactory>()
+        .CreateAsyncScope();
+    var dbContext = auditScope.ServiceProvider.GetRequiredService<AppDbContext>();
     int? userId = null;
     var subject = context.User.Identity?.IsAuthenticated == true
         ? context.User.FindFirst("sub")?.Value
