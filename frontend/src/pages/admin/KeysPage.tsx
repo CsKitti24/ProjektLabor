@@ -144,7 +144,9 @@ export default function KeysPage() {
   const loadMasterAccess = async (key: KeyItem) => {
     const [accessResponse, userResponse] = await Promise.all([
       client.get<MasterAccess[]>(`/keys/${key.id}/master-access`),
-      client.get<{ items?: UserOption[] } | UserOption[]>('/users?role=Oktato'),
+      client.get<{ items?: UserOption[] } | UserOption[]>('/users', {
+        params: { role: 'Oktato', page: 1, pageSize: 100 },
+      }),
     ])
     setMasterAccess(accessResponse.data)
     setInstructors(Array.isArray(userResponse.data) ? userResponse.data : (userResponse.data.items ?? []))

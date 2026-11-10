@@ -42,7 +42,9 @@ export default function UsersPage() {
   useEffect(() => {
     let ignore = false
     client
-      .get<{ items?: UserItem[] } | UserItem[]>('/users')
+      .get<{ items?: UserItem[] } | UserItem[]>('/users', {
+        params: { page: 1, pageSize: 100 },
+      })
       .then((r) => {
         if (!ignore) {
           const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
