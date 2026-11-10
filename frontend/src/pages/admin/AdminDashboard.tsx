@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -8,6 +8,7 @@ import {
   FileText,
   BarChart2,
   ArrowRight,
+  RefreshCw,
 } from 'lucide-react'
 import client from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
@@ -15,70 +16,103 @@ import { useAuth } from '../../auth/AuthContext'
 interface Stats {
   rooms: number
   activeKeys: number
-  totalKeys: number
   todayBookings: number
   openTickets: number
 }
 
+interface BookingListResponse {
+  totalCount: number
+}
+
+interface TicketListResponse {
+  items: Ticket[]
+  totalCount: number
+}
+
+interface Ticket {
+  statusz?: string
+}
+
+async function fetchAllTickets(): Promise<Ticket[]> {
+  const pageSize = 100
+  const tickets: Ticket[] = []
+  let hasMore = true
+  let page = 1
+
+  while (hasMore) {
+    const response = await client.get<TicketListResponse>('/tickets', {
+      params: { page, pageSize },
+    })
+    if (!Array.isArray(response.data.items) || !Number.isInteger(response.data.totalCount)) {
+      throw new Error('A hibajegy-válasz formátuma érvénytelen.')
+    }
+
+    tickets.push(...response.data.items)
+    hasMore = tickets.length < response.data.totalCount
+    if (hasMore && response.data.items.length === 0) {
+      throw new Error('A hibajegyek lapozása nem teljes.')
+    }
+    page += 1
+  }
+
+  return tickets
+}
+
 export default function AdminDashboard() {
   const { user } = useAuth()
-  const [stats, setStats] = useState<Stats>({
-    rooms: 0,
-    activeKeys: 0,
-    totalKeys: 0,
-    todayBookings: 0,
-    openTickets: 0,
-  })
+  const [stats, setStats] = useState<Stats | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const loadDashboard = useCallback(async () => {
+    setIsLoading(true)
+    setError('')
+    setStats(null)
+
+    try {
+      const now = new Date()
+      const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+      const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000)
+      const [roomsRes, keysRes, bookingsRes, ticketsData] = await Promise.all([
+        client.get<Array<unknown>>('/rooms'),
+        client.get<Array<{ jelenlegiAllapot?: string }>>('/keys'),
+        client.get<BookingListResponse>('/bookings', {
+          params: {
+            page: 1,
+            pageSize: 1,
+            tol: startOfDay.toISOString(),
+            ig: endOfDay.toISOString(),
+          },
+        }),
+        fetchAllTickets(),
+      ])
+
+      if (!Array.isArray(roomsRes.data) || !Array.isArray(keysRes.data) ||
+          !Number.isInteger(bookingsRes.data.totalCount)) {
+        throw new Error('Az áttekintő adatok formátuma érvénytelen.')
+      }
+
+      const activeKeys = keysRes.data.filter((key) => key.jelenlegiAllapot === 'Kiadva').length
+      const openTickets = ticketsData.filter(
+        (ticket) => !['Zarva', 'Lezarva', 'Megoldva', 'Closed', 'Resolved'].includes(ticket.statusz ?? '')
+      ).length
+
+      setStats({
+        rooms: roomsRes.data.length,
+        activeKeys,
+        todayBookings: bookingsRes.data.totalCount,
+        openTickets,
+      })
+    } catch {
+      setError('Az áttekintő adatok betöltése nem sikerült. Ellenőrizd a kapcsolatot, majd próbáld újra.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    const promises = [
-      client.get('/rooms').catch(() => ({ data: [] })),
-      client.get('/keys').catch(() => ({ data: [] })),
-      client.get('/bookings').catch(() => ({ data: [] })),
-      client.get('/tickets').catch(() => ({ data: [] })),
-    ]
-
-    Promise.all(promises)
-      .then(([roomsRes, keysRes, bookingsRes, ticketsRes]) => {
-        const roomsData = Array.isArray(roomsRes.data) ? roomsRes.data : []
-        const keysData = Array.isArray(keysRes.data) ? keysRes.data : []
-        const bookingsData = Array.isArray(bookingsRes.data)
-          ? bookingsRes.data
-          : (bookingsRes.data?.items ?? [])
-        const ticketsData = Array.isArray(ticketsRes.data)
-          ? ticketsRes.data
-          : (ticketsRes.data?.items ?? [])
-
-        const todayStr = new Date().toISOString().split('T')[0]
-        const todayBookings = bookingsData.filter((b: { startTime?: string; date?: string }) => {
-          const bDate = (b.startTime || b.date || '').split('T')[0]
-          return bDate === todayStr
-        }).length
-
-        const activeKeys = keysData.filter(
-          (k: { jelenlegiAllapot?: string; isOut?: boolean; isAvailable?: boolean }) =>
-            k.jelenlegiAllapot === 'Kiadva' || k.isOut === true || k.isAvailable === false
-        ).length
-
-        const openTickets = ticketsData.filter(
-          (t: { status?: string }) =>
-            t.status !== 'Lezarva' &&
-            t.status !== 'Megoldva' &&
-            t.status !== 'Closed' &&
-            t.status !== 'Resolved'
-        ).length
-
-        setStats({
-          rooms: roomsData.length,
-          activeKeys,
-          totalKeys: keysData.length,
-          todayBookings,
-          openTickets,
-        })
-      })
-      .finally(() => setIsLoading(false))
-  }, [])
+    void Promise.resolve().then(() => loadDashboard())
+  }, [loadDashboard])
 
   return (
     <div>
@@ -98,7 +132,15 @@ export default function AdminDashboard() {
         <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
           <span className="spinner spinner-primary" style={{ width: 24, height: 24 }} />
         </div>
-      ) : (
+      ) : error ? (
+        <div className="alert alert-error" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span>{error}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void loadDashboard()}>
+            <RefreshCw size={14} strokeWidth={1.5} />
+            <span>Újrapróbálás</span>
+          </button>
+        </div>
+      ) : stats ? (
         <>
           <div className="stats-grid">
             <div className="stat-card">
@@ -194,6 +236,8 @@ export default function AdminDashboard() {
             </div>
           </div>
         </>
+      ) : (
+        <div className="alert alert-error" role="alert">Az áttekintő adatok nem érhetők el.</div>
       )}
 
       <style>{`

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
-import { FileText, Plus, X, AlertCircle, Check } from 'lucide-react'
+import { FileText, Plus, X, AlertCircle, Check, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
 
 interface RoomOption {
@@ -50,6 +50,7 @@ function getStatusBadge(status: string | undefined) {
     case 'Resolved':
       return <span className="badge badge-success">Megoldva</span>
     case 'Lezarva':
+    case 'Zarva':
     case 'Closed':
     case 'Lezárt':
       return <span className="badge badge-neutral">Lezárva</span>
@@ -63,6 +64,8 @@ export default function TicketsPage() {
   const [rooms, setRooms] = useState<RoomOption[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
+  const [roomsError, setRoomsError] = useState('')
+  const [isLoadingRooms, setIsLoadingRooms] = useState(true)
   const [successMsg, setSuccessMsg] = useState('')
 
   const [showModal, setShowModal] = useState(false)
@@ -74,55 +77,54 @@ export default function TicketsPage() {
 
   const loadTickets = useCallback(() => {
     setIsLoading(true)
+    setError('')
     client
       .get<{ items?: Ticket[] } | Ticket[]>('/tickets')
       .then((r) => {
-        const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
+        const list = Array.isArray(r.data)
+          ? r.data
+          : Array.isArray(r.data?.items)
+            ? r.data.items
+            : null
+        if (!list) {
+          throw new Error('A hibajegylista formátuma érvénytelen.')
+        }
         setTickets(list)
         setError('')
       })
       .catch((err: unknown) => {
+        setTickets([])
         const axErr = err as { response?: { data?: { message?: string } } }
         setError(axErr.response?.data?.message || 'Nem sikerült betölteni a hibajegyeket.')
       })
       .finally(() => setIsLoading(false))
   }, [])
 
-  useEffect(() => {
-    let ignore = false
-    client
-      .get<{ items?: Ticket[] } | Ticket[]>('/tickets')
-      .then((r) => {
-        if (!ignore) {
-          const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
-          setTickets(list)
-          setError('')
-        }
-      })
-      .catch((err: unknown) => {
-        if (!ignore) {
-          const axErr = err as { response?: { data?: { message?: string } } }
-          setError(axErr.response?.data?.message || 'Nem sikerült betölteni a hibajegyeket.')
-        }
-      })
-      .finally(() => {
-        if (!ignore) setIsLoading(false)
-      })
-
-    client
-      .get<RoomOption[]>('/rooms')
-      .then((res) => {
-        if (!ignore) {
-          setRooms(res.data)
-          if (res.data.length > 0) setSelectedRoomId(String(res.data[0].id))
-        }
-      })
-      .catch(() => {})
-
-    return () => {
-      ignore = true
+  const loadRooms = useCallback(async () => {
+    setIsLoadingRooms(true)
+    setRoomsError('')
+    try {
+      const response = await client.get<RoomOption[]>('/rooms')
+      if (!Array.isArray(response.data)) {
+        throw new Error('A teremlista formátuma érvénytelen.')
+      }
+      setRooms(response.data)
+      setSelectedRoomId(String(response.data[0]?.id ?? ''))
+    } catch {
+      setRooms([])
+      setSelectedRoomId('')
+      setRoomsError('A termek listáját nem sikerült betölteni.')
+    } finally {
+      setIsLoadingRooms(false)
     }
   }, [])
+
+  useEffect(() => {
+    void Promise.resolve().then(() => {
+      loadTickets()
+      void loadRooms()
+    })
+  }, [loadRooms, loadTickets])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -176,9 +178,13 @@ export default function TicketsPage() {
       </div>
 
       {error && (
-        <div className="alert alert-error">
+        <div className="alert alert-error" role="alert" style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
           <AlertCircle size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
           <span>{error}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={loadTickets}>
+            <RefreshCw size={14} strokeWidth={1.5} />
+            <span>Újrapróbálás</span>
+          </button>
         </div>
       )}
 
@@ -193,7 +199,7 @@ export default function TicketsPage() {
         <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
           <span className="spinner spinner-primary" style={{ width: 24, height: 24 }} />
         </div>
-      ) : (
+      ) : error ? null : (
         <div className="table-container">
           <table className="data-table">
             <thead>
@@ -265,11 +271,21 @@ export default function TicketsPage() {
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label className="form-label">Érintett terem *</label>
+                {roomsError && (
+                  <div className="alert alert-error" role="alert">
+                    <span>{roomsError}</span>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void loadRooms()}>
+                      <RefreshCw size={14} strokeWidth={1.5} />
+                      <span>Újrapróbálás</span>
+                    </button>
+                  </div>
+                )}
                 <select
                   className="form-select"
                   value={selectedRoomId}
                   onChange={(e) => setSelectedRoomId(e.target.value)}
                   required
+                  disabled={isLoadingRooms || roomsError !== '' || rooms.length === 0}
                 >
                   {rooms.map((r) => (
                     <option key={r.id} value={r.id}>
@@ -317,7 +333,7 @@ export default function TicketsPage() {
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={isSaving}
+                  disabled={isSaving || isLoadingRooms || roomsError !== '' || rooms.length === 0}
                 >
                   {isSaving ? 'Beküldés…' : 'Hibajegy beküldése'}
                 </button>

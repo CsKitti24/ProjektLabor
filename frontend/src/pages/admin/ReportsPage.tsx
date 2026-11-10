@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { BarChart2, Calendar, TrendingUp, Award, DoorOpen, Key } from 'lucide-react'
+import { BarChart2, Calendar, TrendingUp, Award, DoorOpen, Key, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
 
 interface WeeklyReport {
@@ -50,6 +50,7 @@ export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('weekly')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
+  const [retryVersion, setRetryVersion] = useState(0)
 
   const [weeklyData, setWeeklyData] = useState<WeeklyReport | null>(null)
   const [utilizationData, setUtilizationData] = useState<RoomUtilization | null>(null)
@@ -63,12 +64,20 @@ export default function ReportsPage() {
         .get<WeeklyReport>('/reports/weekly')
         .then((res) => {
           if (!ignore) {
+            if (!Number.isFinite(res.data.osszesKulcskiadas) ||
+                !Number.isFinite(res.data.osszesKulcsvisszavetel) ||
+                !Number.isFinite(res.data.osszesKesedelmesFoglalas) ||
+                !Number.isFinite(res.data.osszesNoShow)) {
+              throw new Error('A heti riport válasza hiányos.')
+            }
             setWeeklyData(res.data)
-            setError('')
           }
         })
         .catch(() => {
-          if (!ignore) setError('A heti riport betöltése nem sikerült.')
+          if (!ignore) {
+            setWeeklyData(null)
+            setError('A heti riport betöltése nem sikerült.')
+          }
         })
         .finally(() => {
           if (!ignore) setIsLoading(false)
@@ -78,12 +87,19 @@ export default function ReportsPage() {
         .get<RoomUtilization>('/reports/room-utilization')
         .then((res) => {
           if (!ignore) {
+            if (!Number.isFinite(res.data.kihasznaltsagSzazalek) ||
+                !Number.isFinite(res.data.osszesFoglaltOra) ||
+                !Number.isFinite(res.data.osszesRendelkezesreAlloOra)) {
+              throw new Error('A kihasználtsági riport válasza hiányos.')
+            }
             setUtilizationData(res.data)
-            setError('')
           }
         })
         .catch(() => {
-          if (!ignore) setError('A kihasználtsági riport betöltése nem sikerült.')
+          if (!ignore) {
+            setUtilizationData(null)
+            setError('A kihasználtsági riport betöltése nem sikerült.')
+          }
         })
         .finally(() => {
           if (!ignore) setIsLoading(false)
@@ -93,12 +109,19 @@ export default function ReportsPage() {
         .get<ReliabilityReport>('/reports/reliability')
         .then((res) => {
           if (!ignore) {
+            if (!Number.isFinite(res.data.atlagosPontszam) ||
+                !Number.isFinite(res.data.esemenyekSzama) ||
+                !Number.isFinite(res.data.erintettOktatokSzama)) {
+              throw new Error('A megbízhatósági riport válasza hiányos.')
+            }
             setReliabilityData(res.data)
-            setError('')
           }
         })
         .catch(() => {
-          if (!ignore) setError('A megbízhatósági riport betöltése nem sikerült.')
+          if (!ignore) {
+            setReliabilityData(null)
+            setError('A megbízhatósági riport betöltése nem sikerült.')
+          }
         })
         .finally(() => {
           if (!ignore) setIsLoading(false)
@@ -108,7 +131,7 @@ export default function ReportsPage() {
     return () => {
       ignore = true
     }
-  }, [activeTab])
+  }, [activeTab, retryVersion])
 
   return (
     <div>
@@ -127,7 +150,12 @@ export default function ReportsPage() {
         <button
           type="button"
           className={`report-tab-btn ${activeTab === 'weekly' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('weekly'); setIsLoading(true); }}
+          onClick={() => {
+            setActiveTab('weekly')
+            setError('')
+            setIsLoading(true)
+            setRetryVersion((version) => version + 1)
+          }}
         >
           <Calendar size={14} strokeWidth={1.5} />
           <span>Heti kulcs- és teremforgalom</span>
@@ -135,7 +163,12 @@ export default function ReportsPage() {
         <button
           type="button"
           className={`report-tab-btn ${activeTab === 'utilization' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('utilization'); setIsLoading(true); }}
+          onClick={() => {
+            setActiveTab('utilization')
+            setError('')
+            setIsLoading(true)
+            setRetryVersion((version) => version + 1)
+          }}
         >
           <DoorOpen size={14} strokeWidth={1.5} />
           <span>Teremkihasználtság</span>
@@ -143,18 +176,37 @@ export default function ReportsPage() {
         <button
           type="button"
           className={`report-tab-btn ${activeTab === 'reliability' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('reliability'); setIsLoading(true); }}
+          onClick={() => {
+            setActiveTab('reliability')
+            setError('')
+            setIsLoading(true)
+            setRetryVersion((version) => version + 1)
+          }}
         >
           <Award size={14} strokeWidth={1.5} />
           <span>Megbízhatósági statisztika</span>
         </button>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
-
       {isLoading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
           <span className="spinner spinner-primary" style={{ width: 24, height: 24 }} />
+        </div>
+      ) : error ? (
+        <div className="alert alert-error" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span>{error}</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              setError('')
+              setIsLoading(true)
+              setRetryVersion((version) => version + 1)
+            }}
+          >
+            <RefreshCw size={14} strokeWidth={1.5} />
+            <span>Újrapróbálás</span>
+          </button>
         </div>
       ) : (
         <>
@@ -166,7 +218,7 @@ export default function ReportsPage() {
                     <Key size={18} strokeWidth={1.5} />
                   </div>
                   <div className="stat-card-body">
-                    <div className="stat-card-value">{weeklyData?.osszesKulcskiadas ?? 0}</div>
+                    <div className="stat-card-value">{weeklyData?.osszesKulcskiadas ?? '—'}</div>
                     <div className="stat-card-label">Kulcskiadás ezen a héten</div>
                   </div>
                 </div>
@@ -176,7 +228,7 @@ export default function ReportsPage() {
                     <Key size={18} strokeWidth={1.5} />
                   </div>
                   <div className="stat-card-body">
-                    <div className="stat-card-value">{weeklyData?.osszesKulcsvisszavetel ?? 0}</div>
+                    <div className="stat-card-value">{weeklyData?.osszesKulcsvisszavetel ?? '—'}</div>
                     <div className="stat-card-label">Visszavételezett kulcs</div>
                   </div>
                 </div>
@@ -186,7 +238,7 @@ export default function ReportsPage() {
                     <TrendingUp size={18} strokeWidth={1.5} />
                   </div>
                   <div className="stat-card-body">
-                    <div className="stat-card-value">{weeklyData?.osszesKesedelmesFoglalas ?? 0}</div>
+                    <div className="stat-card-value">{weeklyData?.osszesKesedelmesFoglalas ?? '—'}</div>
                     <div className="stat-card-label">Késedelmes leadás</div>
                   </div>
                 </div>
@@ -196,7 +248,7 @@ export default function ReportsPage() {
                     <Calendar size={18} strokeWidth={1.5} />
                   </div>
                   <div className="stat-card-body">
-                    <div className="stat-card-value">{weeklyData?.osszesNoShow ?? 0}</div>
+                    <div className="stat-card-value">{weeklyData?.osszesNoShow ?? '—'}</div>
                     <div className="stat-card-label">No-Show esemény</div>
                   </div>
                 </div>
@@ -244,7 +296,7 @@ export default function ReportsPage() {
                   </div>
                   <div className="stat-card-body">
                     <div className="stat-card-value">
-                      {utilizationData?.kihasznaltsagSzazalek?.toFixed(1) ?? '0.0'}%
+                      {utilizationData?.kihasznaltsagSzazalek?.toFixed(1) ?? '—'}%
                     </div>
                     <div className="stat-card-label">Átlagos kihasználtság</div>
                   </div>
@@ -256,7 +308,7 @@ export default function ReportsPage() {
                   </div>
                   <div className="stat-card-body">
                     <div className="stat-card-value">
-                      {utilizationData?.osszesFoglaltOra?.toFixed(1) ?? '0'} óra
+                      {utilizationData?.osszesFoglaltOra?.toFixed(1) ?? '—'} óra
                     </div>
                     <div className="stat-card-label">Összes foglalt oktatási óra</div>
                   </div>
@@ -303,7 +355,7 @@ export default function ReportsPage() {
                   </div>
                   <div className="stat-card-body">
                     <div className="stat-card-value">
-                      {reliabilityData?.atlagosPontszam?.toFixed(1) ?? '100'} / 100
+                      {reliabilityData?.atlagosPontszam?.toFixed(1) ?? '—'} / 100
                     </div>
                     <div className="stat-card-label">Oktatói átlagos megbízhatóság</div>
                   </div>
@@ -314,7 +366,7 @@ export default function ReportsPage() {
                     <TrendingUp size={18} strokeWidth={1.5} />
                   </div>
                   <div className="stat-card-body">
-                    <div className="stat-card-value">{reliabilityData?.esemenyekSzama ?? 0}</div>
+                    <div className="stat-card-value">{reliabilityData?.esemenyekSzama ?? '—'}</div>
                     <div className="stat-card-label">Rögzített megbízhatósági esemény</div>
                   </div>
                 </div>
