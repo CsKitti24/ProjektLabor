@@ -35,6 +35,8 @@ export default function UsersPage() {
   const [editingId, setEditingId] = useState<string | number | null>(null)
   const [editRole, setEditRole] = useState('')
   const [editPin, setEditPin] = useState('')
+  const [editPassword, setEditPassword] = useState('')
+  const [editPasswordConfirmation, setEditPasswordConfirmation] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
@@ -67,6 +69,34 @@ export default function UsersPage() {
     setEditingId(user.id)
     setEditRole(user.role)
     setEditPin('')
+    setEditPassword('')
+    setEditPasswordConfirmation('')
+  }
+
+  const handleSavePassword = async (id: string | number) => {
+    if (editPassword.length < 8) {
+      setError('A jelszónak legalább 8 karakterből kell állnia.')
+      return
+    }
+    if (editPassword !== editPasswordConfirmation) {
+      setError('A két jelszó nem egyezik.')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      await client.put(`/users/${id}`, { UjJelszo: editPassword })
+      setEditPassword('')
+      setEditPasswordConfirmation('')
+      setError('')
+      setSuccessMsg('A jelszó sikeresen módosítva.')
+      setTimeout(() => setSuccessMsg(''), 3000)
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { message?: string } } }
+      setError(axErr.response?.data?.message || 'A jelszó módosítása sikertelen.')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleSavePin = async (id: string | number) => {
@@ -196,6 +226,26 @@ export default function UsersPage() {
                             value={editPin}
                             onChange={(e) => setEditPin(e.target.value)}
                           />
+                          <input
+                            aria-label={`${user.nev || user.username} új jelszó`}
+                            className="form-input"
+                            type="password"
+                            minLength={8}
+                            placeholder="Új jelszó (min. 8 karakter)"
+                            autoComplete="new-password"
+                            value={editPassword}
+                            onChange={(e) => setEditPassword(e.target.value)}
+                          />
+                          <input
+                            aria-label={`${user.nev || user.username} új jelszó megerősítése`}
+                            className="form-input"
+                            type="password"
+                            minLength={8}
+                            placeholder="Jelszó ismétlése"
+                            autoComplete="new-password"
+                            value={editPasswordConfirmation}
+                            onChange={(e) => setEditPasswordConfirmation(e.target.value)}
+                          />
                         </div>
                       ) : (
                         <span className="badge badge-primary">
@@ -222,6 +272,14 @@ export default function UsersPage() {
                             onClick={() => handleSavePin(user.id)}
                           >
                             PIN mentése
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={isSaving || !editPassword || !editPasswordConfirmation}
+                            onClick={() => handleSavePassword(user.id)}
+                          >
+                            Jelszó mentése
                           </button>
                           <button
                             type="button"

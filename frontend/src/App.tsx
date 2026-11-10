@@ -21,6 +21,8 @@ import TicketsPage from './pages/admin/TicketsPage'
 import ReportsPage from './pages/admin/ReportsPage'
 import ProfilePage from './pages/ProfilePage'
 import NotificationsPage from './pages/NotificationsPage'
+import AuditLogPage from './pages/admin/AuditLogPage'
+import ParametersPage from './pages/admin/ParametersPage'
 
 export default function App() {
   return (
@@ -150,6 +152,22 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['Adminisztrator', 'UzemeltetesiIgazgato']}>
                   <ReportsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="audit"
+              element={
+                <ProtectedRoute allowedRoles={['Adminisztrator', 'UzemeltetesiIgazgato']}>
+                  <AuditLogPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="parameters"
+              element={
+                <ProtectedRoute allowedRoles={['Adminisztrator', 'UzemeltetesiIgazgato']}>
+                  <ParametersPage />
                 </ProtectedRoute>
               }
             />

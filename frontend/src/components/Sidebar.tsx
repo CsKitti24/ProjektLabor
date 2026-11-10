@@ -15,6 +15,8 @@ import {
   List,
   Shield,
   Bell,
+  ClipboardList,
+  Settings,
 } from 'lucide-react'
 import type { UserRole } from '../auth/AuthContext'
 
@@ -58,11 +60,15 @@ function getNavItems(role: UserRole): NavItem[] {
         { to: '/maintenance', label: 'Karbantartás', icon: <Wrench size={17} strokeWidth={1.5} /> },
         { to: '/tickets', label: 'Hibajegyek', icon: <FileText size={17} strokeWidth={1.5} /> },
         { to: '/reports', label: 'Riportok', icon: <BarChart2 size={17} strokeWidth={1.5} /> },
+        { to: '/audit', label: 'Auditnapló', icon: <ClipboardList size={17} strokeWidth={1.5} /> },
+        { to: '/parameters', label: 'Rendszerparaméterek', icon: <Settings size={17} strokeWidth={1.5} /> },
       ]
     case 'UzemeltetesiIgazgato':
       return [
         { to: '/admin', label: 'Áttekintés', icon: <LayoutDashboard size={17} strokeWidth={1.5} /> },
         { to: '/reports', label: 'Riportok', icon: <BarChart2 size={17} strokeWidth={1.5} /> },
+        { to: '/audit', label: 'Auditnapló', icon: <ClipboardList size={17} strokeWidth={1.5} /> },
+        { to: '/parameters', label: 'Rendszerparaméterek', icon: <Settings size={17} strokeWidth={1.5} /> },
         { to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> },
         { to: '/tickets', label: 'Hibajegyek', icon: <FileText size={17} strokeWidth={1.5} /> },
         { to: '/profile', label: 'Profil és státusz', icon: <Star size={17} strokeWidth={1.5} /> },

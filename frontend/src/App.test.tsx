@@ -13,6 +13,8 @@ vi.mock('./auth/AuthContext', () => ({
 vi.mock('./pages/ProfilePage', () => ({ default: () => 'Profile page' }))
 vi.mock('./pages/bookings/MyBookingsPage', () => ({ default: () => 'My bookings page' }))
 vi.mock('./pages/bookings/NewBookingPage', () => ({ default: () => 'New booking page' }))
+vi.mock('./pages/admin/AuditLogPage', () => ({ default: () => 'Audit log page' }))
+vi.mock('./pages/admin/ParametersPage', () => ({ default: () => 'Parameters page' }))
 
 describe('App role-protected booking routes', () => {
   beforeEach(() => {
@@ -43,6 +45,27 @@ describe('App role-protected booking routes', () => {
       expect(screen.getByText('Profile page')).toBeTruthy()
       expect(screen.queryByText('My bookings page')).toBeNull()
       expect(screen.queryByText('New booking page')).toBeNull()
+    },
+  )
+
+  it.each(['/audit', '/parameters'])(
+    'does not expose %s to instructors',
+    async (path) => {
+      vi.mocked(useAuth).mockReturnValue({
+        user: { userId: 2, username: 'teacher', role: 'Oktato' },
+        token: 'test-token',
+        login: vi.fn(async () => undefined),
+        logout: vi.fn(),
+        isLoading: false,
+      })
+      window.history.pushState({}, '', path)
+      render(<App />)
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe('/profile')
+      })
+      expect(screen.queryByText('Audit log page')).toBeNull()
+      expect(screen.queryByText('Parameters page')).toBeNull()
     },
   )
 })
