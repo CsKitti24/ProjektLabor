@@ -237,7 +237,8 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| N1 | GET | `/api/notifications/my` | Saját értesítések lekérdezése | ✅ Kész |
+| N1 | GET | `/api/notifications/my` | Oktató és Portás saját értesítéseinek lekérdezése | ✅ Kész |
+| N3 | PATCH | `/api/notifications/{id}/read` | Saját értesítés olvasottként jelölése | ✅ Kész |
 | N2 | GET | `/api/notifications/pending` | Függőben lévő értesítések (Adminisztrátor / Portás) | ✅ Kész |
 
 ### Egészségellenőrzés
@@ -1077,23 +1078,28 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 
 ### N1 – GET `/api/notifications/my`
 
-**Funkció:** A bejelentkezett oktató értesítéseinek listája.
+**Funkció:** A bejelentkezett oktató vagy portás címzett értesítéseinek listája.
 
-**Jogosultság:** `Oktato`
+**Jogosultság:** `Oktato`, `Portas`
 
 **Response DTO – 200 OK:**
 ```json
 [{
-  "id": "int", "foglalasId": "int",
-  "ertesitesTipus": "string (BeforeEnd)",
+  "id": "int", "foglalasId": "int|null",
+  "ertesitesTipus": "string (BeforeEnd|EveningKeyReturn)",
   "idoPont": "datetime",
   "allapot": "string (Kesz|KuldesAlatt|Hiba)",
   "createdAt": "datetime",
-  "foglalasKezdete": "datetime", "foglalasVege": "datetime"
+  "foglalasKezdete": "datetime|null", "foglalasVege": "datetime|null",
+  "olvasva": "boolean", "kulcsSzam": "string|null",
+  "teremNev": "string|null", "hatarido": "datetime|null"
 }]
 ```
 
-**Kapcsolódó entitások:** `Ertesitesek`, `Foglalasok`
+Az `EveningKeyReturn` típus a napi kulcszáráskor még kiadott kulcsot, a
+helyiséget és a visszavételi határidőt jeleníti meg.
+
+**Kapcsolódó entitások:** `Ertesitesek`, `Foglalasok`, `Felhasznalok`, `Kulcsmozgasok`
 
 **HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`
 
@@ -1108,6 +1114,17 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 **Válasz:** Ugyanaz az értesítés-DTO, mint az N1 végpontnál; tartalmazza a kapcsolódó foglalás azonosítóját, kezdetét és lejáratát is.
 
 **HTTP státuszkódok:** `200 OK`, `401 Unauthorized`, `403 Forbidden`.
+
+---
+
+### N3 – PATCH `/api/notifications/{id}/read`
+
+**Funkció:** A bejelentkezett felhasználó saját értesítését olvasottként jelöli.
+
+**Jogosultság:** `Oktato`, `Portas`. Más felhasználó értesítése nem módosítható.
+
+**Válasz:** `204 No Content`; a már olvasott értesítésre is idempotensen `204`.
+Nem saját vagy nem létező értesítés esetén `404 Not Found`.
 
 ---
 
@@ -1202,7 +1219,8 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 | GET /api/reports/key-traffic | ❌ | ❌ | ✅ | ✅ |
 | GET /api/reports/reliability | ❌ | ❌ | ✅ | ✅ |
 | **Értesítések** | | | | |
-| GET /api/notifications/my | ✅ | ❌ | ❌ | ❌ |
+| GET /api/notifications/my | ✅ | ✅ | ❌ | ❌ |
+| PATCH /api/notifications/{id}/read | ✅ | ✅ | ❌ | ❌ |
 | GET /api/notifications/pending | ❌ | ✅ | ✅ | ❌ |
 | **Health** | | | | |
 | GET /api/health | ✅ | ✅ | ✅ | ✅ |
@@ -1410,7 +1428,7 @@ public class ManualCorrectionRequestDto
 | `/api/audit/*` | `AuditLogok` | `Felhasznalok` |
 | `/api/parameters/*` | `Rendszerparameterek` | `AuditLogok` |
 | `/api/reports/*` | `Kulcsmozgasok`, `Foglalasok` | `Termek`, `Felhasznalok`, `MegbizhatosagiEsemenyek` |
-| `/api/notifications/*` | `Ertesitesek` | `Foglalasok` |
+| `/api/notifications/*` | `Ertesitesek` | `Foglalasok`, `Felhasznalok`, `Kulcsmozgasok`, `Kulcsok`, `Termek` |
 
 ### Megjegyzések az adatmodellhez
 

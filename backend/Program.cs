@@ -58,6 +58,8 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("Adminisztrator", policy => policy.RequireRole(RoleNames.Adminisztrator));
     options.AddPolicy("Portas", policy => policy.RequireRole(RoleNames.Portas));
     options.AddPolicy("Oktato", policy => policy.RequireRole(RoleNames.Oktato));
+    options.AddPolicy("OktatoOrPortas", policy =>
+        policy.RequireRole(RoleNames.Oktato, RoleNames.Portas));
     options.AddPolicy("UzemeltetesiIgazgato", policy => policy.RequireRole(RoleNames.UzemeltetesiIgazgato));
     options.AddPolicy("AdminOrIgazgato", policy => policy.RequireRole(RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato));
     options.AddPolicy("AdminOrPortas", policy => policy.RequireRole(RoleNames.Adminisztrator, RoleNames.Portas));

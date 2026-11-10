@@ -20,6 +20,7 @@ import MaintenancePage from './pages/admin/MaintenancePage'
 import TicketsPage from './pages/admin/TicketsPage'
 import ReportsPage from './pages/admin/ReportsPage'
 import ProfilePage from './pages/ProfilePage'
+import NotificationsPage from './pages/NotificationsPage'
 
 export default function App() {
   return (
@@ -40,6 +41,14 @@ export default function App() {
           >
             {/* Common */}
             <Route path="profile" element={<ProfilePage />} />
+            <Route
+              path="notifications"
+              element={
+                <ProtectedRoute allowedRoles={['Oktato', 'Portas']}>
+                  <NotificationsPage />
+                </ProtectedRoute>
+              }
+            />
             <Route path="rooms" element={<RoomsPage />} />
             <Route path="tickets" element={<TicketsPage />} />
 

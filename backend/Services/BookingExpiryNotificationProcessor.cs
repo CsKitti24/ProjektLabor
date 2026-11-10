@@ -39,6 +39,7 @@ public sealed class BookingExpiryNotificationProcessor
         _db.Ertesitesek.AddRange(bookings.Select(booking => new Ertesites
         {
             FoglalasId = booking.Id,
+            CimzettFelhasznaloId = booking.FelhasznaloId,
             ErtesitesTipus = NotificationType,
             IdoPont = nowUtc,
             Allapot = "Kesz",

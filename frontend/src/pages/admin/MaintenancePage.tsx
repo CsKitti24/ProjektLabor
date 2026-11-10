@@ -1,5 +1,5 @@
-import { useState, useEffect, type FormEvent } from 'react'
-import { Wrench, Plus, X, AlertCircle, Check, Trash2 } from 'lucide-react'
+import { useState, useEffect, useCallback, type FormEvent } from 'react'
+import { Wrench, Plus, X, AlertCircle, Check, Trash2, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
 
 interface RoomOption {
@@ -78,54 +78,33 @@ export default function MaintenancePage() {
   const [moveStartTimes, setMoveStartTimes] = useState<Record<number, string>>({})
   const [moveRoomIds, setMoveRoomIds] = useState<Record<number, string>>({})
 
-  const loadData = () => {
+  const loadData = useCallback(async () => {
     setIsLoading(true)
-    Promise.all([
-      client.get<MaintenanceItem[]>('/maintenance'),
-      client.get<RoomOption[]>('/rooms').catch(() => ({ data: [] })),
-    ])
-      .then(([mRes, rRes]) => {
-        setItems(mRes.data)
-        setRooms(rRes.data)
-        if (rRes.data.length > 0) setTeremId(String(rRes.data[0].id))
-        setError('')
-      })
-      .catch((err: unknown) => {
-        const axErr = err as { response?: { data?: { message?: string } } }
-        setError(axErr.response?.data?.message || 'Nem sikerült betölteni a karbantartásokat.')
-      })
-      .finally(() => setIsLoading(false))
-  }
-
-  useEffect(() => {
-    let ignore = false
-    Promise.all([
-      client.get<MaintenanceItem[]>('/maintenance'),
-      client.get<RoomOption[]>('/rooms').catch(() => ({ data: [] })),
-    ])
-      .then(([mRes, rRes]) => {
-        if (!ignore) {
-          setItems(mRes.data)
-          setRooms(rRes.data)
-          if (rRes.data.length > 0) setTeremId(String(rRes.data[0].id))
-          setError('')
-        }
-      })
-      .catch((err: unknown) => {
-        if (!ignore) {
-          const axErr = err as { response?: { data?: { message?: string } } }
-          setError(axErr.response?.data?.message || 'Nem sikerült betölteni a karbantartásokat.')
-        }
-      })
-      .finally(() => {
-        if (!ignore) {
-          setIsLoading(false)
-        }
-      })
-    return () => {
-      ignore = true
+    setError('')
+    try {
+      const [maintenanceResponse, roomsResponse] = await Promise.all([
+        client.get<MaintenanceItem[]>('/maintenance'),
+        client.get<RoomOption[]>('/rooms'),
+      ])
+      if (!Array.isArray(maintenanceResponse.data) || !Array.isArray(roomsResponse.data)) {
+        throw new Error('A karbantartási vagy teremlista formátuma érvénytelen.')
+      }
+      setItems(maintenanceResponse.data)
+      setRooms(roomsResponse.data)
+      setTeremId(String(roomsResponse.data[0]?.id ?? ''))
+    } catch {
+      setItems([])
+      setRooms([])
+      setTeremId('')
+      setError('A karbantartási vagy teremadatok betöltése nem sikerült.')
+    } finally {
+      setIsLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    void Promise.resolve().then(() => loadData())
+  }, [loadData])
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault()
@@ -262,9 +241,13 @@ export default function MaintenancePage() {
       </div>
 
       {error && (
-        <div className="alert alert-error">
+        <div className="alert alert-error" role="alert" style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
           <AlertCircle size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
           <span>{error}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void loadData()}>
+            <RefreshCw size={14} strokeWidth={1.5} />
+            <span>Újrapróbálás</span>
+          </button>
         </div>
       )}
 
@@ -279,7 +262,7 @@ export default function MaintenancePage() {
         <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
           <span className="spinner spinner-primary" style={{ width: 24, height: 24 }} />
         </div>
-      ) : (
+      ) : error ? null : (
         <div className="table-container">
           <table className="data-table">
             <thead>

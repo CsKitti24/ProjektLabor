@@ -265,6 +265,159 @@ public class BackgroundAutomationTests
     }
 
     [Fact]
+    public async Task DailyClosing_NotifiesOnlyPortersAtTheDeadlineAndDoesNotDuplicateNotifications()
+    {
+        await using var db = CreateDb();
+        var (booking, operatorUser) = await SeedBookingAsync(
+            db, "Aktiv", new DateTime(2026, 4, 4, 20, 0, 0, DateTimeKind.Utc));
+        var secondPorter = CreateUser("Portas");
+        db.Felhasznalok.Add(secondPorter);
+        var key = await AddKeyAsync(db, booking.TeremId, "DC-NOTIFY");
+        var issue = await AddMovementAsync(
+            db,
+            key.Id,
+            bookingId: null,
+            operatorUser.Id,
+            "Kiadás",
+            new DateTime(2026, 4, 4, 21, 0, 0, DateTimeKind.Utc),
+            booking.FelhasznaloId);
+        db.Rendszerparameterek.Add(new Rendszerparameter
+        {
+            Kulcs = "napi_kulcsleadasi_zarasi_idopont",
+            Ertek = "22:00"
+        });
+        await db.SaveChangesAsync();
+        var processor = new DailyKeyClosingProcessor(
+            db,
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Automation:TimeZoneId"] = "UTC"
+                })
+                .Build(),
+            NullLogger<DailyKeyClosingProcessor>.Instance);
+        var beforeDeadline = new DateTime(2026, 4, 4, 21, 59, 59, DateTimeKind.Utc);
+        var deadline = new DateTime(2026, 4, 4, 22, 0, 0, DateTimeKind.Utc);
+
+        await processor.ProcessAsync(beforeDeadline, default);
+        Assert.Empty(await db.Ertesitesek.ToListAsync());
+
+        await processor.ProcessAsync(deadline, default);
+        await processor.ProcessAsync(deadline.AddMinutes(1), default);
+
+        var notifications = await db.Ertesitesek
+            .OrderBy(item => item.CimzettFelhasznaloId)
+            .ToListAsync();
+        Assert.Equal(2, notifications.Count);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(issue.Id, notification.KulcsmozgasId);
+            Assert.Equal("EveningKeyReturn", notification.ErtesitesTipus);
+            Assert.Equal(deadline, notification.Hatarido);
+            Assert.Equal("Kesz", notification.Allapot);
+        });
+        Assert.Equal(
+            new[] { operatorUser.Id, secondPorter.Id }.Order(),
+            notifications.Select(notification => notification.CimzettFelhasznaloId!.Value).Order());
+        Assert.DoesNotContain(
+            notifications,
+            notification => notification.CimzettFelhasznaloId == booking.FelhasznaloId);
+        Assert.Equal(
+            1,
+            await db.AuditLogok.CountAsync(item =>
+                item.AutomationKey == $"EveningKeyReturn:{issue.Id}"));
+    }
+
+    [Fact]
+    public async Task DailyClosing_DoesNotNotifyAKeyThatWasReturnedBeforeTheDeadline()
+    {
+        await using var db = CreateDb();
+        var (booking, operatorUser) = await SeedBookingAsync(
+            db, "Aktiv", new DateTime(2026, 4, 4, 20, 0, 0, DateTimeKind.Utc));
+        var key = await AddKeyAsync(db, booking.TeremId, "DC-RETURNED");
+        await AddMovementAsync(
+            db,
+            key.Id,
+            bookingId: null,
+            operatorUser.Id,
+            "Kiadás",
+            new DateTime(2026, 4, 4, 21, 0, 0, DateTimeKind.Utc),
+            booking.FelhasznaloId);
+        await AddMovementAsync(
+            db,
+            key.Id,
+            bookingId: null,
+            operatorUser.Id,
+            "Visszavétel",
+            new DateTime(2026, 4, 4, 21, 30, 0, DateTimeKind.Utc));
+        db.Rendszerparameterek.Add(new Rendszerparameter
+        {
+            Kulcs = "napi_kulcsleadasi_zarasi_idopont",
+            Ertek = "22:00"
+        });
+        await db.SaveChangesAsync();
+        var processor = new DailyKeyClosingProcessor(
+            db,
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Automation:TimeZoneId"] = "UTC"
+                })
+                .Build(),
+            NullLogger<DailyKeyClosingProcessor>.Instance);
+
+        await processor.ProcessAsync(
+            new DateTime(2026, 4, 4, 22, 0, 0, DateTimeKind.Utc),
+            default);
+
+        Assert.Empty(await db.Ertesitesek.ToListAsync());
+    }
+
+    [Fact]
+    public async Task DailyClosing_UsesBudapestLocalTimeForEveningNotificationDeadline()
+    {
+        await using var db = CreateDb();
+        var (booking, operatorUser) = await SeedBookingAsync(
+            db, "Aktiv", new DateTime(2026, 4, 4, 18, 0, 0, DateTimeKind.Utc));
+        var key = await AddKeyAsync(db, booking.TeremId, "DC-BUDAPEST");
+        await AddMovementAsync(
+            db,
+            key.Id,
+            bookingId: null,
+            operatorUser.Id,
+            "Kiadás",
+            new DateTime(2026, 4, 4, 19, 0, 0, DateTimeKind.Utc),
+            booking.FelhasznaloId);
+        db.Rendszerparameterek.Add(new Rendszerparameter
+        {
+            Kulcs = "napi_kulcsleadasi_zarasi_idopont",
+            Ertek = "22:00"
+        });
+        await db.SaveChangesAsync();
+        var processor = new DailyKeyClosingProcessor(
+            db,
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Automation:TimeZoneId"] = "Europe/Budapest"
+                })
+                .Build(),
+            NullLogger<DailyKeyClosingProcessor>.Instance);
+
+        await processor.ProcessAsync(
+            new DateTime(2026, 4, 4, 19, 59, 59, DateTimeKind.Utc),
+            default);
+        Assert.Empty(await db.Ertesitesek.ToListAsync());
+
+        await processor.ProcessAsync(
+            new DateTime(2026, 4, 4, 20, 0, 0, DateTimeKind.Utc),
+            default);
+
+        var notification = Assert.Single(await db.Ertesitesek.ToListAsync());
+        Assert.Equal(new DateTime(2026, 4, 4, 20, 0, 0, DateTimeKind.Utc), notification.Hatarido);
+    }
+
+    [Fact]
     public async Task DailyClosing_UsesRecordedRecipientForBookinglessIssue()
     {
         await using var db = CreateDb();
@@ -340,7 +493,8 @@ public class BackgroundAutomationTests
         Assert.Equal(0, await processor.ProcessAsync(closingTime.AddMinutes(1), default));
 
         Assert.Empty(await db.MegbizhatosagiEsemenyek.ToListAsync());
-        var audit = await db.AuditLogok.SingleAsync();
+        var audit = await db.AuditLogok.SingleAsync(
+            item => item.AutomationKey == $"DailyKeyClosing:UnresolvedRecipient:{issue.Id}");
         Assert.Equal(issue.Id.ToString(), audit.EntitasId);
         Assert.Equal($"DailyKeyClosing:UnresolvedRecipient:{issue.Id}", audit.AutomationKey);
         Assert.Contains("pontlevonás nem történt", audit.Indoklas);

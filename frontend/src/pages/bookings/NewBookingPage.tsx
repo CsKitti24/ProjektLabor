@@ -1,6 +1,6 @@
-import { useState, useEffect, type FormEvent } from 'react'
+import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { PlusCircle, ArrowLeft, Check, AlertCircle, Calendar, Filter, Sparkles } from 'lucide-react'
+import { PlusCircle, ArrowLeft, Check, AlertCircle, Calendar, Filter, Sparkles, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
 
 interface Room {
@@ -52,10 +52,14 @@ export default function NewBookingPage() {
   const [equipmentFilter, setEquipmentFilter] = useState<string>('')
 
   const [error, setError] = useState('')
+  const [roomsError, setRoomsError] = useState('')
   const [success, setSuccess] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingRooms, setIsLoadingRooms] = useState(true)
 
-  const loadRooms = () => {
+  const loadRooms = useCallback(async () => {
+    setIsLoadingRooms(true)
+    setRoomsError('')
     const params: Record<string, string | number | boolean> = { aktivalva: true }
     if (minCapacityFilter && Number(minCapacityFilter) > 0) {
       params.minKapacitas = Number(minCapacityFilter)
@@ -64,26 +68,30 @@ export default function NewBookingPage() {
       params.felszereltseg = equipmentFilter.trim()
     }
 
-    client
-      .get<Room[]>('/rooms', { params })
-      .then((r) => {
-        const activeRooms = r.data.filter((rm) => rm.aktivalva !== false)
-        setRooms(activeRooms)
-        if (activeRooms.length > 0) {
-          if (!activeRooms.some((rm) => String(rm.id) === roomId)) {
-            setRoomId(String(activeRooms[0].id))
-          }
-        } else {
-          setRoomId('')
-        }
-      })
-      .catch(() => {})
-  }
+    try {
+      const response = await client.get<Room[]>('/rooms', { params })
+      if (!Array.isArray(response.data)) {
+        throw new Error('A teremlista formátuma érvénytelen.')
+      }
+      const activeRooms = response.data.filter((room) => room.aktivalva !== false)
+      setRooms(activeRooms)
+      setRoomId((currentRoomId) =>
+        activeRooms.some((room) => String(room.id) === currentRoomId)
+          ? currentRoomId
+          : String(activeRooms[0]?.id ?? '')
+      )
+    } catch {
+      setRooms([])
+      setRoomId('')
+      setRoomsError('A termek betöltése nem sikerült. Próbáld újra.')
+    } finally {
+      setIsLoadingRooms(false)
+    }
+  }, [equipmentFilter, minCapacityFilter])
 
   useEffect(() => {
-    loadRooms()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [minCapacityFilter, equipmentFilter])
+    void Promise.resolve().then(() => loadRooms())
+  }, [loadRooms])
 
   const toggleSpecialNeed = (need: string) => {
     const currentNeeds = specialisIgenyek
@@ -165,6 +173,18 @@ export default function NewBookingPage() {
             <span>{error}</span>
           </div>
         )}
+
+        {roomsError ? (
+          <div className="alert alert-error" role="alert" style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <span>{roomsError}</span>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void loadRooms()}>
+              <RefreshCw size={14} strokeWidth={1.5} />
+              <span>Újrapróbálás</span>
+            </button>
+          </div>
+        ) : !isLoadingRooms && rooms.length === 0 ? (
+          <div className="alert alert-info" role="status">A megadott feltételeknek megfelelő aktív terem nem található.</div>
+        ) : null}
 
         {success && (
           <div className="alert alert-success">
@@ -373,7 +393,7 @@ export default function NewBookingPage() {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={isLoading || rooms.length === 0}
+              disabled={isLoading || isLoadingRooms || roomsError !== '' || rooms.length === 0}
             >
               {isLoading ? (
                 <>

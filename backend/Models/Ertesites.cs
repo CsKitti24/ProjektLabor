@@ -10,8 +10,18 @@ namespace ProjektLabor.Models
         public int Id { get; set; }
 
         [ForeignKey("Foglalas")]
-        public int FoglalasId { get; set; }
-        public Foglalas Foglalas { get; set; } = null!;
+        public int? FoglalasId { get; set; }
+        public Foglalas? Foglalas { get; set; }
+
+        public int? CimzettFelhasznaloId { get; set; }
+        public Felhasznalo? CimzettFelhasznalo { get; set; }
+
+        public int? KulcsmozgasId { get; set; }
+        public Kulcsmozgas? Kulcsmozgas { get; set; }
+
+        public DateTime? Hatarido { get; set; }
+
+        public bool Olvasva { get; set; }
 
         [Required]
         public string ErtesitesTipus { get; set; } = string.Empty; // BeforeEnd

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User as UserIcon, LogOut, Shield, Mail, Award } from 'lucide-react'
+import { User as UserIcon, LogOut, Shield, Mail, Award, RefreshCw } from 'lucide-react'
 import { useAuth, type UserRole } from '../auth/AuthContext'
 import client from '../api/client'
 
@@ -20,41 +20,45 @@ function getRoleLabel(role: UserRole): string {
 }
 
 interface ReliabilityData {
-  score?: number
-  pontszam?: number
-  felhasznaloId?: number
-  kategoria?: string
+  userId: number
+  nev: string
+  tanev: string
+  pontszam: number
+  kovetkezmeny: string
 }
 
 export default function ProfilePage() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [reliability, setReliability] = useState<ReliabilityData | null>(null)
-  const [isLoadingReliability, setIsLoadingReliability] = useState(() => Boolean(user && (user.role === 'Oktato' || user.role === 'UzemeltetesiIgazgato')))
+  const [isLoadingReliability, setIsLoadingReliability] = useState(false)
+  const [reliabilityError, setReliabilityError] = useState('')
+  const canViewReliability = user?.role === 'Oktato'
+
+  const loadReliability = useCallback(async () => {
+    if (!canViewReliability) return
+
+    setIsLoadingReliability(true)
+    setReliabilityError('')
+    setReliability(null)
+    try {
+      const response = await client.get<ReliabilityData>('/reliability/my')
+      if (!Number.isFinite(response.data.pontszam)) {
+        throw new Error('A megbízhatósági válasz formátuma érvénytelen.')
+      }
+      setReliability(response.data)
+    } catch {
+      setReliabilityError('A megbízhatósági pontszám betöltése nem sikerült. Próbáld újra.')
+    } finally {
+      setIsLoadingReliability(false)
+    }
+  }, [canViewReliability])
 
   useEffect(() => {
-    if (user && (user.role === 'Oktato' || user.role === 'UzemeltetesiIgazgato')) {
-      let isCancelled = false
-      client
-        .get<ReliabilityData>('/reliability/my')
-        .then((res) => {
-          if (!isCancelled) {
-            setReliability(res.data)
-          }
-        })
-        .catch(() => {
-          // Ha nincs még rögzített esemény vagy hiba lép fel
-        })
-        .finally(() => {
-          if (!isCancelled) {
-            setIsLoadingReliability(false)
-          }
-        })
-      return () => {
-        isCancelled = true
-      }
+    if (canViewReliability) {
+      void Promise.resolve().then(() => loadReliability())
     }
-  }, [user])
+  }, [canViewReliability, loadReliability])
 
   const handleLogout = () => {
     logout()
@@ -62,8 +66,6 @@ export default function ProfilePage() {
   }
 
   if (!user) return null
-
-  const displayScore = reliability?.score ?? reliability?.pontszam ?? 100
 
   return (
     <div>
@@ -103,7 +105,7 @@ export default function ProfilePage() {
               <span className="profile-detail-label">E-mail cím</span>
               <span className="profile-detail-value">
                 <Mail size={13} strokeWidth={1.5} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-                {user.email || `${user.username}@intezmeny.hu`}
+                {user.email || '—'}
               </span>
             </div>
 
@@ -128,14 +130,13 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Megbízhatósági pontszám kártya (főként oktatóknak és üzemeltetésnek) */}
-        {(user.role === 'Oktato' || user.role === 'UzemeltetesiIgazgato' || user.role === 'Adminisztrator') && (
+        {canViewReliability && (
           <div className="card profile-stat-card">
             <div className="profile-stat-header">
               <div className="profile-stat-icon-wrap">
                 <Award size={18} strokeWidth={1.5} color="var(--color-primary)" />
               </div>
-              <h3 className="profile-stat-title">Megbízhatósági értékelés</h3>
+              <h3 className="profile-stat-title">Megbízhatósági hibapont</h3>
             </div>
 
             <div className="profile-stat-body">
@@ -143,25 +144,39 @@ export default function ProfilePage() {
                 <div style={{ padding: 20, textAlign: 'center' }}>
                   <span className="spinner spinner-primary" />
                 </div>
-              ) : (
+              ) : reliability ? (
                 <>
                   <div className="profile-score-display">
-                    <span className="profile-score-number">{displayScore}</span>
+                    <span className="profile-score-number">{reliability.pontszam}</span>
                     <span className="profile-score-unit">/ 100 pont</span>
                   </div>
 
                   <div className="profile-stat-note">
-                    {displayScore >= 80 ? (
-                      <span className="badge badge-success">Megfelelő minősítés</span>
+                    {reliability.pontszam < 10 ? (
+                      <span className="badge badge-success">{reliability.kovetkezmeny}</span>
                     ) : (
-                      <span className="badge badge-warning">Figyelmeztetés: korlátozott</span>
+                      <span className="badge badge-warning">{reliability.kovetkezmeny}</span>
                     )}
                   </div>
 
                   <p className="profile-stat-desc">
-                    A pontszám automatikusan számolódik a kulcsleadási fegyelem és a pontos teremhasználat alapján.
+                    A magasabb pont több rögzített hibát jelent. Tanév: {reliability.tanev}.
                   </p>
                 </>
+              ) : reliabilityError ? (
+                <div className="alert alert-error" role="alert">
+                  <span>{reliabilityError}</span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => void loadReliability()}
+                  >
+                    <RefreshCw size={14} strokeWidth={1.5} />
+                    <span>Újrapróbálás</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="alert alert-error" role="alert">A megbízhatósági pontszám nem érhető el.</div>
               )}
             </div>
           </div>

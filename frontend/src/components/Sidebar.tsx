@@ -14,6 +14,7 @@ import {
   ArrowUpRight,
   List,
   Shield,
+  Bell,
 } from 'lucide-react'
 import type { UserRole } from '../auth/AuthContext'
 
@@ -35,6 +36,7 @@ function getNavItems(role: UserRole): NavItem[] {
         { to: '/new-booking', label: 'Új foglalás', icon: <PlusCircle size={17} strokeWidth={1.5} /> },
         { to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> },
         { to: '/profile', label: 'Megbízhatóságom', icon: <Star size={17} strokeWidth={1.5} /> },
+        { to: '/notifications', label: 'Értesítéseim', icon: <Bell size={17} strokeWidth={1.5} /> },
         { to: '/tickets', label: 'Hibajegyek', icon: <FileText size={17} strokeWidth={1.5} /> },
       ]
     case 'Portas':
@@ -44,6 +46,7 @@ function getNavItems(role: UserRole): NavItem[] {
         { to: '/key-movements', label: 'Kulcsmozgások', icon: <List size={17} strokeWidth={1.5} /> },
         { to: '/active-keys', label: 'Aktív kulcsok', icon: <Key size={17} strokeWidth={1.5} /> },
         { to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> },
+        { to: '/notifications', label: 'Értesítéseim', icon: <Bell size={17} strokeWidth={1.5} /> },
       ]
     case 'Adminisztrator':
       return [

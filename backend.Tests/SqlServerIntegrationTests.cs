@@ -143,6 +143,11 @@ public sealed class SqlServerIntegrationTests
                     .Select(parameter => parameter.Ertek)
                     .SingleAsync());
 
+                var operatorUserForClosing = await db.Felhasznalok
+                    .SingleAsync(user => user.Id == operatorId);
+                operatorUserForClosing.Role = RoleNames.UzemeltetesiIgazgato;
+                await db.SaveChangesAsync();
+
                 var closingAt = new DateTime(2026, 4, 4, 22, 0, 0, DateTimeKind.Utc);
                 Assert.Equal(1, await closingProcessor.ProcessAsync(closingAt, default));
                 Assert.Equal(0, await closingProcessor.ProcessAsync(closingAt.AddMinutes(1), default));
@@ -184,7 +189,107 @@ public sealed class SqlServerIntegrationTests
                 Assert.True(await ColumnExistsAsync(testConnection, "Kulcsmozgasok", "AtvevoFelhasznaloId"));
                 Assert.Equal(4, await db.Kulcsmozgasok.CountAsync());
                 await AssertRecipientSchemaAsync(db, testConnection);
+                operatorUserForClosing.Role = RoleNames.Portas;
+                await db.SaveChangesAsync();
             }
+        }
+        finally
+        {
+            await DropIsolatedDatabaseAsync(databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task SqlServer_EveningKeyReturnNotificationIsPersistentAndUniquePerPorter()
+    {
+        var databaseName = $"ProjektLaborEveningNotification_{Guid.NewGuid():N}";
+        var connectionString = await CreateIsolatedDatabaseAsync(databaseName);
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlServer(connectionString)
+                .Options;
+            await using var db = new AppDbContext(options);
+            await db.Database.MigrateAsync();
+
+            var instructor = CreateUser(RoleNames.Oktato);
+            var firstPorter = CreateUser(RoleNames.Portas);
+            var secondPorter = CreateUser(RoleNames.Portas);
+            var room = new Terem
+            {
+                Nev = $"Evening notification {Guid.NewGuid():N}",
+                Kapacitas = 20,
+                Aktivalva = true
+            };
+            db.Felhasznalok.AddRange(instructor, firstPorter, secondPorter);
+            db.Termek.Add(room);
+            await db.SaveChangesAsync();
+
+            var key = new Kulcs
+            {
+                Szam = $"EN-{Guid.NewGuid():N}"[..20],
+                Tipus = "Osztalykulcs",
+                TeremId = room.Id,
+                Aktivalva = true
+            };
+            db.Kulcsok.Add(key);
+            await db.SaveChangesAsync();
+
+            var issuedAt = new DateTime(2026, 4, 4, 21, 0, 0, DateTimeKind.Utc);
+            var movement = new Kulcsmozgas
+            {
+                KulcsId = key.Id,
+                AtvevoFelhasznaloId = instructor.Id,
+                OperátorId = firstPorter.Id,
+                MozgasTipus = "Kiadás",
+                Idopont = issuedAt
+            };
+            db.Kulcsmozgasok.Add(movement);
+            await db.SaveChangesAsync();
+
+            var processor = new DailyKeyClosingProcessor(
+                db,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Automation:TimeZoneId"] = "UTC"
+                    })
+                    .Build(),
+                NullLogger<DailyKeyClosingProcessor>.Instance);
+            var deadline = new DateTime(2026, 4, 4, 22, 0, 0, DateTimeKind.Utc);
+
+            Assert.Equal(0, await processor.ProcessAsync(deadline.AddSeconds(-1), default));
+            Assert.Empty(await db.Ertesitesek.ToListAsync());
+            Assert.Equal(1, await processor.ProcessAsync(deadline, default));
+            Assert.Equal(0, await processor.ProcessAsync(deadline.AddMinutes(1), default));
+
+            var notifications = await db.Ertesitesek
+                .OrderBy(item => item.CimzettFelhasznaloId)
+                .ToListAsync();
+            Assert.Equal(2, notifications.Count);
+            Assert.Equal(
+                new[] { firstPorter.Id, secondPorter.Id }.Order(),
+                notifications.Select(item => item.CimzettFelhasznaloId!.Value).Order());
+            Assert.All(notifications, notification =>
+            {
+                Assert.Equal(movement.Id, notification.KulcsmozgasId);
+                Assert.Equal(deadline, notification.Hatarido);
+                Assert.False(notification.Olvasva);
+            });
+
+            db.Ertesitesek.Add(new Ertesites
+            {
+                CimzettFelhasznaloId = firstPorter.Id,
+                KulcsmozgasId = movement.Id,
+                ErtesitesTipus = "EveningKeyReturn",
+                IdoPont = deadline,
+                Hatarido = deadline,
+                Allapot = "Kesz",
+                AutomationKey = notifications[0].AutomationKey,
+                CreatedAt = deadline
+            });
+            await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
         }
         finally
         {
