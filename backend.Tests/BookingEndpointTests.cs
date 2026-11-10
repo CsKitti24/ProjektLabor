@@ -77,6 +77,20 @@ namespace backend.Tests
         }
 
         [Fact]
+        public async Task GetBookings_UsesDefaultPagination_WhenQueryParametersAreOmitted()
+        {
+            var (client, _) = await CreateAuthenticatedUserAsync("Adminisztrator");
+
+            var response = await client.GetAsync("/api/bookings");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<BookingListDto>();
+            Assert.NotNull(result);
+            Assert.Equal(1, result.Page);
+            Assert.Equal(20, result.PageSize);
+        }
+
+        [Fact]
         public async Task CreateBooking_Succeeds_AndPreventsOverlappingBooking()
         {
             // Arrange

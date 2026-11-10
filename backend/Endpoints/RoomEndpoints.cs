@@ -319,8 +319,8 @@ namespace ProjektLabor.Endpoints
                 var bookings = await db.Foglalasok
                     .AsNoTracking()
                     .Include(f => f.Felhasznalo)
+                    .Where(BookingRules.ActiveBookings)
                     .Where(f => f.TeremId == id &&
-                                f.Status != "Megszuntetve" &&
                                 f.StartTime < dayEnd &&
                                 f.EndTime > dayStart)
                     .OrderBy(f => f.StartTime)
@@ -427,7 +427,7 @@ namespace ProjektLabor.Endpoints
 
                 var directKeys = await db.Kulcsok
                     .AsNoTracking()
-                    .Where(k => k.TeremId == id)
+                    .Where(k => k.Tipus != "Mesterkulcs" && k.TeremId == id)
                     .Select(k => new RoomKeyDto
                     {
                         Id = k.Id,
@@ -440,7 +440,7 @@ namespace ProjektLabor.Endpoints
 
                 var masterKeys = await db.KulcsTermek
                     .AsNoTracking()
-                    .Where(kt => kt.TeremId == id)
+                    .Where(kt => kt.TeremId == id && kt.Kulcs.Tipus == "Mesterkulcs")
                     .Include(kt => kt.Kulcs)
                     .Select(kt => new RoomKeyDto
                     {
@@ -448,7 +448,7 @@ namespace ProjektLabor.Endpoints
                         Szam = kt.Kulcs.Szam,
                         Tipus = kt.Kulcs.Tipus,
                         Aktivalva = kt.Kulcs.Aktivalva,
-                        IsPrimaryRoomKey = false
+                        IsPrimaryRoomKey = kt.Kulcs.TeremId == id
                     })
                     .ToListAsync();
 

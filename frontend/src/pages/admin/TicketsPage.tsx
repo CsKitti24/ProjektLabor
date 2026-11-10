@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { FileText, Plus, X, AlertCircle, Check, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
+import { useAuth } from '../../auth/AuthContext'
 
 interface RoomOption {
   id: number
@@ -60,6 +61,10 @@ function getStatusBadge(status: string | undefined) {
 }
 
 export default function TicketsPage() {
+  const { user } = useAuth()
+  const canCreateTicket =
+    user?.role === 'Oktato' || user?.role === 'Portas' || user?.role === 'Adminisztrator'
+
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [rooms, setRooms] = useState<RoomOption[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -167,14 +172,16 @@ export default function TicketsPage() {
           <p className="page-subtitle">Termekkel és eszközökkel kapcsolatos hibabejelentések</p>
         </div>
 
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={() => setShowModal(true)}
-        >
-          <Plus size={15} strokeWidth={1.5} />
-          <span>Új hibajegy</span>
-        </button>
+        {canCreateTicket && (
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setShowModal(true)}
+          >
+            <Plus size={15} strokeWidth={1.5} />
+            <span>Új hibajegy</span>
+          </button>
+        )}
       </div>
 
       {error && (

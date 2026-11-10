@@ -1,6 +1,6 @@
 # API_DESIGN.md – Egyetemi Kulcs- és Teremnyilvántartó Rendszer
 
-> **Implementációs állapot (2026-11-09):** Ez a dokumentum a jelenlegi backendhez igazodik. A korábbi tervezeti megjegyzések nem írhatják felül a tényleges útvonalakat, jogosultságokat vagy státuszkódokat.
+> **Implementációs állapot (2026-11-10):** Ez a dokumentum a jelenlegi backendhez igazodik. A korábbi tervezeti megjegyzések nem írhatják felül a tényleges útvonalakat, jogosultságokat vagy státuszkódokat.
 
 ## Aktuális backend-összefoglaló
 
@@ -8,13 +8,17 @@ Az API ASP.NET Core Minimal API, JWT-hitelesítéssel és szerepkör-alapú poli
 
 ### Üzleti integritás
 
+- A felhasználó-, foglalás-, kulcsmozgás- és hibajegylisták lapozási paraméterei opcionálisak; az alapérték `page=1`, `pageSize=20`, a maximális oldalméret 100.
 - Foglalási idő: egy naptári napon belül 08:00–20:00; kezdés és hossz 45 perces rácshoz igazodik.
 - A foglalás létrehozása és módosítása ugyanazt az idő-, aktív terem-, ütközés- és karbantartási validációt használja; a lemondott és `NoShow` státuszú foglalások nem blokkolnak.
+- A teremelérhetőség ugyanazt az aktívfoglalás-szabályt használja: a `Megszuntetve` és `NoShow` foglalások nem jelennek meg foglaltságként; a karbantartás továbbra is blokkol.
 - Az automatizált `NoShow`, foglalásvége előtti értesítés és napi kulcszárási folyamatok idempotens háttérfeldolgozókkal futnak.
 - Kulcskiadás és -visszavétel: `POST /api/key-movements/issue` és `POST /api/key-movements/return`, `Portas` jogosultsággal. Mindkét kérés 4–8 számjegyű átvevői PIN-t és rögzített teremállapotot igényel; a PIN bcrypt hashként tárolódik, és a backend állítja elő a mozgás időbélyegét.
 - A `PUT /api/users/{id}/pin` adminisztrátori végponttal állítható be az átvevő PIN-je. A PIN nem része a felhasználói válasz DTO-knak és nem kerül az auditnaplóba.
 - A kulcsmozgás a teremállapotot és opcionális sérülésleírást tárolja. Sérülés leírásakor a kulcsmozgással együtt automatikus, auditált `Sérülés` hibajegy készül.
-- A mesterkulcs jogosultságát a rendszer mind foglalásos, mind foglalás nélküli kiadásnál ellenőrzi; a portás csak jogosult átvevőnek adhatja át. A mozgás és a hozzá tartozó auditbejegyzés egy tranzakcióban készül.
+- A mesterkulcs jogosultságát a rendszer mind foglalásos, mind foglalás nélküli kiadásnál ellenőrzi. Foglalásos kiadásnál a foglalás termének szerepelnie kell a mesterkulcs terem-hozzárendelései között; ad-hoc kiadásnál a `teremId` kötelező. A portás csak az adott kulcsra jogosult oktatónak adhatja át. A mozgás és a hozzá tartozó auditbejegyzés egy tranzakcióban készül.
+- Az Adminisztrátor a `GET /api/keys/{id}/rooms` és `PUT /api/keys/{id}/rooms` végpontokon kezeli a mesterkulcs többtermes hozzárendeléseit. A `PUT` a teljes listát cseréli; üres `teremIds` lista minden hozzárendelést visszavon.
+- Az Oktató hibajegyet rögzíthet, és kizárólag a saját hibajegyeit listázhatja/tekintheti meg. A Portás, Adminisztrátor és Üzemeltetési Igazgató a teljes hibajegylistát látja; státuszt csak az Adminisztrátor módosíthat.
 - A `GET /api/key-movements/recipients?kulcsId={id}` kizárólag az adott kulcs átvételére jogosult oktatókat adja vissza a portás felületének.
 - A késedelmi lista (`GET /api/key-movements/overdue`) a napi zárási paramétert, az automatizálás időzónáját és foglalás esetén annak végét használja; a portás aktívkulcs-oldalán a késedelmes tételek egyenként látszanak.
 - A karbantartás foglalási ütközéskor `409 Conflict` választ és az összes érintett foglalás részleteit adja, foglalást nem töröl. Az adminisztrátor ezután a meglévő `PUT /api/bookings/{id}` végponttal törölheti (`status: "Megszuntetve"`) vagy áthelyezheti (`teremId`, `startTime`, `endTime`) a foglalást, majd újra rögzítheti a karbantartást.
@@ -151,13 +155,20 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 | K6 | GET | `/api/keys/{id}/status` | Kulcs aktuális állapota (kinél van, szabad-e) | ✅ Kész |
 | K7 | GET | `/api/keys/{id}/movements` | Kulcs mozgástörténete | ✅ Kész |
 
+### Mesterkulcs-teremhozzárendelések
+
+| # | Metódus | Endpoint | Funkció | Státusz |
+|---|---|---|---|---|
+| KR1 | GET | `/api/keys/{id}/rooms` | Mesterkulcs termeinek listázása (Portás/Adminisztrátor/Üzemeltetési Igazgató) | ✅ Kész |
+| KR2 | PUT | `/api/keys/{id}/rooms` | Mesterkulcs termeinek teljes cseréje (Adminisztrátor) | ✅ Kész |
+
 ### Mesterkulcs-jogosultságok
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| MK1 | GET | `/api/keys/{id}/master-access` | Kulcs mesterkulcs-jogosultsági listája | 🔴 Hiányzik |
-| MK2 | POST | `/api/keys/{id}/master-access` | Mesterkulcs-jogosultság hozzáadása | 🔴 Hiányzik |
-| MK3 | DELETE | `/api/keys/{id}/master-access/{userId}` | Mesterkulcs-jogosultság visszavonása | 🔴 Hiányzik |
+| MK1 | GET | `/api/keys/{id}/master-access` | Kulcs mesterkulcs-jogosultsági listája | ✅ Kész |
+| MK2 | POST | `/api/keys/{id}/master-access` | Mesterkulcs-jogosultság hozzáadása | ✅ Kész |
+| MK3 | DELETE | `/api/keys/{id}/master-access/{userId}` | Mesterkulcs-jogosultság visszavonása | ✅ Kész |
 
 ### Kulcsmozgások (kiadás / visszavétel)
 
@@ -184,9 +195,9 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| T1 | GET | `/api/tickets` | Hibajegyek listázása | ✅ Kész |
-| T2 | GET | `/api/tickets/{id}` | Egy hibajegy részletei | ✅ Kész |
-| T3 | POST | `/api/tickets` | Új hibajegy rögzítése | ✅ Kész |
+| T1 | GET | `/api/tickets` | Hibajegyek listázása (Oktató: csak saját) | ✅ Kész |
+| T2 | GET | `/api/tickets/{id}` | Egy hibajegy részletei (Oktató: csak saját) | ✅ Kész |
+| T3 | POST | `/api/tickets` | Új hibajegy rögzítése (Oktató/Portás/Adminisztrátor) | ✅ Kész |
 | T4 | PUT | `/api/tickets/{id}/status` | Hibajegy státuszának frissítése | ✅ Kész |
 
 ### Karbantartási idősávok
@@ -776,7 +787,7 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 
 **Funkció:** Hibajegy felvétele teremhez.
 
-**Jogosultság:** `Portas`, `Adminisztrator`
+**Jogosultság:** `Oktato` (saját bejelentés), `Portas`, `Adminisztrator`
 
 **Request DTO (`CreateTicketRequestDto`):**
 ```json

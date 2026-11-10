@@ -30,7 +30,9 @@ namespace ProjektLabor.Endpoints
 
                 if (teremId.HasValue)
                 {
-                    query = query.Where(k => k.TeremId == teremId.Value);
+                    query = query.Where(k => k.Tipus == "Mesterkulcs"
+                        ? k.KulcsTeremKapcsok.Any(access => access.TeremId == teremId.Value)
+                        : k.TeremId == teremId.Value);
                 }
 
                 if (!string.IsNullOrWhiteSpace(tipus))
@@ -166,7 +168,10 @@ namespace ProjektLabor.Endpoints
                     Szam = request.Szam.Trim(),
                     Tipus = request.Tipus,
                     TeremId = request.TeremId,
-                    Aktivalva = request.Aktivalva
+                    Aktivalva = request.Aktivalva,
+                    KulcsTeremKapcsok = request.Tipus == "Mesterkulcs"
+                        ? [new KulcsTerem { TeremId = request.TeremId }]
+                        : []
                 };
 
                 db.Kulcsok.Add(key);
@@ -213,13 +218,18 @@ namespace ProjektLabor.Endpoints
                 AuditService auditService,
                 ClaimsPrincipal caller) =>
             {
-                var key = await db.Kulcsok.Include(k => k.Terem).FirstOrDefaultAsync(k => k.Id == id);
+                var key = await db.Kulcsok
+                    .Include(k => k.Terem)
+                    .Include(k => k.KulcsTeremKapcsok)
+                    .FirstOrDefaultAsync(k => k.Id == id);
                 if (key is null)
                 {
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú kulcs nem található." });
                 }
 
                 var changes = new List<string>();
+                var previousType = key.Tipus;
+                var previousRoomId = key.TeremId;
 
                 if (!string.IsNullOrWhiteSpace(request.Szam) && request.Szam.Trim() != key.Szam)
                 {
@@ -253,6 +263,21 @@ namespace ProjektLabor.Endpoints
                 {
                     changes.Add($"Aktivalva: {key.Aktivalva} -> {request.Aktivalva.Value}");
                     key.Aktivalva = request.Aktivalva.Value;
+                }
+
+                if (previousType == "Mesterkulcs" && key.Tipus != "Mesterkulcs")
+                {
+                    db.KulcsTermek.RemoveRange(key.KulcsTeremKapcsok);
+                }
+                else if (key.Tipus == "Mesterkulcs" &&
+                         (previousType != key.Tipus || previousRoomId != key.TeremId) &&
+                         key.KulcsTeremKapcsok.All(room => room.TeremId != key.TeremId))
+                {
+                    key.KulcsTeremKapcsok.Add(new KulcsTerem
+                    {
+                        KulcsId = key.Id,
+                        TeremId = key.TeremId
+                    });
                 }
 
                 if (changes.Count > 0)
@@ -429,6 +454,123 @@ namespace ProjektLabor.Endpoints
             .Produces<List<KeyMovementItemDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .WithOpenApi();
+
+            group.MapGet("/{id:int}/rooms", async (
+                int id,
+                AppDbContext db,
+                CancellationToken cancellationToken) =>
+            {
+                var isMasterKey = await db.Kulcsok.AnyAsync(
+                    key => key.Id == id && key.Tipus == "Mesterkulcs",
+                    cancellationToken);
+                if (!isMasterKey)
+                {
+                    return Results.NotFound(new { message = "A megadott mesterkulcs nem található." });
+                }
+
+                var rooms = await db.KulcsTermek
+                    .AsNoTracking()
+                    .Where(access => access.KulcsId == id)
+                    .OrderBy(access => access.Terem.Nev)
+                    .Select(access => new KeyRoomDto(access.TeremId, access.Terem.Nev))
+                    .ToListAsync(cancellationToken);
+
+                return Results.Ok(rooms);
+            })
+            .WithName("GetMasterKeyRooms")
+            .WithSummary("Mesterkulcshoz rendelt termek listázása")
+            .RequireAuthorization("AdminOrPortasOrIgazgato")
+            .Produces<List<KeyRoomDto>>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound)
+            .WithOpenApi();
+
+            group.MapPut("/{id:int}/rooms", async (
+                int id,
+                UpdateKeyRoomsRequestDto request,
+                AppDbContext db,
+                AuditService auditService,
+                ClaimsPrincipal caller,
+                CancellationToken cancellationToken) =>
+            {
+                if (request.TeremIds is null ||
+                    request.TeremIds.Count != request.TeremIds.Distinct().Count() ||
+                    request.TeremIds.Any(roomId => roomId <= 0))
+                {
+                    return Results.BadRequest(new { message = "A teremazonosítók nem ismétlődhetnek és pozitívnak kell lenniük." });
+                }
+
+                var key = await db.Kulcsok
+                    .Include(item => item.KulcsTeremKapcsok)
+                    .SingleOrDefaultAsync(
+                        item => item.Id == id && item.Tipus == "Mesterkulcs",
+                        cancellationToken);
+                if (key is null)
+                {
+                    return Results.NotFound(new { message = "A megadott mesterkulcs nem található." });
+                }
+
+                var existingRoomIds = await db.Termek
+                    .Where(room => request.TeremIds.Contains(room.Id))
+                    .Select(room => room.Id)
+                    .ToListAsync(cancellationToken);
+                if (existingRoomIds.Count != request.TeremIds.Count)
+                {
+                    return Results.BadRequest(new { message = "A hozzárendelés csak létező termeket tartalmazhat." });
+                }
+
+                return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+                {
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(cancellationToken);
+                var requestedRoomIds = request.TeremIds.ToHashSet();
+                var previousRoomIds = key.KulcsTeremKapcsok
+                    .Select(room => room.TeremId)
+                    .Order()
+                    .ToArray();
+                var removedRooms = key.KulcsTeremKapcsok
+                    .Where(room => !requestedRoomIds.Contains(room.TeremId))
+                    .ToList();
+                db.KulcsTermek.RemoveRange(removedRooms);
+                foreach (var roomId in request.TeremIds.Where(
+                             roomId => key.KulcsTeremKapcsok.All(room => room.TeremId != roomId)))
+                {
+                    key.KulcsTeremKapcsok.Add(new KulcsTerem
+                    {
+                        KulcsId = key.Id,
+                        TeremId = roomId
+                    });
+                }
+
+                await db.SaveChangesAsync(cancellationToken);
+                await auditService.LogAsync(
+                    caller,
+                    "UPDATE_ROOMS",
+                    "Kulcs",
+                    key.Id.ToString(),
+                    regiErtek: string.Join(",", previousRoomIds),
+                    ujErtek: string.Join(",", request.TeremIds.Order()));
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+
+                return Results.Ok(await db.KulcsTermek
+                    .AsNoTracking()
+                    .Where(access => access.KulcsId == id)
+                    .OrderBy(access => access.Terem.Nev)
+                    .Select(access => new KeyRoomDto(access.TeremId, access.Terem.Nev))
+                    .ToListAsync(cancellationToken));
+                });
+            })
+            .WithName("UpdateMasterKeyRooms")
+            .WithSummary("Mesterkulcshoz rendelt termek teljes körű frissítése")
+            .RequireAuthorization("Adminisztrator")
+            .Produces<List<KeyRoomDto>>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status403Forbidden)
             .WithOpenApi();
 

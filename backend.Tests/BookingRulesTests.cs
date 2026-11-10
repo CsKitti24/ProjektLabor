@@ -50,6 +50,54 @@ public class BookingRulesTests
     }
 
     [Fact]
+    public async Task ValidateAsync_ActiveBookingBlocksOverlappingTime()
+    {
+        await using var db = CreateDb();
+        db.Foglalasok.Add(new Foglalas
+        {
+            Id = 1,
+            TeremId = 1,
+            FelhasznaloId = 1,
+            StartTime = new DateTime(2026, 11, 2, 10, 15, 0),
+            EndTime = new DateTime(2026, 11, 2, 11, 0, 0),
+            Status = "Aktiv"
+        });
+        await db.SaveChangesAsync();
+
+        var error = await BookingRules.ValidateAsync(
+            db, 1,
+            new DateTime(2026, 11, 2, 10, 15, 0),
+            new DateTime(2026, 11, 2, 11, 0, 0));
+
+        Assert.Equal("A megadott idősáv ütközik egy már meglévő foglalással.", error);
+    }
+
+    [Theory]
+    [InlineData("NoShow")]
+    [InlineData("Megszuntetve")]
+    public async Task ValidateAsync_IgnoresInactiveBookingStatuses(string status)
+    {
+        await using var db = CreateDb();
+        db.Foglalasok.Add(new Foglalas
+        {
+            Id = 1,
+            TeremId = 1,
+            FelhasznaloId = 1,
+            StartTime = new DateTime(2026, 11, 2, 10, 15, 0),
+            EndTime = new DateTime(2026, 11, 2, 11, 0, 0),
+            Status = status
+        });
+        await db.SaveChangesAsync();
+
+        var error = await BookingRules.ValidateAsync(
+            db, 1,
+            new DateTime(2026, 11, 2, 10, 15, 0),
+            new DateTime(2026, 11, 2, 11, 0, 0));
+
+        Assert.Null(error);
+    }
+
+    [Fact]
     public void IsUserStatusChangeAllowed_RejectsAutomationStatuses()
     {
         Assert.False(BookingRules.IsUserStatusChangeAllowed("Aktiv", "NoShow", false));

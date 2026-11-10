@@ -11,7 +11,6 @@ namespace ProjektLabor.Endpoints;
 
 public static class MaintenanceEndpoints
 {
-    private const string CancelledBookingStatus = "Megszuntetve";
     private static readonly Expression<Func<KarbantartasiIdosav, MaintenanceResponse>> ResponseProjection =
         item => new(
             item.Id,
@@ -122,6 +121,8 @@ public static class MaintenanceEndpoints
             return Results.NotFound(new { message = "A megadott terem nem található." });
         }
 
+        return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+        {
         await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
             ? null
             : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
@@ -153,6 +154,7 @@ public static class MaintenanceEndpoints
 
         var response = await FindResponseAsync(db, item.Id, cancellationToken);
         return Results.Created($"/api/maintenance/{item.Id}", response);
+        });
     }
 
     private static async Task<IResult> UpdateAsync(
@@ -186,6 +188,8 @@ public static class MaintenanceEndpoints
             return Results.NotFound(new { message = "A megadott terem nem található." });
         }
 
+        return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+        {
         await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
             ? null
             : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
@@ -213,6 +217,7 @@ public static class MaintenanceEndpoints
         }
 
         return Results.Ok(await FindResponseAsync(db, item.Id, cancellationToken));
+        });
     }
 
     private static async Task<IResult> DeleteAsync(
@@ -234,6 +239,8 @@ public static class MaintenanceEndpoints
             return Results.NotFound();
         }
 
+        return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+        {
         await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
             ? null
             : await db.Database.BeginTransactionAsync(cancellationToken);
@@ -246,6 +253,7 @@ public static class MaintenanceEndpoints
         }
 
         return Results.NoContent();
+        });
     }
 
     private static async Task<int?> GetAdministratorIdAsync(
@@ -292,10 +300,9 @@ public static class MaintenanceEndpoints
         CancellationToken cancellationToken) =>
         db.Foglalasok
             .AsNoTracking()
+            .Where(BookingRules.ActiveBookings)
             .Where(booking =>
                 booking.TeremId == request.TeremId &&
-                booking.Status != CancelledBookingStatus &&
-                booking.Status != "NoShow" &&
                 booking.StartTime < request.EndTime &&
                 booking.EndTime > request.StartTime)
             .OrderBy(booking => booking.StartTime)

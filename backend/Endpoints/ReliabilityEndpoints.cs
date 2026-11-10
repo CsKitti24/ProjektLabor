@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Models;
 using ProjektLabor.Security;
+using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints;
 
@@ -143,8 +144,11 @@ public static class ReliabilityEndpoints
             return Results.Forbid();
         }
 
-        await using var transaction = await db.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable, cancellationToken);
+        return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+        {
+        await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+            ? null
+            : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var instructor = await FindInstructorAsync(request.UserId, db, cancellationToken);
         if (instructor is null)
@@ -183,9 +187,13 @@ public static class ReliabilityEndpoints
         });
 
         await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
 
         return Results.Ok(CreateScoreResponse(instructor.Id, instructor.Nev, academicYear, newScore));
+        });
     }
 
     private static async Task<int?> GetReadAccessAsync(

@@ -80,6 +80,8 @@ namespace ProjektLabor.Endpoints
                     return Results.Unauthorized();
                 }
 
+                return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+                {
                 await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
                     ? null
                     : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -113,6 +115,7 @@ namespace ProjektLabor.Endpoints
                 int recipientId;
                 string recipientName;
                 string? recipientPinHash;
+                int issueRoomId;
                 if (request.FoglalasId.HasValue)
                 {
                     var booking = await db.Foglalasok
@@ -136,11 +139,25 @@ namespace ProjektLabor.Endpoints
                         return Results.BadRequest(new { message = "A foglaláshoz tartozó átvevő nem módosítható." });
                     }
 
-                    if (booking.TeremId != key.TeremId)
+                    if (key.Tipus == "Mesterkulcs")
+                    {
+                        if (request.TeremId.HasValue && request.TeremId.Value != booking.TeremId)
+                        {
+                            return Results.BadRequest(new { message = "A megadott terem nem egyezik a foglalás termével." });
+                        }
+
+                        if (!await db.KulcsTermek.AnyAsync(access =>
+                                access.KulcsId == key.Id && access.TeremId == booking.TeremId))
+                        {
+                            return Results.BadRequest(new { message = "A mesterkulcs nincs hozzárendelve a foglalás terméhez." });
+                        }
+                    }
+                    else if (booking.TeremId != key.TeremId)
                     {
                         return Results.BadRequest(new { message = "A foglalás nem ehhez a kulcshoz tartozó teremre szól." });
                     }
 
+                    issueRoomId = booking.TeremId;
                     recipientId = booking.FelhasznaloId;
                     recipientName = booking.Felhasznalo.Nev;
                     recipientPinHash = booking.Felhasznalo.PinHash;
@@ -167,13 +184,23 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.BadRequest(new { message = "Kulcs átvevője csak oktató lehet." });
                     }
-                    if (key.Tipus == "Mesterkulcs" &&
-                        !await db.MesterkulcsJogosultsagok.AnyAsync(access =>
-                            access.KulcsId == key.Id && access.FelhasznaloId == recipient.Id))
+                    if (key.Tipus == "Mesterkulcs")
                     {
-                        return Results.Forbid();
+                        if (!request.TeremId.HasValue)
+                        {
+                            return Results.BadRequest(new { message = "Foglalás nélküli mesterkulcs-kiadáshoz terem megadása kötelező." });
+                        }
+
+                        if (!await db.KulcsTermek.AnyAsync(access =>
+                                access.KulcsId == key.Id && access.TeremId == request.TeremId.Value))
+                        {
+                            return Results.BadRequest(new { message = "A mesterkulcs nincs hozzárendelve a megadott teremhez." });
+                        }
                     }
 
+                    issueRoomId = key.Tipus == "Mesterkulcs"
+                        ? request.TeremId!.Value
+                        : key.TeremId;
                     recipientId = recipient.Id;
                     recipientName = recipient.Nev;
                     recipientPinHash = recipient.PinHash;
@@ -213,7 +240,7 @@ namespace ProjektLabor.Endpoints
                 var conditionTicket = AddConditionTicket(
                     db,
                     operatorId.Value,
-                    key.TeremId,
+                    issueRoomId,
                     movement.SerulesLeiras,
                     now);
                 await db.SaveChangesAsync();
@@ -256,6 +283,7 @@ namespace ProjektLabor.Endpoints
                 };
 
                 return Results.Created($"/api/key-movements/{movement.Id}", result);
+                });
             })
             .WithName("IssueKey")
             .WithSummary("Kulcs kiadásának rögzítése")
@@ -289,6 +317,8 @@ namespace ProjektLabor.Endpoints
                     return Results.Unauthorized();
                 }
 
+                return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+                {
                 await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
                     ? null
                     : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -405,6 +435,7 @@ namespace ProjektLabor.Endpoints
                 };
 
                 return Results.Ok(result);
+                });
             })
             .WithName("ReturnKey")
             .WithSummary("Kulcs visszavételének rögzítése")
@@ -422,12 +453,14 @@ namespace ProjektLabor.Endpoints
                 string? mozgasTipus,
                 DateTime? tol,
                 DateTime? ig,
-                int page,
-                int pageSize,
+                int? page,
+                int? pageSize,
                 AppDbContext db) =>
             {
-                page = page <= 0 ? 1 : page;
-                pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 100);
+                var normalizedPage = page.GetValueOrDefault(1);
+                normalizedPage = normalizedPage <= 0 ? 1 : normalizedPage;
+                var normalizedPageSize = pageSize.GetValueOrDefault(20);
+                normalizedPageSize = normalizedPageSize <= 0 ? 20 : Math.Min(normalizedPageSize, 100);
 
                 var query = db.Kulcsmozgasok
                     .AsNoTracking()
@@ -462,8 +495,8 @@ namespace ProjektLabor.Endpoints
 
                 var items = await query
                     .OrderByDescending(km => km.Idopont)
-                    .Skip((page - 1) * pageSize)
-                    .Take(pageSize)
+                    .Skip((normalizedPage - 1) * normalizedPageSize)
+                    .Take(normalizedPageSize)
                     .Select(km => new KeyMovementItemDto
                     {
                         Id = km.Id,
@@ -493,8 +526,8 @@ namespace ProjektLabor.Endpoints
                 {
                     Items = items,
                     TotalCount = totalCount,
-                    Page = page,
-                    PageSize = pageSize
+                    Page = normalizedPage,
+                    PageSize = normalizedPageSize
                 });
             })
             .WithName("GetKeyMovementsList")

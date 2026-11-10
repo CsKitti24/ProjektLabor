@@ -13,6 +13,7 @@ migrációs lánca. A jelenlegi, időrendi sorrend:
 8. `20261109094123_AddSpecialNeedsAndRoomEquipment`
 9. `20261109120001_AddKeyPinsAndMovementCondition`
 10. `20261110164046_AddRecipientAwareKeyReturnNotifications`
+11. `20261110181630_BackfillMasterKeyRooms`
 
 Az 8. és 9. migráció a `Termek.Felszereltseg`,
 `Foglalasok.SpecialisIgenyek`, `Felhasznalok.PinHash`,
@@ -22,6 +23,8 @@ hozzá. Ezek SQL Serveren nullable oszlopok, ezért a korábbi rekordokban
 hivatkozásokat, valamint nullable határidőt ad az értesítéshez; az új
 `Olvasva` oszlop a meglévő értesítéseknél `false` alapértéket kap. A migráció
 nem törli vagy alakítja át a meglévő értesítési rekordokat.
+A 11. migráció az eddigi mesterkulcsok elsődleges termét beállítja a
+`KulcsTerem` kapcsolótáblában; meglévő hozzárendelést nem töröl.
 
 Az `InitialCreate` hozza létre többek között a felhasználók, termek, kulcsok,
 foglalások, kulcsmozgások, értesítések, hibajegyek, karbantartási idősávok,

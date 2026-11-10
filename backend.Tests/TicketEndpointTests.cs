@@ -39,7 +39,7 @@ namespace backend.Tests
             });
         }
 
-        private async Task<HttpClient> CreateClientWithRoleAsync(string role)
+        private async Task<(HttpClient Client, int UserId)> CreateClientWithRoleAsync(string role)
         {
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -62,16 +62,16 @@ namespace backend.Tests
 
             var client = _factory.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            return client;
+            return (client, user.Id);
         }
 
         [Fact]
-        public async Task CreateAndResolveTicket_WorksCorrectly()
+        public async Task InstructorCanCreateAndOnlyReadOwnTickets()
         {
-            // Arrange
-            _ = await CreateClientWithRoleAsync("Oktato");
-            var portasClient = await CreateClientWithRoleAsync("Portas");
-            var adminClient = await CreateClientWithRoleAsync("Adminisztrator");
+            var (teacherClient, teacherId) = await CreateClientWithRoleAsync("Oktato");
+            var (otherTeacherClient, otherTeacherId) = await CreateClientWithRoleAsync("Oktato");
+            var (portasClient, _) = await CreateClientWithRoleAsync("Portas");
+            var (adminClient, _) = await CreateClientWithRoleAsync("Adminisztrator");
 
             int roomId;
             using (var scope = _factory.Services.CreateScope())
@@ -83,30 +83,69 @@ namespace backend.Tests
                 roomId = room.Id;
             }
 
-            // 1. Portas creates a ticket; a forged requester ID is ignored.
-            var createRes = await portasClient.PostAsJsonAsync("/api/tickets", new
+            var ownResponse = await teacherClient.PostAsJsonAsync("/api/tickets", new
             {
-                felhasznaloId = 1,
+                felhasznaloId = otherTeacherId,
                 TeremId = roomId,
                 Kategoria = "Projektor",
                 Leiras = "Nem kapcsol be a kivetítő"
             });
+            Assert.Equal(HttpStatusCode.Created, ownResponse.StatusCode);
+            var ownTicket = await ownResponse.Content.ReadFromJsonAsync<TicketDto>();
+            Assert.NotNull(ownTicket);
+            Assert.Equal(teacherId, ownTicket.FelhasznaloId);
+            Assert.Equal("Nyitva", ownTicket.Statusz);
 
-            Assert.Equal(HttpStatusCode.Created, createRes.StatusCode);
-            var created = await createRes.Content.ReadFromJsonAsync<TicketDto>();
-            Assert.NotNull(created);
-            Assert.Equal("Nyitva", created.Statusz);
-            Assert.NotEqual(1, created.FelhasznaloId);
+            var otherResponse = await otherTeacherClient.PostAsJsonAsync("/api/tickets", new
+            {
+                TeremId = roomId,
+                Kategoria = "Projektor",
+                Leiras = "A másik oktató hibajegye"
+            });
+            Assert.Equal(HttpStatusCode.Created, otherResponse.StatusCode);
+            var otherTicket = await otherResponse.Content.ReadFromJsonAsync<TicketDto>();
+            Assert.NotNull(otherTicket);
+
+            var ownList = await teacherClient.GetFromJsonAsync<TicketListDto>("/api/tickets");
+            Assert.NotNull(ownList);
+            Assert.Equal(1, ownList.TotalCount);
+            Assert.Equal(teacherId, Assert.Single(ownList.Items).FelhasznaloId);
+            Assert.Equal(HttpStatusCode.OK, (await teacherClient.GetAsync($"/api/tickets/{ownTicket.Id}")).StatusCode);
+            Assert.Equal(
+                HttpStatusCode.NotFound,
+                (await teacherClient.GetAsync($"/api/tickets/{otherTicket.Id}")).StatusCode);
+            Assert.Equal(
+                HttpStatusCode.Forbidden,
+                (await teacherClient.PutAsJsonAsync(
+                    $"/api/tickets/{ownTicket.Id}/status",
+                    new UpdateTicketStatusRequestDto { Statusz = "Megoldva" })).StatusCode);
+
+            // Portas and Admin retain access to all tickets; Admin retains status updates.
+            Assert.Equal(HttpStatusCode.Created, (await portasClient.PostAsJsonAsync("/api/tickets", new
+            {
+                TeremId = roomId,
+                Kategoria = "Projektor",
+                Leiras = "Portás által rögzített hiba"
+            })).StatusCode);
+            Assert.Equal(HttpStatusCode.Created, (await adminClient.PostAsJsonAsync("/api/tickets", new
+            {
+                TeremId = roomId,
+                Kategoria = "Projektor",
+                Leiras = "Admin által rögzített hiba"
+            })).StatusCode);
+            var allTickets = await portasClient.GetFromJsonAsync<TicketListDto>("/api/tickets");
+            Assert.NotNull(allTickets);
+            Assert.Equal(4, allTickets.TotalCount);
+
             using (var scope = _factory.Services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var owner = await db.Felhasznalok.FindAsync(created.FelhasznaloId);
+                var owner = await db.Felhasznalok.FindAsync(ownTicket.FelhasznaloId);
                 Assert.NotNull(owner);
-                Assert.Equal("Portas", owner.Role);
+                Assert.Equal("Oktato", owner.Role);
             }
 
-            // 2. Admin updates ticket status
-            var updateRes = await adminClient.PutAsJsonAsync($"/api/tickets/{created.Id}/status", new UpdateTicketStatusRequestDto
+            var updateRes = await adminClient.PutAsJsonAsync($"/api/tickets/{ownTicket.Id}/status", new UpdateTicketStatusRequestDto
             {
                 Statusz = "Megoldva"
             });
@@ -115,6 +154,30 @@ namespace backend.Tests
             var updated = await updateRes.Content.ReadFromJsonAsync<TicketDto>();
             Assert.NotNull(updated);
             Assert.Equal("Megoldva", updated.Statusz);
+        }
+
+        [Fact]
+        public async Task TicketCreation_RejectsUnauthorizedRole()
+        {
+            var (directorClient, _) = await CreateClientWithRoleAsync("UzemeltetesiIgazgato");
+            int roomId;
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var room = new Terem { Nev = "Ticket role test", Kapacitas = 20, Aktivalva = true };
+                db.Termek.Add(room);
+                await db.SaveChangesAsync();
+                roomId = room.Id;
+            }
+
+            var response = await directorClient.PostAsJsonAsync("/api/tickets", new
+            {
+                TeremId = roomId,
+                Kategoria = "Projektor",
+                Leiras = "Nem kapcsol be"
+            });
+
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
     }
 }

@@ -99,6 +99,8 @@ public static class MasterAccessEndpoints
             return Results.Conflict(new { message = "Az oktató már jogosult erre a mesterkulcsra." });
         }
 
+        return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+        {
         var access = new MesterkulcsJogosultsag
         {
             KulcsId = id,
@@ -122,6 +124,7 @@ public static class MasterAccessEndpoints
         return Results.Created(
             $"/api/keys/{id}/master-access/{instructor.Id}",
             new MasterAccessResponse(instructor.Id, instructor.Nev, access.CreatedAt));
+        });
     }
 
     private static async Task<IResult> RevokeAsync(
@@ -151,6 +154,8 @@ public static class MasterAccessEndpoints
             return Results.NotFound(new { message = "A jogosultság nem található." });
         }
 
+        return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+        {
         await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
             ? null
             : await db.Database.BeginTransactionAsync(cancellationToken);
@@ -165,6 +170,7 @@ public static class MasterAccessEndpoints
         }
 
         return Results.NoContent();
+        });
     }
 
     private static async Task<int?> GetAdministratorIdAsync(

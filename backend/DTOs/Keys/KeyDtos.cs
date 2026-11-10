@@ -42,6 +42,13 @@ namespace ProjektLabor.DTOs.Keys
         public bool? Aktivalva { get; set; }
     }
 
+    public class UpdateKeyRoomsRequestDto
+    {
+        public List<int> TeremIds { get; set; } = new();
+    }
+
+    public sealed record KeyRoomDto(int Id, string Nev);
+
     public class KeyStatusDto
     {
         public int KulcsId { get; set; }

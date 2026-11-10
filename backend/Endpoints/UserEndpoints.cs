@@ -26,12 +26,14 @@ namespace ProjektLabor.Endpoints
             // U1 – GET /api/users
             group.MapGet("/", async (
                 string? role,
-                int page,
-                int pageSize,
+                int? page,
+                int? pageSize,
                 AppDbContext db) =>
             {
-                page = page <= 0 ? 1 : page;
-                pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 100);
+                var normalizedPage = page.GetValueOrDefault(1);
+                normalizedPage = normalizedPage <= 0 ? 1 : normalizedPage;
+                var normalizedPageSize = pageSize.GetValueOrDefault(20);
+                normalizedPageSize = normalizedPageSize <= 0 ? 20 : Math.Min(normalizedPageSize, 100);
 
                 var query = db.Felhasznalok.AsNoTracking();
 
@@ -44,8 +46,8 @@ namespace ProjektLabor.Endpoints
 
                 var items = await query
                     .OrderBy(u => u.Id)
-                    .Skip((page - 1) * pageSize)
-                    .Take(pageSize)
+                    .Skip((normalizedPage - 1) * normalizedPageSize)
+                    .Take(normalizedPageSize)
                     .Select(u => new UserDto
                     {
                         Id = u.Id,
@@ -63,8 +65,8 @@ namespace ProjektLabor.Endpoints
                 {
                     Items = items,
                     TotalCount = totalCount,
-                    Page = page,
-                    PageSize = pageSize
+                    Page = normalizedPage,
+                    PageSize = normalizedPageSize
                 });
             })
             .WithName("GetUsers")
@@ -156,7 +158,7 @@ namespace ProjektLabor.Endpoints
                     Nev = request.Nev.Trim(),
                     Role = canonicalRole,
                     SzuletesiDatum = request.SzuletesiDatum,
-                    JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.Jelszo),
+                    JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.Jelszo, workFactor: 12),
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -237,7 +239,7 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.BadRequest(new { message = "A jelszónak legalább 8 karakterből kell állnia." });
                     }
-                    user.JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.UjJelszo);
+                    user.JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.UjJelszo, workFactor: 12);
                     changes.Add("Jelszo modosult");
                 }
 

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.Tickets;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints
@@ -21,25 +22,38 @@ namespace ProjektLabor.Endpoints
         {
             var group = routes.MapGroup("/api/tickets")
                 .WithTags("Tickets")
-                .RequireAuthorization("AdminOrPortasOrIgazgato");
+                .RequireAuthorization("Authenticated");
 
             // T1 – GET /api/tickets
             group.MapGet("/", async (
                 int? teremId,
                 string? statusz,
                 string? kategoria,
-                int page,
-                int pageSize,
-                AppDbContext db) =>
+                int? page,
+                int? pageSize,
+                AppDbContext db,
+                ClaimsPrincipal caller) =>
             {
-                page = page <= 0 ? 1 : page;
-                pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 100);
+                var normalizedPage = page.GetValueOrDefault(1);
+                var normalizedPageSize = pageSize.GetValueOrDefault(20);
+                normalizedPage = normalizedPage <= 0 ? 1 : normalizedPage;
+                normalizedPageSize = normalizedPageSize <= 0 ? 20 : Math.Min(normalizedPageSize, 100);
 
                 var query = db.Hibajegyek
                     .AsNoTracking()
                     .Include(h => h.Terem)
                     .Include(h => h.Felhasznalo)
                     .AsQueryable();
+
+                if (caller.IsInRole(RoleNames.Oktato))
+                {
+                    if (!TryGetCallerId(caller, out var userId))
+                    {
+                        return Results.Unauthorized();
+                    }
+
+                    query = query.Where(h => h.FelhasznaloId == userId);
+                }
 
                 if (teremId.HasValue)
                 {
@@ -60,8 +74,8 @@ namespace ProjektLabor.Endpoints
 
                 var items = await query
                     .OrderByDescending(h => h.CreatedAt)
-                    .Skip((page - 1) * pageSize)
-                    .Take(pageSize)
+                    .Skip((normalizedPage - 1) * normalizedPageSize)
+                    .Take(normalizedPageSize)
                     .Select(h => new TicketDto
                     {
                         Id = h.Id,
@@ -81,24 +95,36 @@ namespace ProjektLabor.Endpoints
                 {
                     Items = items,
                     TotalCount = totalCount,
-                    Page = page,
-                    PageSize = pageSize
+                    Page = normalizedPage,
+                    PageSize = normalizedPageSize
                 });
             })
             .WithName("GetTickets")
             .WithSummary("Hibajegyek listázása szűrőkkel és lapozással")
+            .RequireAuthorization("TicketReaders")
             .Produces<TicketListDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .WithOpenApi();
 
             // T2 – GET /api/tickets/{id}
-            group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
+            group.MapGet("/{id:int}", async (int id, AppDbContext db, ClaimsPrincipal caller) =>
             {
-                var h = await db.Hibajegyek
+                var query = db.Hibajegyek
                     .AsNoTracking()
                     .Include(h => h.Terem)
                     .Include(h => h.Felhasznalo)
-                    .FirstOrDefaultAsync(h => h.Id == id);
+                    .AsQueryable();
+                if (caller.IsInRole(RoleNames.Oktato))
+                {
+                    if (!TryGetCallerId(caller, out var userId))
+                    {
+                        return Results.Unauthorized();
+                    }
+
+                    query = query.Where(h => h.FelhasznaloId == userId);
+                }
+
+                var h = await query.FirstOrDefaultAsync(h => h.Id == id);
 
                 if (h is null)
                 {
@@ -123,6 +149,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("GetTicketById")
             .WithSummary("Egy hibajegy adatainak lekérdezése")
+            .RequireAuthorization("TicketReaders")
             .Produces<TicketDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -194,7 +221,7 @@ namespace ProjektLabor.Endpoints
             })
             .WithName("CreateTicket")
             .WithSummary("Új hibajegy rögzítése")
-            .RequireAuthorization("AdminOrPortas")
+            .RequireAuthorization("TicketCreators")
             .Produces<TicketDto>(StatusCodes.Status201Created)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
@@ -266,6 +293,13 @@ namespace ProjektLabor.Endpoints
             .WithOpenApi();
 
             return group;
+        }
+
+        private static bool TryGetCallerId(ClaimsPrincipal caller, out int userId)
+        {
+            var subject = caller.FindFirst("sub")?.Value
+                ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return int.TryParse(subject, out userId) && userId > 0;
         }
     }
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { AlertCircle, Key, Pencil, Plus, Search, Trash2, UserPlus, X } from 'lucide-react'
+import { AlertCircle, Building2, Key, Pencil, Plus, Search, Trash2, UserPlus, X } from 'lucide-react'
 import client from '../../api/client'
 
 interface KeyItem {
@@ -42,6 +42,9 @@ export default function KeysPage() {
   const [roomId, setRoomId] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [masterKey, setMasterKey] = useState<KeyItem | null>(null)
+  const [masterRoomKey, setMasterRoomKey] = useState<KeyItem | null>(null)
+  const [masterRoomIds, setMasterRoomIds] = useState<number[]>([])
+  const [isSavingMasterRooms, setIsSavingMasterRooms] = useState(false)
   const [masterAccess, setMasterAccess] = useState<MasterAccess[]>([])
   const [instructors, setInstructors] = useState<UserOption[]>([])
   const [selectedInstructorId, setSelectedInstructorId] = useState('')
@@ -182,6 +185,33 @@ export default function KeysPage() {
     }
   }
 
+  const openMasterRooms = async (key: KeyItem) => {
+    try {
+      const response = await client.get<RoomOption[]>(`/keys/${key.id}/rooms`)
+      setMasterRoomKey(key)
+      setMasterRoomIds(response.data.map((room) => room.id))
+      setError('')
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { message?: string } } }
+      setError(axErr.response?.data?.message || 'A mesterkulcs terem-hozzárendelései nem tölthetők be.')
+    }
+  }
+
+  const saveMasterRooms = async () => {
+    if (!masterRoomKey) return
+    setIsSavingMasterRooms(true)
+    try {
+      await client.put(`/keys/${masterRoomKey.id}/rooms`, { teremIds: masterRoomIds })
+      setMasterRoomKey(null)
+      setError('')
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { message?: string } } }
+      setError(axErr.response?.data?.message || 'A mesterkulcs termeinek mentése sikertelen.')
+    } finally {
+      setIsSavingMasterRooms(false)
+    }
+  }
+
   const filtered = keys.filter((key) => {
     const query = search.toLowerCase()
     return key.szam.toLowerCase().includes(query) || key.teremNev.toLowerCase().includes(query)
@@ -260,9 +290,14 @@ export default function KeysPage() {
                   <td>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
                       {key.tipus === 'Mesterkulcs' && (
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMasterAccess(key)}>
-                          Jogosultságok
-                        </button>
+                        <>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMasterRooms(key)}>
+                            <Building2 size={14} /> Termek
+                          </button>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMasterAccess(key)}>
+                            Jogosultságok
+                          </button>
+                        </>
                       )}
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(key)} title="Szerkesztés">
                         <Pencil size={14} />
@@ -357,6 +392,45 @@ export default function KeysPage() {
               ))}
               {masterAccess.length === 0 && <li>Nincs kiosztott jogosultság.</li>}
             </ul>
+          </div>
+        </div>
+      )}
+
+      {masterRoomKey && (
+        <div className="modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) setMasterRoomKey(null) }}>
+          <div className="modal" style={{ maxWidth: 560 }}>
+            <div className="modal-header">
+              <div>
+                <h2 className="modal-title">Mesterkulcs termei</h2>
+                <p className="page-subtitle">Kulcs #{masterRoomKey.szam}</p>
+              </div>
+              <button type="button" className="modal-close" onClick={() => setMasterRoomKey(null)} aria-label="Bezárás">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="form-group">
+              <p className="form-label">A kulccsal elérhető termek</p>
+              {rooms.map((room) => (
+                <label key={room.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0' }}>
+                  <input
+                    type="checkbox"
+                    checked={masterRoomIds.includes(room.id)}
+                    onChange={(event) => setMasterRoomIds((current) => event.target.checked
+                      ? [...current, room.id]
+                      : current.filter((id) => id !== room.id))}
+                  />
+                  <span>{room.nev}</span>
+                </label>
+              ))}
+              {rooms.length === 0 && <p className="form-hint">Nincs hozzárendelhető terem.</p>}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setMasterRoomKey(null)}>Mégse</button>
+              <button type="button" className="btn btn-primary" onClick={saveMasterRooms}
+                disabled={isSavingMasterRooms || rooms.length === 0}>
+                {isSavingMasterRooms ? 'Mentés…' : 'Mentés'}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -12,6 +12,8 @@ namespace ProjektLabor.DTOs.KeyMovements
 
         public int? AtvevoFelhasznaloId { get; set; }
 
+        public int? TeremId { get; set; }
+
         [Required]
         [RegularExpression("^[0-9]{4,8}$", ErrorMessage = "A PIN-kód 4–8 számjegyből állhat.")]
         public string Pin { get; set; } = string.Empty;

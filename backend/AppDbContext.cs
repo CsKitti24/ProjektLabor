@@ -180,12 +180,12 @@ namespace ProjektLabor.Data
                     continue;
                 }
 
-                var conflict = Foglalasok.Any(f => f.Id != booking.Id &&
-                    f.TeremId == booking.TeremId &&
-                    f.Status != "Megszuntetve" &&
-                    f.Status != "NoShow" &&
-                    booking.StartTime < f.EndTime &&
-                    booking.EndTime > f.StartTime);
+                var conflict = Foglalasok
+                    .Where(Services.BookingRules.ActiveBookings)
+                    .Any(f => f.Id != booking.Id &&
+                        f.TeremId == booking.TeremId &&
+                        booking.StartTime < f.EndTime &&
+                        booking.EndTime > f.StartTime);
                 var maintenanceConflict = KarbantartasiIdosavok.Any(m =>
                     m.TeremId == booking.TeremId &&
                     booking.StartTime < m.EndTime &&
