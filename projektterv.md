@@ -123,7 +123,7 @@ flowchart TB
 ### 3.1. Frontend megvalósítás
 - **React 19 és TypeScript:** Szigorú típusosság a DTO objektumokkal.
 - **Vite építőrendszer:** Gyors HMR (Hot Module Replacement) és optimalizált production bundle.
-- **Tailwind CSS & Lucide ikonok:** Letisztult, akadálymentesített, modern egyetemi kezelőfelület.
+- **Natív CSS és Lucide ikonok:** A saját `index.css` stílusrendszer és a Lucide ikonkönyvtár biztosít letisztult, akadálymentesített, modern egyetemi kezelőfelületet.
 - **Navigáció és védelem:** `ProtectedRoute` komponens ellenőrzi az aktuális token érvényességét és a szerepkör egyezését. Illetéktelen elérés esetén a felhasználó azonnal visszairányításra kerül.
 
 ### 3.2. Backend API megvalósítás
