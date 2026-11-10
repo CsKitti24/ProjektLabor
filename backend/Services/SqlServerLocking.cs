@@ -6,6 +6,9 @@ namespace ProjektLabor.Services;
 
 public static class SqlServerLocking
 {
+    public static Task<T> ExecuteWithRetryAsync<T>(AppDbContext db, Func<Task<T>> operation) =>
+        db.Database.CreateExecutionStrategy().ExecuteAsync(operation);
+
     public static async Task AcquireAsync(
         AppDbContext db,
         string resource,

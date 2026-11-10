@@ -56,7 +56,7 @@ export default function App() {
             <Route
               path="my-bookings"
               element={
-                <ProtectedRoute allowedRoles={['Oktato', 'Adminisztrator']}>
+                <ProtectedRoute allowedRoles={['Oktato']}>
                   <MyBookingsPage />
                 </ProtectedRoute>
               }
@@ -64,7 +64,7 @@ export default function App() {
             <Route
               path="new-booking"
               element={
-                <ProtectedRoute allowedRoles={['Oktato', 'Adminisztrator']}>
+                <ProtectedRoute allowedRoles={['Oktato']}>
                   <NewBookingPage />
                 </ProtectedRoute>
               }
@@ -74,7 +74,7 @@ export default function App() {
             <Route
               path="key-issue"
               element={
-                <ProtectedRoute allowedRoles={['Portas', 'Adminisztrator']}>
+                <ProtectedRoute allowedRoles={['Portas']}>
                   <KeyIssuePage />
                 </ProtectedRoute>
               }
@@ -82,7 +82,7 @@ export default function App() {
             <Route
               path="key-return"
               element={
-                <ProtectedRoute allowedRoles={['Portas', 'Adminisztrator']}>
+                <ProtectedRoute allowedRoles={['Portas']}>
                   <KeyReturnPage />
                 </ProtectedRoute>
               }

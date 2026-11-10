@@ -186,6 +186,68 @@ namespace backend.Tests
         }
 
         [Fact]
+        public async Task GetRoomAvailability_OnlyShowsActiveBookingsAndMaintenanceAsBusy()
+        {
+            var client = await CreateClientWithRoleAsync("Oktato");
+            int roomId;
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var room = new Terem { Nev = "Availability statuses", Kapacitas = 20, Aktivalva = true };
+                var instructor = await db.Felhasznalok.FirstAsync();
+                db.Termek.Add(room);
+                await db.SaveChangesAsync();
+                roomId = room.Id;
+
+                db.Foglalasok.AddRange(
+                    new Foglalas
+                    {
+                        FelhasznaloId = instructor.Id,
+                        TeremId = roomId,
+                        StartTime = new DateTime(2026, 11, 2, 8, 45, 0),
+                        EndTime = new DateTime(2026, 11, 2, 9, 30, 0),
+                        Status = "Aktiv"
+                    },
+                    new Foglalas
+                    {
+                        FelhasznaloId = instructor.Id,
+                        TeremId = roomId,
+                        StartTime = new DateTime(2026, 11, 2, 9, 30, 0),
+                        EndTime = new DateTime(2026, 11, 2, 10, 15, 0),
+                        Status = "NoShow"
+                    },
+                    new Foglalas
+                    {
+                        FelhasznaloId = instructor.Id,
+                        TeremId = roomId,
+                        StartTime = new DateTime(2026, 11, 2, 10, 15, 0),
+                        EndTime = new DateTime(2026, 11, 2, 11, 0, 0),
+                        Status = "Megszuntetve"
+                    });
+                db.KarbantartasiIdosavok.Add(new KarbantartasiIdosav
+                {
+                    FelhasznaloId = instructor.Id,
+                    TeremId = roomId,
+                    StartTime = new DateTime(2026, 11, 2, 11, 0, 0),
+                    EndTime = new DateTime(2026, 11, 2, 11, 45, 0)
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var response = await client.GetAsync($"/api/rooms/{roomId}/availability?datum=2026-11-02");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var availability = await response.Content.ReadFromJsonAsync<RoomAvailabilityDto>();
+            Assert.NotNull(availability);
+            var booking = Assert.Single(availability.Foglalt);
+            Assert.Equal("Aktiv", booking.Statusz);
+            Assert.Contains(availability.Szabad, slot =>
+                slot.StartTime == new DateTime(2026, 11, 2, 9, 30, 0) &&
+                slot.EndTime == new DateTime(2026, 11, 2, 11, 0, 0));
+            Assert.Single(availability.Karbantartas);
+        }
+
+        [Fact]
         public async Task CreateAndUpdateRoom_SupportsFelszereltseg()
         {
             // Arrange

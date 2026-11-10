@@ -386,11 +386,12 @@ flowchart TD
         B_RBAC["3. RBAC & Biztonsági Integrációs Tesztek (WebApplicationFactory)"]
         SQL_Job["4. Valós SQL Server Integrációs Job (MSSQL 2022 Konténer)"]
         F_Lint["5. Frontend Linting (ESLint + TypeScript check)"]
-        F_Build["6. Frontend Production Build (Vite)"]
-        D_Comp["7. Docker Compose Konfiguráció Validáció"]
+        F_Test["6. Frontend UI Tesztek (Vitest)"]
+        F_Build["7. Frontend Production Build (Vite)"]
+        D_Comp["8. Docker Compose Konfiguráció Validáció"]
         
         B_Build --> B_Unit --> B_RBAC --> SQL_Job
-        F_Lint --> F_Build
+        F_Lint --> F_Test --> F_Build
         SQL_Job --> D_Comp
         F_Build --> D_Comp
     end
@@ -405,6 +406,7 @@ flowchart TD
 - **Valós SQL Server integrációs tesztek (`SqlServerIntegrationTests`):**
   - A CI folyamatban dedikált SQL Server szolgáltatás-konténer fut.
   - Eldobható, izolált adatbázison ellenőrzi az EF Core migrációk lefutását, a séma integritását és a seedelést.
+- **Frontend UI-tesztek (`Vitest`, React Testing Library):** A felhasználói felületek célzott komponens- és interakciós tesztjei a lint és a production build mellett a CI-ben is lefutnak.
 
 ---
 

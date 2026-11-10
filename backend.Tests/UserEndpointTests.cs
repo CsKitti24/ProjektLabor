@@ -95,6 +95,20 @@ namespace backend.Tests
         }
 
         [Fact]
+        public async Task GetUsers_UsesDefaultPagination_WhenQueryParametersAreOmitted()
+        {
+            var (client, _) = await CreateAuthenticatedClientAsync("Adminisztrator");
+
+            var response = await client.GetAsync("/api/users");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<UserListDto>();
+            Assert.NotNull(result);
+            Assert.Equal(1, result.Page);
+            Assert.Equal(20, result.PageSize);
+        }
+
+        [Fact]
         public async Task CreateUser_Succeeds_WhenValidAdmin()
         {
             // Arrange
@@ -117,6 +131,12 @@ namespace backend.Tests
             Assert.NotNull(created);
             Assert.Equal(newUser.Username, created.Username);
             Assert.Equal("Oktato", created.Role);
+
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var storedUser = await db.Felhasznalok.SingleAsync(user => user.Id == created.Id);
+            Assert.Contains("$12$", storedUser.JelszoHash);
+            Assert.True(BCrypt.Net.BCrypt.Verify(newUser.Jelszo, storedUser.JelszoHash));
         }
 
         [Fact]

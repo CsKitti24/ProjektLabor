@@ -15,6 +15,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.Auth;
+using ProjektLabor.DTOs.Bookings;
 using ProjektLabor.DTOs.KeyMovements;
 using ProjektLabor.DTOs.Keys;
 using ProjektLabor.Models;
@@ -55,6 +56,8 @@ public sealed class SqlServerIntegrationTests
             int unresolvedMovementId;
             int bookingId;
             int keyId;
+            int masterKeyId;
+            int masterRoomId;
             var testDate = new DateTime(2026, 4, 4, 21, 0, 0, DateTimeKind.Utc);
 
             var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -70,6 +73,19 @@ public sealed class SqlServerIntegrationTests
                 operatorId = legacyData.OperatorId;
                 bookingId = legacyData.BookingId;
                 keyId = legacyData.KeyId;
+                masterRoomId = await db.Kulcsok
+                    .Where(key => key.Id == keyId)
+                    .Select(key => key.TeremId)
+                    .SingleAsync();
+                masterKeyId = await InsertLegacyRowAsync(
+                    db,
+                    """
+                    INSERT INTO [Kulcsok] ([Szam], [Tipus], [Aktivalva], [TeremId])
+                    OUTPUT INSERTED.[Id]
+                    VALUES (@number, N'Mesterkulcs', 1, @roomId);
+                    """,
+                    ("@number", $"MK-{Guid.NewGuid():N}"[..20]),
+                    ("@roomId", masterRoomId));
                 legacyBookingMovementId = await InsertLegacyMovementAsync(
                     db,
                     keyId,
@@ -84,6 +100,8 @@ public sealed class SqlServerIntegrationTests
                     testDate.AddMinutes(1));
 
                 await db.Database.MigrateAsync();
+                Assert.True(await db.KulcsTermek.AnyAsync(access =>
+                    access.KulcsId == masterKeyId && access.TeremId == masterRoomId));
                 var instructorForPin = await db.Felhasznalok
                     .SingleAsync(user => user.Id == instructorId);
                 instructorForPin.PinHash = BCryptHasher.HashPassword("1234");
@@ -160,7 +178,8 @@ public sealed class SqlServerIntegrationTests
                 Assert.Equal(
                     $"DailyKeyClosing:UnresolvedRecipient:{unresolvedMovementId}",
                     await db.AuditLogok
-                        .Where(entry => entry.EntitasId == unresolvedMovementId.ToString())
+                        .Where(entry => entry.AutomationKey ==
+                            $"DailyKeyClosing:UnresolvedRecipient:{unresolvedMovementId}")
                         .Select(entry => entry.AutomationKey)
                         .SingleAsync());
                 Assert.Equal(bookingId, await db.MegbizhatosagiEsemenyek
@@ -315,7 +334,9 @@ public sealed class SqlServerIntegrationTests
                     services.Remove(optionsRegistration);
                 }
 
-                services.AddDbContext<AppDbContext>(options => options.UseSqlServer(connectionString));
+                services.AddDbContext<AppDbContext>(options => options.UseSqlServer(
+                    connectionString,
+                    sqlOptions => sqlOptions.EnableRetryOnFailure()));
             });
         });
 
@@ -323,6 +344,7 @@ public sealed class SqlServerIntegrationTests
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var authService = scope.ServiceProvider.GetRequiredService<AuthService>();
         var operatorUser = await db.Felhasznalok.SingleAsync(user => user.Id == operatorId);
+        var instructorUser = await db.Felhasznalok.SingleAsync(user => user.Id == instructorId);
         var roomId = await db.Kulcsok
             .Where(key => key.Id == keyId)
             .Select(key => key.TeremId)
@@ -339,6 +361,33 @@ public sealed class SqlServerIntegrationTests
         var token = authService.GenerateJwtToken(operatorUser);
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var instructorClient = factory.CreateClient();
+        instructorClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", authService.GenerateJwtToken(instructorUser));
+        var bookingDate = DateTime.UtcNow.Date.AddDays(1);
+        while (bookingDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+        {
+            bookingDate = bookingDate.AddDays(1);
+        }
+
+        var bookingStart = bookingDate.AddHours(10).AddMinutes(15);
+        using var bookingResponse = await instructorClient.PostAsJsonAsync(
+            "/api/bookings",
+            new CreateBookingRequestDto
+            {
+                TeremId = roomId,
+                StartTime = bookingStart,
+                EndTime = bookingStart.AddMinutes(45)
+            });
+        Assert.Equal(HttpStatusCode.Created, bookingResponse.StatusCode);
+        var booking = await bookingResponse.Content.ReadFromJsonAsync<BookingDto>();
+        Assert.NotNull(booking);
+
+        using var updateBookingResponse = await instructorClient.PutAsJsonAsync(
+            $"/api/bookings/{booking.Id}",
+            new UpdateBookingRequestDto { SpecialisIgenyek = "SQL retry strategy" });
+        Assert.Equal(HttpStatusCode.OK, updateBookingResponse.StatusCode);
 
         using var issueResponse = await client.PostAsJsonAsync(
             "/api/key-movements/issue",
@@ -373,6 +422,9 @@ public sealed class SqlServerIntegrationTests
             .Where(movement => movement.Id == issuedMovement.Id)
             .Select(movement => movement.AtvevoFelhasznaloId)
             .SingleAsync());
+
+        using var cancelBookingResponse = await instructorClient.DeleteAsync($"/api/bookings/{booking.Id}");
+        Assert.Equal(HttpStatusCode.OK, cancelBookingResponse.StatusCode);
     }
 
     private static async Task AssertRecipientSchemaAsync(

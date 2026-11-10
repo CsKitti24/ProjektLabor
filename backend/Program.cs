@@ -66,6 +66,14 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("AdminOrOktato", policy => policy.RequireRole(RoleNames.Adminisztrator, RoleNames.Oktato));
     options.AddPolicy("AdminOrPortasOrIgazgato", policy =>
         policy.RequireRole(RoleNames.Adminisztrator, RoleNames.Portas, RoleNames.UzemeltetesiIgazgato));
+    options.AddPolicy("TicketReaders", policy =>
+        policy.RequireRole(
+            RoleNames.Adminisztrator,
+            RoleNames.Portas,
+            RoleNames.UzemeltetesiIgazgato,
+            RoleNames.Oktato));
+    options.AddPolicy("TicketCreators", policy =>
+        policy.RequireRole(RoleNames.Adminisztrator, RoleNames.Portas, RoleNames.Oktato));
     options.AddPolicy("Authenticated", policy => policy.RequireAuthenticatedUser());
 });
 

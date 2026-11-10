@@ -213,7 +213,7 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
             (Path: "/api/rooms/1/keys", AllowedRoles: new[] { RoleNames.Portas, RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
             (Path: "/api/key-movements?page=1&pageSize=20", AllowedRoles: new[] { RoleNames.Portas, RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
             (Path: "/api/bookings?page=1&pageSize=20", AllowedRoles: new[] { RoleNames.Portas, RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
-            (Path: "/api/tickets?page=1&pageSize=20", AllowedRoles: new[] { RoleNames.Portas, RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
+            (Path: "/api/tickets?page=1&pageSize=20", AllowedRoles: new[] { RoleNames.Oktato, RoleNames.Portas, RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
             (Path: "/api/users?page=1&pageSize=20", AllowedRoles: new[] { RoleNames.Adminisztrator }),
             (Path: "/api/parameters", AllowedRoles: new[] { RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
             (Path: "/api/audit", AllowedRoles: new[] { RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
@@ -283,12 +283,19 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
         };
 
         foreach (var (userId, role) in AllRoles().Where(user =>
-                     user.Role != RoleNames.Portas && user.Role != RoleNames.Adminisztrator))
+                     user.Role == RoleNames.UzemeltetesiIgazgato))
         {
             using var deniedClient = CreateAuthenticatedClient(userId, role);
             var denied = await deniedClient.PostAsJsonAsync("/api/tickets", ticketRequest);
             Assert.Equal(System.Net.HttpStatusCode.Forbidden, denied.StatusCode);
         }
+
+        using var instructorReporter = CreateAuthenticatedClient(1, RoleNames.Oktato);
+        var instructorTicketResponse = await instructorReporter.PostAsJsonAsync("/api/tickets", ticketRequest);
+        Assert.Equal(System.Net.HttpStatusCode.Created, instructorTicketResponse.StatusCode);
+        var instructorTicket = await instructorTicketResponse.Content.ReadFromJsonAsync<TicketTestResponse>();
+        Assert.NotNull(instructorTicket);
+        Assert.Equal(1, instructorTicket.FelhasznaloId);
 
         using var porter = CreateAuthenticatedClient(2, RoleNames.Portas);
         var createdTicket = await porter.PostAsJsonAsync("/api/tickets", ticketRequest);

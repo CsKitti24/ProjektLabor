@@ -151,11 +151,10 @@ public static class ReportEndpoints
 
         var bookings = await db.Foglalasok
             .AsNoTracking()
+            .Where(BookingRules.ActiveBookings)
             .Where(booking =>
                 booking.StartTime < end &&
-                booking.EndTime > start &&
-                booking.Status != "NoShow" &&
-                booking.Status != "Megszuntetve")
+                booking.EndTime > start)
             .Select(booking => new { booking.TeremId, booking.StartTime, booking.EndTime })
             .ToListAsync(cancellationToken);
         var maintenances = await db.KarbantartasiIdosavok

@@ -270,7 +270,7 @@ docker compose down
 
 Az adatbázis az induláskor `APPLY_MIGRATIONS=true` beállítással futó backend
 által alkalmazza a függő EF Core migrációkat. Meglévő helyi vagy megosztott
-adatbázis frissítése előtt készíts és ellenőrizz mentést; a részletes, kilenc
+adatbázis frissítése előtt készíts és ellenőrizz mentést; a részletes, tizenegy
 migrációt felsoroló leírást lásd a [database/README.md](./database/README.md)
 fájlban. Éles vagy közös adatbázist ne frissíts automatikusan külön jóváhagyás
 nélkül.
@@ -297,6 +297,7 @@ adatbázisokat hoz létre és töröl.
 ```bash
 cd frontend
 npm ci
+npm test
 npm run lint
 npm run build
 ```

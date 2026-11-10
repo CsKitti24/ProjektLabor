@@ -18,12 +18,20 @@ interface UserOption {
   email?: string
 }
 
+interface RoomOption {
+  id: number
+  nev: string
+}
+
 export default function KeyIssuePage() {
   const [keys, setKeys] = useState<KeyItem[]>([])
+  const [roomsForMasterKey, setRoomsForMasterKey] = useState<RoomOption[]>([])
+  const [roomsForKeyId, setRoomsForKeyId] = useState('')
   const [users, setUsers] = useState<UserOption[]>([])
   const [recipientsForKeyId, setRecipientsForKeyId] = useState('')
   const [keyId, setKeyId] = useState('')
   const [userId, setUserId] = useState('')
+  const [roomId, setRoomId] = useState('')
   const [pin, setPin] = useState('')
   const [teremAllapot, setTeremAllapot] = useState('')
   const [serulesLeiras, setSerulesLeiras] = useState('')
@@ -32,6 +40,7 @@ export default function KeyIssuePage() {
   const [success, setSuccess] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const recipientOptions = recipientsForKeyId === keyId ? users : []
+  const selectedKey = keys.find((key) => String(key.id) === keyId)
 
   const fetchKeys = useCallback(() => {
     client
@@ -61,11 +70,35 @@ export default function KeyIssuePage() {
     if (!keyId) return
 
     let ignore = false
+    if (selectedKey?.tipus !== 'Mesterkulcs') return
+
+    client.get<RoomOption[]>(`/keys/${keyId}/rooms`)
+      .then((response) => {
+        if (!ignore) {
+          setRoomsForMasterKey(response.data)
+          setRoomsForKeyId(keyId)
+          setRoomId(response.data.length > 0 ? String(response.data[0].id) : '')
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const axErr = err as { response?: { data?: { message?: string } } }
+          setError(axErr.response?.data?.message || 'Nem sikerült betölteni a mesterkulcs termeit.')
+        }
+      })
+    return () => {
+      ignore = true
+    }
+  }, [keyId, selectedKey?.tipus])
+
+  useEffect(() => {
+    if (!keyId) return
+
+    let ignore = false
     client
       .get<UserOption[]>('/key-movements/recipients', { params: { kulcsId: Number(keyId) } })
       .then((res) => {
         if (!ignore) {
-          setError('')
           setUsers(res.data)
           setRecipientsForKeyId(keyId)
           setUserId(res.data.length > 0 ? String(res.data[0].id) : '')
@@ -85,7 +118,8 @@ export default function KeyIssuePage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (!keyId || !userId || !recipientOptions.some((user) => String(user.id) === userId) ||
-      !pin || !teremAllapot.trim()) {
+      !pin || !teremAllapot.trim() ||
+      (selectedKey?.tipus === 'Mesterkulcs' && (!roomId || roomsForKeyId !== keyId))) {
       setError('Válaszd ki a kulcsot és az átvevőt, add meg a PIN-kódot és a terem állapotát.')
       return
     }
@@ -97,6 +131,7 @@ export default function KeyIssuePage() {
       await client.post('/key-movements/issue', {
         kulcsId: Number(keyId),
         atvevoFelhasznaloId: Number(userId),
+        teremId: selectedKey?.tipus === 'Mesterkulcs' ? Number(roomId) : undefined,
         pin,
         teremAllapot: teremAllapot.trim(),
         serulesLeiras: serulesLeiras.trim() || undefined,
@@ -154,7 +189,10 @@ export default function KeyIssuePage() {
               id="issue-key"
               className="form-select"
               value={keyId}
-              onChange={(e) => setKeyId(e.target.value)}
+              onChange={(e) => {
+                setKeyId(e.target.value)
+                setError('')
+              }}
               required
             >
               {keys.length === 0 ? (
@@ -168,6 +206,29 @@ export default function KeyIssuePage() {
               )}
             </select>
           </div>
+
+          {selectedKey?.tipus === 'Mesterkulcs' && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="issue-room">Érintett terem *</label>
+              {roomsForKeyId !== keyId ? (
+                <p className="form-hint">A mesterkulcs termeinek betöltése…</p>
+              ) : roomsForMasterKey.length > 0 ? (
+                <select
+                  id="issue-room"
+                  className="form-select"
+                  value={roomId}
+                  onChange={(event) => setRoomId(event.target.value)}
+                  required
+                >
+                  {roomsForMasterKey.map((room) => (
+                    <option key={room.id} value={room.id}>{room.nev}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="form-hint">Ehhez a mesterkulcshoz nincs terem rendelve.</p>
+              )}
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label" htmlFor="issue-user">
@@ -230,7 +291,9 @@ export default function KeyIssuePage() {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={isLoading || keys.length === 0 || recipientOptions.length === 0}
+              disabled={isLoading || keys.length === 0 || recipientOptions.length === 0 ||
+                (selectedKey?.tipus === 'Mesterkulcs' &&
+                  (!roomId || roomsForKeyId !== keyId))}
             >
               {isLoading ? (
                 <>

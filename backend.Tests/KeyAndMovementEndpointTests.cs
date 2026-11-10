@@ -103,12 +103,39 @@ namespace backend.Tests
                 Szam = keyNumber,
                 Tipus = keyType,
                 TeremId = room.Id,
-                Aktivalva = true
+                Aktivalva = true,
+                KulcsTeremKapcsok = keyType == "Mesterkulcs"
+                    ? [new KulcsTerem { TeremId = room.Id }]
+                    : []
             };
             db.Kulcsok.Add(key);
             await db.SaveChangesAsync();
 
             return (room.Id, key.Id);
+        }
+
+        private async Task<int> SeedRoomAsync(string name)
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var room = new Terem { Nev = name, Kapacitas = 20, Aktivalva = true };
+            db.Termek.Add(room);
+            await db.SaveChangesAsync();
+            return room.Id;
+        }
+
+        [Fact]
+        public async Task GetKeyMovements_UsesDefaultPagination_WhenQueryParametersAreOmitted()
+        {
+            var (client, _) = await CreateClientWithRoleAsync("Portas");
+
+            var response = await client.GetAsync("/api/key-movements");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = await response.Content.ReadFromJsonAsync<KeyMovementListDto>();
+            Assert.NotNull(result);
+            Assert.Equal(1, result.Page);
+            Assert.Equal(20, result.PageSize);
         }
 
         [Fact]
@@ -289,6 +316,172 @@ namespace backend.Tests
             issueRequest.Pin = "1234";
             var allowed = await portasClient.PostAsJsonAsync("/api/key-movements/issue", issueRequest);
             Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
+        }
+
+        [Fact]
+        public async Task MasterKeyCanIssueForAnyAssignedRoom()
+        {
+            var (portasClient, _) = await CreateClientWithRoleAsync("Portas");
+            var (adminClient, _) = await CreateClientWithRoleAsync("Adminisztrator");
+            var (primaryRoomId, keyId) = await SeedRoomAndKeyAsync("MK-MULTI", "Mesterkulcs");
+            var secondRoomId = await SeedRoomAsync("Mesterkulcs második terem");
+            var recipientId = await SeedInstructorAsync();
+
+            var assignment = await adminClient.PutAsJsonAsync(
+                $"/api/keys/{keyId}/rooms",
+                new UpdateKeyRoomsRequestDto { TeremIds = [primaryRoomId, secondRoomId] });
+            Assert.Equal(HttpStatusCode.OK, assignment.StatusCode);
+            var assignedRooms = await assignment.Content.ReadFromJsonAsync<List<KeyRoomDto>>();
+            Assert.NotNull(assignedRooms);
+            Assert.Equal(2, assignedRooms.Count);
+
+            var grant = await adminClient.PostAsJsonAsync(
+                $"/api/keys/{keyId}/master-access",
+                new { userId = recipientId });
+            Assert.Equal(HttpStatusCode.Created, grant.StatusCode);
+
+            int bookingId;
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var booking = new Foglalas
+                {
+                    FelhasznaloId = recipientId,
+                    TeremId = secondRoomId,
+                    StartTime = DateTime.UtcNow.AddHours(1),
+                    EndTime = DateTime.UtcNow.AddHours(2),
+                    Status = "Aktiv"
+                };
+                db.Foglalasok.Add(booking);
+                await db.SaveChangesAsync();
+                bookingId = booking.Id;
+            }
+
+            var issue = await portasClient.PostAsJsonAsync(
+                "/api/key-movements/issue",
+                new IssueKeyRequestDto
+                {
+                    KulcsId = keyId,
+                    FoglalasId = bookingId,
+                    Pin = "1234",
+                    TeremAllapot = "Rendben"
+                });
+
+            Assert.Equal(HttpStatusCode.Created, issue.StatusCode);
+        }
+
+        [Fact]
+        public async Task MasterKeyAdHocIssueRequiresAnAssignedRoom()
+        {
+            var (portasClient, _) = await CreateClientWithRoleAsync("Portas");
+            var (adminClient, _) = await CreateClientWithRoleAsync("Adminisztrator");
+            var (roomId, keyId) = await SeedRoomAndKeyAsync("MK-ADHOC", "Mesterkulcs");
+            var recipientId = await SeedInstructorAsync();
+            var grant = await adminClient.PostAsJsonAsync(
+                $"/api/keys/{keyId}/master-access",
+                new { userId = recipientId });
+            Assert.Equal(HttpStatusCode.Created, grant.StatusCode);
+
+            var missingRoom = await portasClient.PostAsJsonAsync(
+                "/api/key-movements/issue",
+                new IssueKeyRequestDto
+                {
+                    KulcsId = keyId,
+                    AtvevoFelhasznaloId = recipientId,
+                    Pin = "1234",
+                    TeremAllapot = "Rendben"
+                });
+            Assert.Equal(HttpStatusCode.BadRequest, missingRoom.StatusCode);
+
+            var assignedRoom = await portasClient.PostAsJsonAsync(
+                "/api/key-movements/issue",
+                new IssueKeyRequestDto
+                {
+                    KulcsId = keyId,
+                    AtvevoFelhasznaloId = recipientId,
+                    TeremId = roomId,
+                    Pin = "1234",
+                    TeremAllapot = "Rendben"
+                });
+            Assert.Equal(HttpStatusCode.Created, assignedRoom.StatusCode);
+        }
+
+        [Fact]
+        public async Task MasterKeyRejectsBookingForUnassignedRoom()
+        {
+            var (portasClient, _) = await CreateClientWithRoleAsync("Portas");
+            var (adminClient, _) = await CreateClientWithRoleAsync("Adminisztrator");
+            var (_, keyId) = await SeedRoomAndKeyAsync("MK-UNASSIGNED", "Mesterkulcs");
+            var unassignedRoomId = await SeedRoomAsync("Nem hozzárendelt terem");
+            var recipientId = await SeedInstructorAsync();
+
+            var grant = await adminClient.PostAsJsonAsync(
+                $"/api/keys/{keyId}/master-access",
+                new { userId = recipientId });
+            Assert.Equal(HttpStatusCode.Created, grant.StatusCode);
+
+            int bookingId;
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var booking = new Foglalas
+                {
+                    FelhasznaloId = recipientId,
+                    TeremId = unassignedRoomId,
+                    StartTime = DateTime.UtcNow.AddHours(1),
+                    EndTime = DateTime.UtcNow.AddHours(2),
+                    Status = "Aktiv"
+                };
+                db.Foglalasok.Add(booking);
+                await db.SaveChangesAsync();
+                bookingId = booking.Id;
+            }
+
+            var issue = await portasClient.PostAsJsonAsync(
+                "/api/key-movements/issue",
+                new IssueKeyRequestDto
+                {
+                    KulcsId = keyId,
+                    FoglalasId = bookingId,
+                    Pin = "1234",
+                    TeremAllapot = "Rendben"
+                });
+
+            Assert.Equal(HttpStatusCode.BadRequest, issue.StatusCode);
+        }
+
+        [Fact]
+        public async Task MasterKeyRoomAssignmentsCanBeChangedAndRevoked()
+        {
+            var (portasClient, _) = await CreateClientWithRoleAsync("Portas");
+            var (adminClient, _) = await CreateClientWithRoleAsync("Adminisztrator");
+            var (primaryRoomId, keyId) = await SeedRoomAndKeyAsync("MK-ROOMS", "Mesterkulcs");
+            var secondRoomId = await SeedRoomAsync("Másik mesterkulcsos terem");
+
+            var deniedUpdate = await portasClient.PutAsJsonAsync(
+                $"/api/keys/{keyId}/rooms",
+                new UpdateKeyRoomsRequestDto { TeremIds = [secondRoomId] });
+            Assert.Equal(HttpStatusCode.Forbidden, deniedUpdate.StatusCode);
+
+            var update = await adminClient.PutAsJsonAsync(
+                $"/api/keys/{keyId}/rooms",
+                new UpdateKeyRoomsRequestDto { TeremIds = [primaryRoomId, secondRoomId] });
+            Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+
+            var revokeOne = await adminClient.PutAsJsonAsync(
+                $"/api/keys/{keyId}/rooms",
+                new UpdateKeyRoomsRequestDto { TeremIds = [secondRoomId] });
+            Assert.Equal(HttpStatusCode.OK, revokeOne.StatusCode);
+            var remaining = await adminClient.GetFromJsonAsync<List<KeyRoomDto>>(
+                $"/api/keys/{keyId}/rooms");
+            Assert.Equal(secondRoomId, Assert.Single(remaining!).Id);
+
+            var revokeAll = await adminClient.PutAsJsonAsync(
+                $"/api/keys/{keyId}/rooms",
+                new UpdateKeyRoomsRequestDto());
+            Assert.Equal(HttpStatusCode.OK, revokeAll.StatusCode);
+            Assert.Empty(await adminClient.GetFromJsonAsync<List<KeyRoomDto>>(
+                $"/api/keys/{keyId}/rooms") ?? []);
         }
 
         [Fact]

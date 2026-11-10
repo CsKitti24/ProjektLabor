@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Models;
@@ -6,6 +7,12 @@ namespace ProjektLabor.Services;
 
 public static class BookingRules
 {
+    public const string CancelledStatus = "Megszuntetve";
+    public const string NoShowStatus = "NoShow";
+
+    public static Expression<Func<Foglalas, bool>> ActiveBookings =>
+        booking => booking.Status != CancelledStatus && booking.Status != NoShowStatus;
+
     public const int SlotMinutes = 45;
     public static readonly TimeSpan OpeningTime = new(8, 0, 0);
     public static readonly TimeSpan ClosingTime = new(20, 0, 0);
@@ -34,8 +41,8 @@ public static class BookingRules
     }
 
     public static bool IsActive(string status) =>
-        !status.Equals("Megszuntetve", StringComparison.OrdinalIgnoreCase) &&
-        !status.Equals("NoShow", StringComparison.OrdinalIgnoreCase);
+        !status.Equals(CancelledStatus, StringComparison.OrdinalIgnoreCase) &&
+        !status.Equals(NoShowStatus, StringComparison.OrdinalIgnoreCase);
 
     public static async Task<string?> ValidateAsync(
         AppDbContext db,
@@ -51,13 +58,13 @@ public static class BookingRules
             return timeError;
         }
 
-        if (await db.Foglalasok.AnyAsync(f =>
-                f.Id != bookingId &&
-                f.TeremId == roomId &&
-                f.Status != "Megszuntetve" &&
-                f.Status != "NoShow" &&
-                start < f.EndTime &&
-                end > f.StartTime, cancellationToken))
+        if (await db.Foglalasok
+                .Where(ActiveBookings)
+                .AnyAsync(f =>
+                    f.Id != bookingId &&
+                    f.TeremId == roomId &&
+                    start < f.EndTime &&
+                    end > f.StartTime, cancellationToken))
         {
             return "A megadott idősáv ütközik egy már meglévő foglalással.";
         }

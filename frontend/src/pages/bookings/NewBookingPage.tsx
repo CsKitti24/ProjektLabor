@@ -15,13 +15,16 @@ interface Room {
 
 const DEFAULT_SLOTS = [
   { start: '08:00', end: '09:30', label: '1. sáv (08:00 – 09:30)' },
-  { start: '09:45', end: '11:15', label: '2. sáv (09:45 – 11:15)' },
-  { start: '11:30', end: '13:00', label: '3. sáv (11:30 – 13:00)' },
-  { start: '13:15', end: '14:45', label: '4. sáv (13:15 – 14:45)' },
-  { start: '15:00', end: '16:30', label: '5. sáv (15:00 – 16:30)' },
-  { start: '16:45', end: '18:15', label: '6. sáv (16:45 – 18:15)' },
-  { start: '18:30', end: '20:00', label: '7. sáv (18:30 – 20:00)' },
+  { start: '09:30', end: '11:00', label: '2. sáv (09:30 – 11:00)' },
+  { start: '11:00', end: '12:30', label: '3. sáv (11:00 – 12:30)' },
+  { start: '12:30', end: '14:00', label: '4. sáv (12:30 – 14:00)' },
+  { start: '14:00', end: '15:30', label: '5. sáv (14:00 – 15:30)' },
+  { start: '15:30', end: '17:00', label: '6. sáv (15:30 – 17:00)' },
+  { start: '17:00', end: '18:30', label: '7. sáv (17:00 – 18:30)' },
+  { start: '18:30', end: '20:00', label: '8. sáv (18:30 – 20:00)' },
 ]
+
+const SLOT_SECONDS = 45 * 60
 
 const COMMON_SPECIAL_NEEDS = [
   'Projektor',
@@ -323,6 +326,9 @@ export default function NewBookingPage() {
                     type="time"
                     className="form-input"
                     value={customStart}
+                    min="08:00"
+                    max="19:15"
+                    step={SLOT_SECONDS}
                     onChange={(e) => setCustomStart(e.target.value)}
                     required
                   />
@@ -335,6 +341,9 @@ export default function NewBookingPage() {
                     type="time"
                     className="form-input"
                     value={customEnd}
+                    min="08:45"
+                    max="20:00"
+                    step={SLOT_SECONDS}
                     onChange={(e) => setCustomEnd(e.target.value)}
                     required
                   />

@@ -81,12 +81,14 @@ namespace ProjektLabor.Endpoints
                 string? status,
                 DateTime? tol,
                 DateTime? ig,
-                int page,
-                int pageSize,
+                int? page,
+                int? pageSize,
                 AppDbContext db) =>
             {
-                page = page <= 0 ? 1 : page;
-                pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 100);
+                var normalizedPage = page.GetValueOrDefault(1);
+                normalizedPage = normalizedPage <= 0 ? 1 : normalizedPage;
+                var normalizedPageSize = pageSize.GetValueOrDefault(20);
+                normalizedPageSize = normalizedPageSize <= 0 ? 20 : Math.Min(normalizedPageSize, 100);
 
                 var query = db.Foglalasok
                     .AsNoTracking()
@@ -123,8 +125,8 @@ namespace ProjektLabor.Endpoints
 
                 var items = await query
                     .OrderByDescending(f => f.StartTime)
-                    .Skip((page - 1) * pageSize)
-                    .Take(pageSize)
+                    .Skip((normalizedPage - 1) * normalizedPageSize)
+                    .Take(normalizedPageSize)
                     .Select(f => new BookingDto
                     {
                         Id = f.Id,
@@ -146,8 +148,8 @@ namespace ProjektLabor.Endpoints
                 {
                     Items = items,
                     TotalCount = totalCount,
-                    Page = page,
-                    PageSize = pageSize
+                    Page = normalizedPage,
+                    PageSize = normalizedPageSize
                 });
             })
             .WithName("GetBookings")
@@ -237,6 +239,8 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = "Deaktivált teremre nem lehet foglalást rögzíteni." });
                 }
 
+                return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+                {
                 await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
                     ? null
                     : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
@@ -327,6 +331,7 @@ namespace ProjektLabor.Endpoints
                 };
 
                 return Results.Created($"/api/bookings/{booking.Id}", result);
+                });
             })
             .WithName("CreateBooking")
             .WithSummary("Új teremfoglalás létrehozása")
@@ -369,6 +374,8 @@ namespace ProjektLabor.Endpoints
                     return Results.Forbid();
                 }
 
+                return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+                {
                 await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
                     ? null
                     : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
@@ -468,6 +475,7 @@ namespace ProjektLabor.Endpoints
                 };
 
                 return Results.Ok(result);
+                });
             })
             .WithName("UpdateBooking")
             .WithSummary("Foglalás időpontjának vagy státuszának módosítása")
