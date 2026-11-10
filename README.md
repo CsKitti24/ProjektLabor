@@ -10,8 +10,8 @@ A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikál
 
 | Szerepkör | Fő felelősségi kör | Elérhető funkciók |
 | :--- | :--- | :--- |
-| **`Oktato`** | Foglalások és kulcshasználat | Teremkatalógus böngészése, új foglalás leadása, saját foglalások és megbízhatósági pontszám megtekintése, hibajegy bejelentése. |
-| **`Portas`** | Kulcsok fizikai kiadása és visszavétele | Aktív foglalásokhoz tartozó kulcsok kiadása/visszavétele, kulcsmozgások naplózása, átvételi elismervény, azonnali hibajegy rögzítés. |
+| **`Oktato`** | Foglalások és kulcshasználat | Teremkatalógus böngészése, új foglalás leadása, saját foglalások, megbízhatósági hibapont és rendszerbeli értesítések megtekintése, hibajegy bejelentése. |
+| **`Portas`** | Kulcsok fizikai kiadása és visszavétele | Aktív foglalásokhoz tartozó kulcsok kiadása/visszavétele, kulcsmozgások naplózása, esti kulcsvisszavételi értesítések olvasása, átvételi elismervény, azonnali hibajegy rögzítés. |
 | **`Adminisztrator`** | Rendszertörzsadatok és konfiguráció | Felhasználók kezelése és szerepkör-módosítás, termek és kulcsok CRUD, mesterkulcs-jogosultságok, karbantartási idősávok, rendszerparaméterek, megbízhatósági korrekció. |
 | **`UzemeltetesiIgazgato`** | Ellenőrzés és riportálás | Teremkihasználtsági statisztikák, napi és heti riportok, kulcsforgalom elemzése, oktatói megbízhatósági audit, teljes rendszeresemény-napló. |
 
@@ -21,7 +21,7 @@ A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikál
 
 | Réteg | Technológia | Megjegyzés |
 | :--- | :--- | :--- |
-| **Frontend** | React 19, TypeScript, Vite, Tailwind CSS, Lucide React | Modern SPA szerepkörös irányítópultokkal, JWT klienssel és modális nézetekkel. |
+| **Frontend** | React 19, TypeScript, Vite, saját CSS, Lucide React | Szerepkörös SPA, JWT klienssel, hibakezeléssel és modális nézetekkel. |
 | **Backend** | ASP.NET Core 8 Minimal API, C# | Erősen típusos, moduláris végpontok, BCrypt jelszó- és kulcsátvételi PIN-kezelés, beépített RBAC házirendek. |
 | **Adatbázis** | Microsoft SQL Server 2022 | Konténerizált relációs adatbázis tranzakció- és zárkezeléssel. |
 | **ORM / Migráció** | Entity Framework Core 8 | Code-first megközelítés, automatikus séma-migrációk indításkor. |
@@ -56,6 +56,7 @@ erDiagram
         string Username UK
         string Email UK
         string JelszoHash
+        string PinHash
         string Nev
         date SzuletesiDatum
         string Role
@@ -68,6 +69,7 @@ erDiagram
         string Nev
         int Kapacitas
         string Leiras
+        string Felszereltseg
         boolean Aktivalva
     }
 
@@ -97,17 +99,20 @@ erDiagram
         datetime StartTime
         datetime EndTime
         string Status
+        string SpecialisIgenyek
     }
 
     KULCSMOZGASOK {
         int Id PK
         int KulcsId FK
-        int FoglalasId FK
-        int AtvevoFelhasznaloId FK
+        int? FoglalasId FK
+        int? AtvevoFelhasznaloId FK
         int OperatorId FK
         string MozgasTipus
         datetime Idopont
         string Megjegyzes
+        string TeremAllapot
+        string SerulesLeiras
     }
 
     KARBANTARTASI_IDOSAVOK {
@@ -147,7 +152,7 @@ erDiagram
         int FelhasznaloId FK
         string MuveletTipus
         string EntitasTipus
-        int EntitasId
+        string EntitasId
         string AutomationKey
         string RegiErtek
         string UjErtek
@@ -157,11 +162,16 @@ erDiagram
 
     ERTESITESEK {
         int Id PK
-        int FoglalasId FK
+        int FoglalasId FK "nullable"
+        int CimzettFelhasznaloId FK "nullable"
+        int KulcsmozgasId FK "nullable"
         string ErtesitesTipus
         datetime IdoPont
+        datetime Hatarido "nullable"
         string Allapot
+        boolean Olvasva
         string AutomationKey
+        datetime CreatedAt
     }
 
     RENDSZERPARAMETEREK {
@@ -210,8 +220,10 @@ erDiagram
     %% Audit naplozas
     FELHASZNALOK o|--o{ AUDIT_LOGOK : "muveletet vegzi"
     
-    %% Foglalasi ertesitesek
-    FOGLALASOK ||--o{ ERTESITESEK : "ertesiteseket kap"
+    %% Felhasznaloi ertesitesek
+    FOGLALASOK o|--o{ ERTESITESEK : "foglalasi ertesites"
+    FELHASZNALOK o|--o{ ERTESITESEK : "cimzett"
+    KULCSMOZGASOK o|--o{ ERTESITESEK : "kulcsvisszaveteli esemeny"
 ```
 
 ---
@@ -256,6 +268,13 @@ Leállítás az adatok megőrzésével:
 docker compose down
 ```
 
+Az adatbázis az induláskor `APPLY_MIGRATIONS=true` beállítással futó backend
+által alkalmazza a függő EF Core migrációkat. Meglévő helyi vagy megosztott
+adatbázis frissítése előtt készíts és ellenőrizz mentést; a részletes, kilenc
+migrációt felsoroló leírást lásd a [database/README.md](./database/README.md)
+fájlban. Éles vagy közös adatbázist ne frissíts automatikusan külön jóváhagyás
+nélkül.
+
 ---
 
 ## Helyi fejlesztés és tesztelés
@@ -265,10 +284,14 @@ docker compose down
 # Fordítás
 dotnet build ProjektLabor.sln
 
-# Automatikus egység- és integrációs tesztek futtatása
+# Adatbázist nem igénylő tesztek
 dotnet test ProjektLabor.sln --configuration Release \
   --filter "FullyQualifiedName!~SqlServerIntegrationTests"
 ```
+
+Az SQL Server-integrációs tesztek kizárólag erre elkülönített teszt SQL
+Server-példányon futtathatók. A teszt ideiglenes `ProjektLaborIntegration_*`
+adatbázisokat hoz létre és töröl.
 
 ### Frontend fejlesztés (Node.js 20+)
 ```bash
@@ -277,6 +300,14 @@ npm ci
 npm run lint
 npm run build
 ```
+
+Az oktató foglalásvége előtti emlékeztetőit a felület az adatbázisban tárolt
+értesítésekként jeleníti meg. A napi kulcszárási háttérfolyamat a konfigurált
+zárási határidőkor (alapértelmezetten 22:00, `Europe/Budapest`) a még kint lévő
+kulcsokhoz az adatbázisban tárolt értesítést hoz létre minden `Portas`
+felhasználónak. Az oktatók és portások a `/notifications` felületen olvashatják
+értesítéseiket, és olvasottként jelölhetik őket. Az e-mail-, SMS- és push-küldés
+nincs bekötve.
 
 ---
 

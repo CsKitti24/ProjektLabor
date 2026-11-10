@@ -48,7 +48,48 @@ public class NotificationEndpointTests : IClassFixture<WebApplicationFactory<Pro
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var notifications = await response.Content.ReadFromJsonAsync<List<NotificationEndpoints.NotificationResponse>>();
         var notification = Assert.Single(notifications!);
-        Assert.Equal(owner.Id, await GetBookingOwnerIdAsync(notification.FoglalasId));
+        Assert.Equal(owner.Id, await GetBookingOwnerIdAsync(notification.FoglalasId!.Value));
+    }
+
+    [Fact]
+    public async Task MyNotifications_ReturnsKeyDetailsToPorterAndReadStateIsRecipientScoped()
+    {
+        var (porterClient, porter) = await CreateClientAsync("Portas");
+        var (otherPorterClient, _) = await CreateClientAsync("Portas");
+        var (instructorClient, _) = await CreateClientAsync("Oktato");
+        var (notificationId, deadline) = await SeedKeyNotificationAsync(porter.Id);
+
+        var response = await porterClient.GetAsync("/api/notifications/my");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var notifications = await response.Content.ReadFromJsonAsync<List<NotificationEndpoints.NotificationResponse>>();
+        var notification = Assert.Single(notifications!);
+        Assert.Equal("EveningKeyReturn", notification.ErtesitesTipus);
+        Assert.Equal("KEY-PORTER-1", notification.KulcsSzam);
+        Assert.Equal("101-es terem", notification.TeremNev);
+        Assert.Equal(deadline, notification.Hatarido);
+        Assert.False(notification.Olvasva);
+        Assert.Null(notification.FoglalasId);
+
+        var instructorResponse = await instructorClient.GetAsync("/api/notifications/my");
+        var instructorNotifications =
+            await instructorResponse.Content.ReadFromJsonAsync<List<NotificationEndpoints.NotificationResponse>>();
+        Assert.Empty(instructorNotifications!);
+
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await otherPorterClient.PatchAsync(
+                $"/api/notifications/{notification.Id}/read",
+                content: null)).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.NoContent,
+            (await porterClient.PatchAsync(
+                $"/api/notifications/{notification.Id}/read",
+                content: null)).StatusCode);
+
+        var readResponse = await porterClient.GetAsync("/api/notifications/my");
+        var readNotifications =
+            await readResponse.Content.ReadFromJsonAsync<List<NotificationEndpoints.NotificationResponse>>();
+        Assert.True(Assert.Single(readNotifications!).Olvasva);
     }
 
     [Fact]
@@ -141,6 +182,55 @@ public class NotificationEndpointTests : IClassFixture<WebApplicationFactory<Pro
             Allapot = state
         });
         await db.SaveChangesAsync();
+    }
+
+    private async Task<(int NotificationId, DateTime Deadline)> SeedKeyNotificationAsync(int porterId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var room = new Terem
+        {
+            Nev = "101-es terem",
+            Kapacitas = 20,
+            Aktivalva = true
+        };
+        db.Termek.Add(room);
+        await db.SaveChangesAsync();
+
+        var key = new Kulcs
+        {
+            Szam = "KEY-PORTER-1",
+            Tipus = "Osztalykulcs",
+            TeremId = room.Id,
+            Aktivalva = true
+        };
+        db.Kulcsok.Add(key);
+        await db.SaveChangesAsync();
+
+        var movement = new Kulcsmozgas
+        {
+            KulcsId = key.Id,
+            OperátorId = porterId,
+            MozgasTipus = "Kiadás",
+            Idopont = DateTime.UtcNow.AddHours(-1)
+        };
+        db.Kulcsmozgasok.Add(movement);
+        await db.SaveChangesAsync();
+
+        var deadline = DateTime.UtcNow.AddMinutes(10);
+        var notification = new Ertesites
+        {
+            CimzettFelhasznaloId = porterId,
+            KulcsmozgasId = movement.Id,
+            ErtesitesTipus = "EveningKeyReturn",
+            IdoPont = DateTime.UtcNow,
+            Hatarido = deadline,
+            Allapot = "Kesz",
+            AutomationKey = $"EveningKeyReturn:{movement.Id}:{porterId}"
+        };
+        db.Ertesitesek.Add(notification);
+        await db.SaveChangesAsync();
+        return (notification.Id, deadline);
     }
 
     private async Task<int> GetBookingOwnerIdAsync(int bookingId)

@@ -101,6 +101,24 @@ namespace ProjektLabor.Data
                 .HasForeignKey(movement => movement.AtvevoFelhasznaloId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            modelBuilder.Entity<Ertesites>()
+                .HasOne(notification => notification.CimzettFelhasznalo)
+                .WithMany()
+                .HasForeignKey(notification => notification.CimzettFelhasznaloId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Ertesites>()
+                .HasOne(notification => notification.Foglalas)
+                .WithMany(booking => booking.Ertesitesek)
+                .HasForeignKey(notification => notification.FoglalasId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Ertesites>()
+                .HasOne(notification => notification.Kulcsmozgas)
+                .WithMany()
+                .HasForeignKey(notification => notification.KulcsmozgasId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             // Seed default system parameters
             modelBuilder.Entity<Rendszerparameter>().HasData(
                 new Rendszerparameter { Kulcs = "napi_kulcsleadasi_zarasi_idopont", Ertek = "22:00", Leiras = "Napi kulcsleadási zárási időpont", ModositasIdeje = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) },

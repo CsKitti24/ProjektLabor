@@ -62,7 +62,7 @@ A rendszerben négy hivatalos, kanonikus szerepkör létezik. Minden jogosultsá
 | Szerepkör | Fő felelősség | Funkcionális jogosultságok |
 | :--- | :--- | :--- |
 | **`Oktato`** | Termek igénylése és használata | - Teremkatalógus megtekintése, szabad idősávok keresése<br/>- Saját foglalások létrehozása, megtekintése, lemondása<br/>- Saját megbízhatósági pontszám és eseménytörténet lekérdezése<br/>- Saját értesítések olvasása<br/>- Hibajegy bejelentése meghibásodott terem esetén |
-| **`Portas`** | Fizikai kulcsok kezelése | - Aktuális foglalások alapján kulcs kiadása a jogosult oktatónak<br/>- Kulcs visszavételének rögzítése megjegyzéssel<br/>- Kint lévő és késedelmes kulcsok listázása<br/>- Ad-hoc kulcskiadás engedélyezett mesterkulcsok esetén<br/>- Hibajegyek azonnali rögzítése a pultnál |
+| **`Portas`** | Fizikai kulcsok kezelése | - Aktuális foglalások alapján kulcs kiadása a jogosult oktatónak<br/>- Kulcs visszavételének rögzítése megjegyzéssel<br/>- Kint lévő és késedelmes kulcsok listázása<br/>- Esti kulcsvisszavételi értesítések olvasása<br/>- Ad-hoc kulcskiadás engedélyezett mesterkulcsok esetén<br/>- Hibajegyek azonnali rögzítése a pultnál |
 | **`Adminisztrator`** | Rendszer-törzsadatok és beállítások | - Felhasználók kezelése, jelszó- és szerepkör-módosítás<br/>- Termek és kulcsok teljes CRUD kezelése, aktiválás/inaktiválás<br/>- Mesterkulcs–terem és mesterkulcs–oktató jogosultságok beállítása<br/>- Karbantartási idősávok rögzítése és ütközésvizsgálata<br/>- Megbízhatósági pontok manuális korrekciója kötelező indoklással<br/>- Rendszerparaméterek és auditnapló megtekintése/módosítása |
 | **`UzemeltetesiIgazgato`** | Intézményi felügyelet és elemzés | - Napi és heti aggregált kulcs- és foglalási riportok<br/>- Teremkihasználtsági mutatók elemzése<br/>- Kulcsforgalom és fluktuáció vizsgálata<br/>- Oktatói megbízhatósági statisztikák és fegyelmi listák<br/>- Teljes körű auditnapló ellenőrzése |
 
@@ -246,11 +246,16 @@ erDiagram
 
     ERTESITESEK {
         int Id PK
-        int FoglalasId FK
+        int FoglalasId FK "nullable"
+        int CimzettFelhasznaloId FK "nullable"
+        int KulcsmozgasId FK "nullable"
         string ErtesitesTipus
         datetime IdoPont
+        datetime Hatarido "nullable"
         string Allapot
+        boolean Olvasva
         string AutomationKey
+        datetime CreatedAt
     }
 
     RENDSZERPARAMETEREK {
@@ -299,8 +304,10 @@ erDiagram
     %% Audit naplozas
     FELHASZNALOK o|--o{ AUDIT_LOGOK : "muveletet vegzi"
     
-    %% Foglalasi ertesitesek
-    FOGLALASOK ||--o{ ERTESITESEK : "ertesiteseket kap"
+    %% Felhasznaloi ertesitesek
+    FOGLALASOK o|--o{ ERTESITESEK : "foglalasi ertesites"
+    FELHASZNALOK o|--o{ ERTESITESEK : "cimzett"
+    KULCSMOZGASOK o|--o{ ERTESITESEK : "kulcsvisszaveteli esemeny"
 ```
 
 ### 4.1. Adatbázis-integritási és biztonsági megkötések
@@ -356,9 +363,13 @@ A rendszer célja nem a büntetés, hanem a kulcsfegyelem fenntartása transzpar
    - Ha egy foglalás kezdete óta eltelt a paraméterezett türelmi idő (alapértelmezetten 15 perc), és a hozzá tartozó kulcsot nem vették át, a státuszt automatikusan `NoShow`-ra állítja, felszabadítva a termet.
 2. **Napi kulcszárás feldolgozó (`DailyKeyClosingBackgroundService`):**
    - Minden este a zárási időpontban (alapértelmezetten 22:00) ellenőrzi a még le nem adott kulcsokat.
-   - Automatikusan létrehozza a "Le nem adott" megbízhatósági eseményeket és értesíti a portaszolgálatot.
+   - Automatikusan létrehozza a "Le nem adott" megbízhatósági eseményeket és auditbejegyzést.
+   - A határidőkor még kint lévő kulcs minden `Portas` felhasználónak egy, az adatbázisban rögzített `EveningKeyReturn` értesítést generál. Az értesítés tartalmazza a kulcsot, a helyiséget és a kulcsmozgásból számított visszavételi határidőt; a határidő és a zárási időzóna a meglévő rendszerparamétert, illetve `Automation:TimeZoneId` beállítást használja.
+   - A `KulcsmozgasId`-hez és címzetthez képzett egyedi `AutomationKey` megakadályozza az újrapróbálkozáskor keletkező duplikációt. Visszavétel után az adott kiadáshoz már nem jön létre értesítés.
+   - Az `/api/notifications/my` a portások és oktatók saját értesítéseit adja vissza; a `PATCH /api/notifications/{id}/read` a címzett számára teszi olvasottá az értesítést. Az alkalmazás `/notifications` felülete a kulcsot, helyiséget, határidőt és olvasottsági állapotot jeleníti meg.
 3. **Lejárat előtti értesítő (`BookingExpiryNotificationBackgroundService`):**
-   - A foglalások lejárta előtt (pl. 10 perccel) értesítést generál a kulcs visszahozatalára.
+   - A foglalás vége előtt 10 perccel adatbázisba mentett, oktatói felületen olvasható értesítést generál.
+   - E-mail-, SMS- és push-küldés nincs bekötve; a külső csatorna opcionális fejlesztési mérföldkő.
 
 ---
 
@@ -405,8 +416,8 @@ flowchart TD
 | **M2: Hitelesítés & RBAC** | BCrypt, JWT Bearer, 4 szerepkör, policy-k, bootstrap | **100% Kész** (Teljes jogosultsági fa lefedve) |
 | **M3: Üzleti Logika & Automatizmusok** | Ütközésvizsgálat, No-Show, esti zárás, pontszámítás | **100% Kész** (Háttérszolgáltatásokkal implementálva) |
 | **M4: Tesztelés & CI/CD** | xUnit tesztek, GitHub Actions workflow, Docker Compose | **100% Kész** (Minden teszt automatikusan fut) |
-| **M5: Webes Felhasználói Felület (Frontend)** | React SPA, szerepkörös irányítópultok, foglalás és kulcs UI | **100% Kész** (Minden szerepkörhöz dedikált oldalak elkészültek) |
-| **M6: Külső Értesítési Csatornák (Opcionális)** | E-mail (SMTP/SendGrid) vagy SMS integráció | *Tervezett (P1)* – Jelenleg in-app értesítés működik |
+| **M5: Webes Felhasználói Felület (Frontend)** | React SPA, szerepkörös irányítópultok, foglalás és kulcs UI | A fő felületek elkészültek; a teljes üzleti folyamatok böngészős ellenőrzése külön validációt igényel |
+| **M6: Külső Értesítési Csatornák (Opcionális)** | E-mail vagy SMS integráció | *Tervezett (P1)* – A foglalásvége- és esti kulcsvisszavételi értesítések jelenleg az adatbázisban tárolt in-app üzenetek |
 | **M7: Éles Üzemeltetési Hardening** | Kereskedelmi SSL tanúsítvány, szigorúbb CORS, külső loggyűjtő | *Tervezett (P2)* – Üzembe helyezés előtti fázis |
 
 ---

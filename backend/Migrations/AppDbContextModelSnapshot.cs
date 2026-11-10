@@ -17,7 +17,7 @@ namespace backend.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.3")
+                .HasAnnotation("ProductVersion", "8.0.31")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -91,6 +91,9 @@ namespace backend.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<int?>("CimzettFelhasznaloId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -98,11 +101,20 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("FoglalasId")
+                    b.Property<int?>("FoglalasId")
                         .HasColumnType("int");
+
+                    b.Property<DateTime?>("Hatarido")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("IdoPont")
                         .HasColumnType("datetime2");
+
+                    b.Property<int?>("KulcsmozgasId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("Olvasva")
+                        .HasColumnType("bit");
 
                     b.HasKey("Id");
 
@@ -110,7 +122,11 @@ namespace backend.Migrations
                         .IsUnique()
                         .HasFilter("[AutomationKey] IS NOT NULL");
 
+                    b.HasIndex("CimzettFelhasznaloId");
+
                     b.HasIndex("FoglalasId");
+
+                    b.HasIndex("KulcsmozgasId");
 
                     b.ToTable("Ertesitesek");
                 });
@@ -574,13 +590,26 @@ namespace backend.Migrations
 
             modelBuilder.Entity("ProjektLabor.Models.Ertesites", b =>
                 {
+                    b.HasOne("ProjektLabor.Models.Felhasznalo", "CimzettFelhasznalo")
+                        .WithMany()
+                        .HasForeignKey("CimzettFelhasznaloId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ProjektLabor.Models.Foglalas", "Foglalas")
                         .WithMany("Ertesitesek")
                         .HasForeignKey("FoglalasId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("ProjektLabor.Models.Kulcsmozgas", "Kulcsmozgas")
+                        .WithMany()
+                        .HasForeignKey("KulcsmozgasId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CimzettFelhasznalo");
 
                     b.Navigation("Foglalas");
+
+                    b.Navigation("Kulcsmozgas");
                 });
 
             modelBuilder.Entity("ProjektLabor.Models.Foglalas", b =>

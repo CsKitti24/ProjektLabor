@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 
 namespace ProjektLabor.Services;
 
@@ -11,6 +12,7 @@ public sealed class DailyKeyClosingProcessor
     private const string LegacyIssueMovement = "Kiadas";
     private const string ReturnMovement = "Visszavétel";
     private const string PenaltyEventType = "LeNemAdott";
+    private const string EveningNotificationType = "EveningKeyReturn";
     private const int PenaltyPoints = 3;
 
     private readonly AppDbContext _db;
@@ -41,7 +43,12 @@ public sealed class DailyKeyClosingProcessor
             .ToListAsync(cancellationToken);
 
         var createdCount = 0;
+        var createdNotificationCount = 0;
         var unresolvedRecipientCount = 0;
+        var porterIds = await _db.Felhasznalok
+            .Where(user => user.Role == RoleNames.Portas)
+            .Select(user => user.Id)
+            .ToListAsync(cancellationToken);
         foreach (var movement in issuedMovements)
         {
             var issuedAtUtc = AsUtc(movement.Idopont);
@@ -53,6 +60,62 @@ public sealed class DailyKeyClosingProcessor
             if (nowUtc < deadlineUtc)
             {
                 continue;
+            }
+
+            var returnedByNow = await _db.Kulcsmozgasok.AnyAsync(
+                candidate =>
+                    candidate.KulcsId == movement.KulcsId &&
+                    candidate.MozgasTipus == ReturnMovement &&
+                    candidate.Idopont > movement.Idopont &&
+                    candidate.Idopont <= nowUtc,
+                cancellationToken);
+            if (!returnedByNow)
+            {
+                foreach (var porterId in porterIds)
+                {
+                    var automationKey = $"{EveningNotificationType}:{movement.Id}:{porterId}";
+                    var alreadyNotified = await _db.Ertesitesek.AnyAsync(
+                        notification => notification.AutomationKey == automationKey,
+                        cancellationToken);
+                    if (alreadyNotified)
+                    {
+                        continue;
+                    }
+
+                    _db.Ertesitesek.Add(new Ertesites
+                    {
+                        FoglalasId = movement.FoglalasId,
+                        CimzettFelhasznaloId = porterId,
+                        KulcsmozgasId = movement.Id,
+                        ErtesitesTipus = EveningNotificationType,
+                        IdoPont = AsUtc(nowUtc),
+                        Hatarido = deadlineUtc,
+                        Allapot = "Kesz",
+                        AutomationKey = automationKey,
+                        CreatedAt = AsUtc(nowUtc)
+                    });
+                    createdNotificationCount++;
+                }
+
+                var auditAutomationKey = $"{EveningNotificationType}:{movement.Id}";
+                if (porterIds.Count > 0 &&
+                    !_db.AuditLogok.Local.Any(entry =>
+                        entry.AutomationKey == auditAutomationKey) &&
+                    !await _db.AuditLogok.AnyAsync(
+                        entry => entry.AutomationKey == auditAutomationKey,
+                        cancellationToken))
+                {
+                    _db.AuditLogok.Add(new AuditLog
+                    {
+                        MuveletTipus = "AUTOMATIC_NOTIFICATION",
+                        EntitasTipus = "Kulcsmozgas",
+                        EntitasId = movement.Id.ToString(CultureInfo.InvariantCulture),
+                        AutomationKey = auditAutomationKey,
+                        UjErtek = EveningNotificationType,
+                        Indoklas = "Esti kulcsvisszaadási értesítés létrehozása a portaszolgálatnak",
+                        LetrehozasIdeje = AsUtc(nowUtc)
+                    });
+                }
             }
 
             var alreadyReturnedByDeadline = await _db.Kulcsmozgasok.AnyAsync(
@@ -135,7 +198,7 @@ public sealed class DailyKeyClosingProcessor
                 unresolvedRecipientCount);
         }
 
-        if (createdCount > 0 || _db.ChangeTracker.HasChanges())
+        if (createdCount > 0 || createdNotificationCount > 0 || _db.ChangeTracker.HasChanges())
         {
             await _db.SaveChangesAsync(cancellationToken);
             if (createdCount > 0)
@@ -145,6 +208,14 @@ public sealed class DailyKeyClosingProcessor
                     createdCount,
                     nowUtc);
             }
+        }
+
+        if (createdNotificationCount > 0)
+        {
+            _logger.LogInformation(
+                "Created {NotificationCount} evening key return notifications at {ProcessedAtUtc}.",
+                createdNotificationCount,
+                nowUtc);
         }
 
         return createdCount;
