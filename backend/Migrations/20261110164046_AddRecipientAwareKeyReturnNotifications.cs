@@ -122,6 +122,10 @@ namespace backend.Migrations
                 name: "Olvasva",
                 table: "Ertesitesek");
 
+            // A régi sémában minden értesítéshez foglalás tartozik; a foglalás nélküli (pl. esti
+            // kulcsvisszaadási) értesítések ott nem ábrázolhatók, ezért visszaállításkor törlődnek.
+            migrationBuilder.Sql("DELETE FROM [Ertesitesek] WHERE [FoglalasId] IS NULL;");
+
             migrationBuilder.AlterColumn<int>(
                 name: "FoglalasId",
                 table: "Ertesitesek",

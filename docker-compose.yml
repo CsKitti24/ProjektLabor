@@ -3,8 +3,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        - VITE_DEMO_ACCOUNTS=${DEMO_USERS_ENABLED:-false}
     ports:
       - "3000:3000"
     environment:
@@ -28,11 +26,6 @@ services:
       - Authentication__Jwt__SigningKey=${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
       - BootstrapAdmin__Username=${BOOTSTRAP_ADMIN_USERNAME:?Set BOOTSTRAP_ADMIN_USERNAME in .env}
       - BootstrapAdmin__Password=${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}
-      - DemoUsers__Enabled=${DEMO_USERS_ENABLED:-false}
-      - DemoUsers__Oktato__Password=${DEMO_OKTATO_PASSWORD:-}
-      - DemoUsers__Portas__Password=${DEMO_PORTAS_PASSWORD:-}
-      - DemoUsers__Adminisztrator__Password=${DEMO_ADMIN_PASSWORD:-}
-      - DemoUsers__UzemeltetesiIgazgato__Password=${DEMO_IGAZGATO_PASSWORD:-}
       - Cors__AllowedOrigins=${CORS_ALLOWED_ORIGINS:-}
       - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=sa;TrustServerCertificate=True;
       - Database__Password=${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}

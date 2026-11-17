@@ -101,8 +101,10 @@ public sealed class SqlServerIntegrationTests
                 instructorForPin.PinHash = BCryptHasher.HashPassword("1234");
                 await db.SaveChangesAsync();
 
+                // A mintaadat-migráció (MINTA-* kulcsok) mozgásait kihagyjuk.
                 var oldRowsAfterMigration = await db.Kulcsmozgasok
                     .AsNoTracking()
+                    .Where(movement => !movement.Kulcs.Szam.StartsWith("MINTA-"))
                     .OrderBy(movement => movement.Id)
                     .ToListAsync();
                 Assert.Equal(2, oldRowsAfterMigration.Count);
@@ -200,7 +202,9 @@ public sealed class SqlServerIntegrationTests
 
                 await db.GetService<IMigrator>().MigrateAsync();
                 Assert.True(await ColumnExistsAsync(testConnection, "Kulcsmozgasok", "AtvevoFelhasznaloId"));
-                Assert.Equal(4, await db.Kulcsmozgasok.CountAsync());
+                Assert.Equal(4, await db.Kulcsmozgasok.CountAsync(movement => !movement.Kulcs.Szam.StartsWith("MINTA-")));
+                // Visszaállítás után újrafuttatva a mintaadat-migráció ismét lefut (34 kiadás + 32 visszavétel).
+                Assert.Equal(66, await db.Kulcsmozgasok.CountAsync(movement => movement.Kulcs.Szam.StartsWith("MINTA-")));
                 await AssertRecipientSchemaAsync(db, testConnection);
                 operatorUserForClosing.Role = RoleNames.Portas;
                 await db.SaveChangesAsync();
@@ -277,12 +281,20 @@ public sealed class SqlServerIntegrationTests
             Assert.Equal(1, await processor.ProcessAsync(deadline, default));
             Assert.Equal(0, await processor.ProcessAsync(deadline.AddMinutes(1), default));
 
+            // Minden portás (a mintaadat-migráció "portas" fiókja is) kap egy értesítést.
+            var porterIds = await db.Felhasznalok
+                .Where(user => user.Role == RoleNames.Portas)
+                .Select(user => user.Id)
+                .ToListAsync();
+            Assert.Contains(firstPorter.Id, porterIds);
+            Assert.Contains(secondPorter.Id, porterIds);
             var notifications = await db.Ertesitesek
+                .Where(item => item.KulcsmozgasId == movement.Id)
                 .OrderBy(item => item.CimzettFelhasznaloId)
                 .ToListAsync();
-            Assert.Equal(2, notifications.Count);
+            Assert.Equal(porterIds.Count, notifications.Count);
             Assert.Equal(
-                new[] { firstPorter.Id, secondPorter.Id }.Order(),
+                porterIds.Order(),
                 notifications.Select(item => item.CimzettFelhasznaloId!.Value).Order());
             Assert.All(notifications, notification =>
             {
@@ -833,58 +845,70 @@ public sealed class SqlServerIntegrationTests
             await db.SaveChangesAsync();
             await transaction.RollbackAsync();
 
-            var suffix = Guid.NewGuid().ToString("N")[..10];
-            var roleConfiguration = RoleNames.All.ToDictionary(
-                role => role,
-                role => Convert.ToBase64String(RandomNumberGenerator.GetBytes(18)));
-            var settings = new Dictionary<string, string?>
-            {
-                ["BootstrapAdmin:Username"] = $"sql_admin_{suffix}",
-                ["BootstrapAdmin:Password"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(18)),
-                ["DemoUsers:Enabled"] = "true"
-            };
-            foreach (var role in RoleNames.All)
-            {
-                settings[$"DemoUsers:{role}:Password"] = roleConfiguration[role];
-            }
-
-            var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
-            await AdminBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
-            await AdminBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
-
-            var users = await db.Felhasznalok
-                .Where(user => user.Username.StartsWith("demo-"))
-                .ToListAsync();
-            Assert.Equal(RoleNames.All.Length, users.Count);
-
-            var jwtSettings = new JwtSettings(
-                "sql-server-integration-tests",
-                "sql-server-integration-tests-api",
-                Convert.ToBase64String(RandomNumberGenerator.GetBytes(48)));
+            // A SeedRoleUsersAndReliabilitySample migráció szerepkörönként egy fiókot hoz létre.
+            var configuration = new ConfigurationBuilder().Build();
             var authService = new AuthService(
                 db,
                 configuration,
-                jwtSettings,
+                new JwtSettings(
+                    "sql-server-integration-tests",
+                    "sql-server-integration-tests-api",
+                    Convert.ToBase64String(RandomNumberGenerator.GetBytes(48))),
                 NullLogger<AuthService>.Instance,
                 new AuditService(db, NullLogger<AuditService>.Instance));
-            foreach (var role in RoleNames.All)
+            foreach (var (username, password, role) in new[]
+                     {
+                         ("admin", "Adminjelszo1!", RoleNames.Adminisztrator),
+                         ("oktato", "Oktatojelszo1!", RoleNames.Oktato),
+                         ("portas", "Portasjelszo1!", RoleNames.Portas),
+                         ("igazgato", "Igazgatojelszo1!", RoleNames.UzemeltetesiIgazgato),
+                         ("radli.richard", "RadliRichard1!", RoleNames.Oktato)
+                     })
             {
-                var user = Assert.Single(users, account => account.Role == role);
-                var password = roleConfiguration[role];
-                Assert.True(BCryptHasher.Verify(password, user.JelszoHash));
-                Assert.NotEqual(password, user.JelszoHash);
-
-                var login = await authService.LoginAsync(new LoginRequestDto
-                {
-                    Username = user.Username,
-                    Jelszo = password
-                });
+                var login = await authService.LoginAsync(new LoginRequestDto { Username = username, Jelszo = password });
                 Assert.NotNull(login);
                 Assert.Equal(role, login.Felhasznalo.Role);
                 var serializedLogin = System.Text.Json.JsonSerializer.Serialize(login);
                 Assert.DoesNotContain(password, serializedLogin, StringComparison.Ordinal);
                 Assert.DoesNotContain("JelszoHash", serializedLogin, StringComparison.Ordinal);
             }
+
+            // Rádli Richárd: 34 nem időben visszaadott kulcs (+3 pont/db), a pontszám 100-nál megáll,
+            // és két kulcs jelenleg is nála van.
+            var radli = await db.Felhasznalok.SingleAsync(user => user.Username == "radli.richard");
+            Assert.Equal("Rádli Richárd", radli.Nev);
+
+            // A két mintaoktató eltérő PIN-t kap (GiveSampleInstructorsDistinctPins).
+            var instructorPin = await db.Felhasznalok
+                .Where(user => user.Username == "oktato")
+                .Select(user => user.PinHash)
+                .SingleAsync();
+            Assert.True(BCryptHasher.Verify("4729", instructorPin));
+            Assert.True(BCryptHasher.Verify("8153", radli.PinHash));
+            Assert.False(BCryptHasher.Verify("1234", radli.PinHash));
+            var now = DateTime.UtcNow;
+            var startYear = now.Month >= 9 ? now.Year : now.Year - 1;
+            var points = await db.MegbizhatosagiEsemenyek
+                .Where(item => item.FelhasznaloId == radli.Id && item.Tanev == $"{startYear}/{startYear + 1}")
+                .OrderBy(item => item.EsemenyIdopontja)
+                .Select(item => item.Pont)
+                .ToListAsync();
+            Assert.Equal(34, points.Count);
+            Assert.Equal(100, points.Aggregate(0, (score, point) => Math.Clamp(score + point, 0, 100)));
+
+            var heldKeys = await db.Kulcsmozgasok
+                .Where(movement =>
+                    movement.AtvevoFelhasznaloId == radli.Id &&
+                    !db.Kulcsmozgasok.Any(newer => newer.KulcsId == movement.KulcsId && newer.Idopont > movement.Idopont))
+                .CountAsync(movement => movement.MozgasTipus == KeyMovementTypes.Issue);
+            Assert.Equal(2, heldKeys);
+
+            // A Down() kiveszi a mintaadatokat, a fiókokat pedig inaktiválja (az audit napló hivatkozik rájuk).
+            await db.GetService<IMigrator>().MigrateAsync("20261117193607_AddUserSoftDeletePinLockAndMovementRoom");
+            db.ChangeTracker.Clear();
+            Assert.False((await db.Felhasznalok.SingleAsync(user => user.Username == "radli.richard")).Aktiv);
+            Assert.False(await db.Kulcsok.AnyAsync(key => key.Szam.StartsWith("MINTA-")));
+            Assert.False(await db.MegbizhatosagiEsemenyek.AnyAsync(item => item.FelhasznaloId == radli.Id));
         }
         finally
         {

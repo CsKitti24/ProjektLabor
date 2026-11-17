@@ -2,7 +2,6 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Lock, User, AlertCircle, ArrowRight, ArrowLeft } from 'lucide-react'
 import { useAuth, type UserRole } from '../auth/AuthContext'
-import { DEMO_ACCOUNTS, SHOW_DEMO_ACCOUNTS } from '../auth/demoAccounts'
 
 function getDashboardPath(role: UserRole): string {
   switch (role) {
@@ -26,12 +25,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-
-  const handleSelectDemo = (u: string, p: string) => {
-    setUsername(u)
-    setPassword(p)
-    setError('')
-  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -136,24 +129,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {SHOW_DEMO_ACCOUNTS && (
-          <div className="demo-selector-container">
-            <div className="demo-selector-title">Gyorskitöltés a bemutatóhoz:</div>
-            <div className="demo-selector-buttons">
-              {DEMO_ACCOUNTS.map((acc) => (
-                <button
-                  key={acc.username}
-                  type="button"
-                  className="demo-pill-btn"
-                  onClick={() => handleSelectDemo(acc.username, acc.pass)}
-                  title={`Kiválasztás: ${acc.username}`}
-                >
-                  {acc.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       <style>{`
@@ -242,46 +217,6 @@ export default function LoginPage() {
           margin-top: 8px;
           padding: 10px 16px;
           font-size: 14px;
-        }
-
-        .demo-selector-container {
-          margin-top: 24px;
-          padding-top: 16px;
-          border-top: 1px solid var(--color-gray-200);
-        }
-
-        .demo-selector-title {
-          font-size: 11.5px;
-          font-weight: 500;
-          color: var(--color-gray-500);
-          margin-bottom: 8px;
-          text-align: center;
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
-        }
-
-        .demo-selector-buttons {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 6px;
-        }
-
-        .demo-pill-btn {
-          background-color: var(--color-gray-50);
-          border: 1px solid var(--color-gray-200);
-          border-radius: var(--border-radius-sm);
-          padding: 6px 10px;
-          font-size: 12px;
-          color: var(--color-gray-700);
-          text-align: center;
-          transition: all 0.15s ease;
-          cursor: pointer;
-        }
-
-        .demo-pill-btn:hover {
-          background-color: var(--color-primary-light);
-          border-color: var(--color-primary-border);
-          color: var(--color-primary-hover);
         }
       `}</style>
     </div>

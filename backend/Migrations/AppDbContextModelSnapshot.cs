@@ -174,9 +174,6 @@ namespace backend.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<DateTime?>("SzuletesiDatum")
-                        .HasColumnType("datetime2");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 

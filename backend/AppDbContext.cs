@@ -32,10 +32,6 @@ namespace ProjektLabor.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
-            // A születési dátum naptári dátum, nem időpont: nem konvertáljuk időzónák között.
-            modelBuilder.Entity<Felhasznalo>()
-                .Property(u => u.SzuletesiDatum)
-                .HasConversion((ValueConverter?)null);
             // Unique constraints for Felhasznalo
             modelBuilder.Entity<Felhasznalo>()
                 .HasIndex(u => u.Username).IsUnique();

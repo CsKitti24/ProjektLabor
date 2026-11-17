@@ -10,7 +10,6 @@ namespace ProjektLabor.DTOs.Users
         public string Email { get; set; } = string.Empty;
         public string Role { get; set; } = string.Empty;
         public bool Aktiv { get; set; }
-        public DateTime? SzuletesiDatum { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }
@@ -45,7 +44,6 @@ namespace ProjektLabor.DTOs.Users
         [Required(ErrorMessage = "A szerepkör megadása kötelező.")]
         public string Role { get; set; } = string.Empty;
 
-        public DateTime? SzuletesiDatum { get; set; }
     }
 
     public class UpdateUserRequestDto
@@ -60,7 +58,6 @@ namespace ProjektLabor.DTOs.Users
         [MinLength(8, ErrorMessage = "A jelszónak legalább 8 karakter hosszúnak kell lennie.")]
         public string? UjJelszo { get; set; }
 
-        public DateTime? SzuletesiDatum { get; set; }
     }
 
     public class ChangeRoleRequestDto
