@@ -72,7 +72,9 @@ export default function BookingsPage() {
 
   useEffect(() => {
     client
-      .get<{ items?: Booking[] } | Booking[]>('/bookings')
+      .get<{ items?: Booking[] } | Booking[]>('/bookings', {
+        params: { page: 1, pageSize: 100 },
+      })
       .then((r) => {
         const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
         setBookings(list)

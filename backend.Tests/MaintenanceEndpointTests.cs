@@ -61,16 +61,16 @@ public sealed class MaintenanceEndpointTests : IClassFixture<WebApplicationFacto
             {
                 FelhasznaloId = userId,
                 TeremId = roomId,
-                StartTime = new DateTime(2027, 1, 1, 8, 45, 0, DateTimeKind.Utc),
-                EndTime = new DateTime(2027, 1, 1, 9, 30, 0, DateTimeKind.Utc),
+                StartTime = new DateTime(2027, 1, 1, 8, 45, 0, DateTimeKind.Unspecified),
+                EndTime = new DateTime(2027, 1, 1, 9, 30, 0, DateTimeKind.Unspecified),
                 Status = "Aktiv"
             };
             var secondBooking = new Foglalas
             {
                 FelhasznaloId = userId,
                 TeremId = roomId,
-                StartTime = new DateTime(2027, 1, 1, 9, 30, 0, DateTimeKind.Utc),
-                EndTime = new DateTime(2027, 1, 1, 10, 15, 0, DateTimeKind.Utc),
+                StartTime = new DateTime(2027, 1, 1, 9, 30, 0, DateTimeKind.Unspecified),
+                EndTime = new DateTime(2027, 1, 1, 10, 15, 0, DateTimeKind.Unspecified),
                 Status = "Aktiv"
             };
             db.Foglalasok.AddRange(firstBooking, secondBooking);
@@ -83,8 +83,8 @@ public sealed class MaintenanceEndpointTests : IClassFixture<WebApplicationFacto
         var maintenanceRequest = new
         {
             teremId = roomId,
-            startTime = new DateTime(2027, 1, 1, 8, 45, 0, DateTimeKind.Utc),
-            endTime = new DateTime(2027, 1, 1, 10, 15, 0, DateTimeKind.Utc),
+            startTime = new DateTime(2027, 1, 1, 8, 45, 0, DateTimeKind.Unspecified),
+            endTime = new DateTime(2027, 1, 1, 10, 15, 0, DateTimeKind.Unspecified),
             leiras = "Projektor csere"
         };
 

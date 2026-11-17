@@ -1,3 +1,4 @@
+using ProjektLabor.Services;
 using System.Globalization;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
@@ -153,10 +154,13 @@ public static class SystemAdministrationEndpoints
             pageSize <= 0 ||
             pageSize > MaximumPageSize ||
             page > int.MaxValue / pageSize ||
-            (kezdet.HasValue && veg.HasValue && kezdet > veg))
+            (kezdet.HasValue && veg.HasValue && AppTime.ToUtc(kezdet.Value) > AppTime.ToUtc(veg.Value)))
         {
             return Results.BadRequest(new { message = "Érvénytelen audit szűrő vagy lapozási paraméter." });
         }
+
+        kezdet = AppTime.ToUtc(kezdet);
+        veg = AppTime.ToUtc(veg);
 
         var query = db.AuditLogok.AsNoTracking().AsQueryable();
         if (felhasznaloId.HasValue)

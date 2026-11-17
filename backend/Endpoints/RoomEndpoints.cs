@@ -311,9 +311,14 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú terem nem található." });
                 }
 
-                var targetDate = (datum ?? DateTime.UtcNow).Date;
-                var dayStart = targetDate.AddHours(8); // Campus nyitás: 08:00
-                var dayEnd = targetDate.AddHours(20);   // Campus zárás: 20:00
+                // A napot az intézmény helyi naptára szerint értelmezzük; a határok UTC-ben vannak.
+                var targetDate = datum.HasValue
+                    ? datum.Value.Kind == DateTimeKind.Unspecified
+                        ? DateOnly.FromDateTime(datum.Value)
+                        : AppTime.LocalDate(datum.Value)
+                    : AppTime.LocalDate(DateTime.UtcNow);
+                var dayStart = AppTime.LocalToUtc(targetDate, TimeOnly.FromTimeSpan(BookingRules.OpeningTime));
+                var dayEnd = AppTime.LocalToUtc(targetDate, TimeOnly.FromTimeSpan(BookingRules.ClosingTime));
 
                 // Foglalások az adott napra
                 var bookings = await db.Foglalasok
@@ -400,7 +405,7 @@ namespace ProjektLabor.Endpoints
                 var availability = new RoomAvailabilityDto
                 {
                     TeremId = id,
-                    Datum = targetDate,
+                    Datum = targetDate.ToDateTime(TimeOnly.MinValue),
                     Szabad = freeSlots,
                     Foglalt = bookings,
                     Karbantartas = maintenances

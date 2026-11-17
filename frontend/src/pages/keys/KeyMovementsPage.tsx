@@ -42,7 +42,9 @@ export default function KeyMovementsPage() {
   const fetchMovements = () => {
     setIsLoading(true)
     client
-      .get<{ items?: KeyMovement[] } | KeyMovement[]>('/key-movements')
+      .get<{ items?: KeyMovement[] } | KeyMovement[]>('/key-movements', {
+        params: { page: 1, pageSize: 100 },
+      })
       .then((r) => {
         const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
         setMovements(list)
@@ -60,7 +62,9 @@ export default function KeyMovementsPage() {
   useEffect(() => {
     let ignore = false
     client
-      .get<{ items?: KeyMovement[] } | KeyMovement[]>('/key-movements')
+      .get<{ items?: KeyMovement[] } | KeyMovement[]>('/key-movements', {
+        params: { page: 1, pageSize: 100 },
+      })
       .then((r) => {
         if (!ignore) {
           const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])

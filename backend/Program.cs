@@ -13,6 +13,13 @@ using ProjektLabor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var configuredTimeZoneId = builder.Configuration["Automation:TimeZoneId"];
+if (!AppTime.Configure(configuredTimeZoneId))
+{
+    throw new InvalidOperationException(
+        $"Az Automation:TimeZoneId beállításban megadott időzóna ('{configuredTimeZoneId}') nem található.");
+}
+
 var jwtSettings = JwtSettings.FromConfiguration(builder.Configuration, builder.Environment);
 var jwtSigningKey = jwtSettings.GetSymmetricSecurityKey();
 
@@ -137,13 +144,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 {
     if (!string.IsNullOrWhiteSpace(connectionString))
     {
-        options.UseSqlServer(connectionString, sqlOptions =>
-        {
-            sqlOptions.EnableRetryOnFailure(
-                maxRetryCount: 5,
-                maxRetryDelay: TimeSpan.FromSeconds(5),
-                errorNumbersToAdd: null);
-        });
+        options.UseSqlServer(connectionString);
     }
 });
 

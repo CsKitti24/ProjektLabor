@@ -66,12 +66,14 @@ public static class MaintenanceEndpoints
 
         if (startTime.HasValue)
         {
-            query = query.Where(item => item.EndTime > startTime.Value);
+            var startUtc = AppTime.ToUtc(startTime.Value);
+            query = query.Where(item => item.EndTime > startUtc);
         }
 
         if (endTime.HasValue)
         {
-            query = query.Where(item => item.StartTime < endTime.Value);
+            var endUtc = AppTime.ToUtc(endTime.Value);
+            query = query.Where(item => item.StartTime < endUtc);
         }
 
         var items = await query
@@ -115,6 +117,12 @@ public static class MaintenanceEndpoints
         {
             return Results.BadRequest(new { message = validationError });
         }
+
+        request = request with
+        {
+            StartTime = AppTime.ToUtc(request.StartTime),
+            EndTime = AppTime.ToUtc(request.EndTime)
+        };
 
         if (!await db.Termek.AnyAsync(room => room.Id == request.TeremId, cancellationToken))
         {
@@ -175,6 +183,12 @@ public static class MaintenanceEndpoints
         {
             return Results.BadRequest(new { message = validationError });
         }
+
+        request = request with
+        {
+            StartTime = AppTime.ToUtc(request.StartTime),
+            EndTime = AppTime.ToUtc(request.EndTime)
+        };
 
         var item = await db.KarbantartasiIdosavok.SingleOrDefaultAsync(
             item => item.Id == id, cancellationToken);

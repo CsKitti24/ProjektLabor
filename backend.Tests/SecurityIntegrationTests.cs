@@ -143,8 +143,8 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
         var request = new
         {
             teremId = 1,
-            startTime = new DateTime(2027, 1, 1, 8, 0, 0, DateTimeKind.Utc),
-            endTime = new DateTime(2027, 1, 1, 9, 0, 0, DateTimeKind.Utc),
+            startTime = new DateTime(2027, 1, 1, 8, 0, 0, DateTimeKind.Unspecified),
+            endTime = new DateTime(2027, 1, 1, 9, 0, 0, DateTimeKind.Unspecified),
             leiras = "Teszt karbantartás"
         };
 
@@ -311,8 +311,8 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
             {
                 teremId = 1,
                 felhasznaloId = 2,
-                startTime = new DateTime(2027, 1, 3, 8, 0, 0, DateTimeKind.Utc).AddDays(userId),
-                endTime = new DateTime(2027, 1, 3, 8, 45, 0, DateTimeKind.Utc).AddDays(userId)
+                startTime = new DateTime(2027, 1, 3, 8, 0, 0, DateTimeKind.Unspecified).AddDays(userId),
+                endTime = new DateTime(2027, 1, 3, 8, 45, 0, DateTimeKind.Unspecified).AddDays(userId)
             };
             var response = await client.PostAsJsonAsync("/api/bookings", bookingRequest);
             Assert.Equal(

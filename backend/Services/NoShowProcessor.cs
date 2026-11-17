@@ -24,50 +24,70 @@ public sealed class NoShowProcessor
             .Where(booking => booking.Status == "Aktiv" && booking.StartTime <= cutoff)
             .ToListAsync(cancellationToken);
 
+        if (candidates.Count == 0)
+        {
+            return 0;
+        }
+
+        // 1. Foglalások, amelyekhez már felvették a kulcsot (korai felvétel is számít).
+        var candidateIds = candidates.Select(booking => (int?)booking.Id).ToList();
+        var collectedBookingIds = (await _db.Kulcsmozgasok
+                .Where(movement =>
+                    candidateIds.Contains(movement.FoglalasId) &&
+                    (movement.MozgasTipus == "Kiadás" || movement.MozgasTipus == "Kiadas") &&
+                    movement.Idopont <= nowUtc)
+                .Select(movement => movement.FoglalasId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        // 2. Termek, amelyeknek valamelyik (saját vagy mester-) kulcsa jelenleg ki van adva.
+        var roomIds = candidates.Select(booking => booking.TeremId).Distinct().ToList();
+        var roomKeys = await _db.Kulcsok
+            .Where(key => roomIds.Contains(key.TeremId))
+            .Select(key => new { KulcsId = key.Id, key.TeremId })
+            .ToListAsync(cancellationToken);
+        var masterKeys = await _db.KulcsTermek
+            .Where(link => roomIds.Contains(link.TeremId))
+            .Select(link => new { link.KulcsId, link.TeremId })
+            .ToListAsync(cancellationToken);
+        var keyRooms = roomKeys.Concat(masterKeys).Distinct().ToList();
+        var keyIds = keyRooms.Select(item => item.KulcsId).Distinct().ToList();
+
+        var issuedKeyIds = (await _db.Kulcsmozgasok
+                .Where(movement =>
+                    keyIds.Contains(movement.KulcsId) &&
+                    movement.Idopont <= nowUtc &&
+                    !_db.Kulcsmozgasok.Any(newer =>
+                        newer.KulcsId == movement.KulcsId &&
+                        newer.Idopont <= nowUtc &&
+                        (newer.Idopont > movement.Idopont ||
+                         (newer.Idopont == movement.Idopont && newer.Id > movement.Id))))
+                .Where(latest => latest.MozgasTipus == "Kiadás" || latest.MozgasTipus == "Kiadas")
+                .Select(latest => latest.KulcsId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+        var roomsWithIssuedKey = keyRooms
+            .Where(item => issuedKeyIds.Contains(item.KulcsId))
+            .Select(item => item.TeremId)
+            .ToHashSet();
+
+        var candidateAutomationKeys = candidates.Select(booking => $"NoShow:{booking.Id}").ToList();
+        var auditedKeys = (await _db.AuditLogok
+                .Where(entry => entry.AutomationKey != null && candidateAutomationKeys.Contains(entry.AutomationKey))
+                .Select(entry => entry.AutomationKey!)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
         var updatedCount = 0;
         foreach (var booking in candidates)
         {
-            // 1. Check if key was collected for this booking (including early pickup before start time)
-            var keyWasCollected = await _db.Kulcsmozgasok.AnyAsync(
-                movement =>
-                    movement.FoglalasId == booking.Id &&
-                    (movement.MozgasTipus == "Kiadás" || movement.MozgasTipus == "Kiadas") &&
-                    movement.Idopont <= nowUtc,
-                cancellationToken);
-            if (keyWasCollected)
+            if (collectedBookingIds.Contains(booking.Id))
             {
                 continue;
             }
 
-            // 2. Check if room currently has any active key movement (keys assigned to this room that are currently issued and not returned)
-            var roomKeyIds = await _db.Kulcsok
-                .Where(k => k.TeremId == booking.TeremId)
-                .Select(k => k.Id)
-                .ToListAsync(cancellationToken);
-
-            var masterKeyIds = await _db.KulcsTermek
-                .Where(kt => kt.TeremId == booking.TeremId)
-                .Select(kt => kt.KulcsId)
-                .ToListAsync(cancellationToken);
-
-            var allRelevantKeyIds = roomKeyIds.Concat(masterKeyIds).Distinct().ToList();
-
-            var hasActiveKeyMovementForRoom = false;
-            foreach (var keyId in allRelevantKeyIds)
-            {
-                var latestMovement = await _db.Kulcsmozgasok
-                    .Where(m => m.KulcsId == keyId && m.Idopont <= nowUtc)
-                    .OrderByDescending(m => m.Idopont)
-                    .FirstOrDefaultAsync(cancellationToken);
-
-                if (latestMovement != null && (latestMovement.MozgasTipus == "Kiadás" || latestMovement.MozgasTipus == "Kiadas"))
-                {
-                    hasActiveKeyMovementForRoom = true;
-                    break;
-                }
-            }
-
-            if (hasActiveKeyMovementForRoom)
+            if (roomsWithIssuedKey.Contains(booking.TeremId))
             {
                 _logger.LogInformation(
                     "Booking {BookingId} for room {RoomId} has an active key movement, skipping NoShow marking.",
@@ -79,8 +99,7 @@ public sealed class NoShowProcessor
             booking.Status = "NoShow";
             booking.UpdatedAt = nowUtc;
             var automationKey = $"NoShow:{booking.Id}";
-            var alreadyAudited = await _db.AuditLogok.AnyAsync(a => a.AutomationKey == automationKey, cancellationToken);
-            if (!alreadyAudited)
+            if (!auditedKeys.Contains(automationKey))
             {
                 _db.AuditLogok.Add(new AuditLog
                 {

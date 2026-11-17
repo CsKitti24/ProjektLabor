@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ProjektLabor.Models;
 
 namespace ProjektLabor.Data
@@ -21,9 +22,20 @@ namespace ProjektLabor.Data
         public DbSet<Rendszerparameter> Rendszerparameterek { get; set; }
         public DbSet<KulcsTerem> KulcsTermek { get; set; }
 
+        protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+        {
+            // Minden időpont UTC-ben tárolódik; olvasáskor UTC kind-ot kap, így a JSON "Z" jelöléssel megy ki.
+            configurationBuilder.Properties<DateTime>().HaveConversion<UtcDateTimeConverter>();
+            configurationBuilder.Properties<DateTime?>().HaveConversion<UtcDateTimeConverter>();
+        }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+            // A születési dátum naptári dátum, nem időpont: nem konvertáljuk időzónák között.
+            modelBuilder.Entity<Felhasznalo>()
+                .Property(u => u.SzuletesiDatum)
+                .HasConversion((ValueConverter?)null);
             // Unique constraints for Felhasznalo
             modelBuilder.Entity<Felhasznalo>()
                 .HasIndex(u => u.Username).IsUnique();
@@ -51,16 +63,6 @@ namespace ProjektLabor.Data
             modelBuilder.Entity<MesterkulcsJogosultsag>()
                 .HasIndex(access => new { access.KulcsId, access.FelhasznaloId })
                 .IsUnique();
-
-            modelBuilder.Entity<Ertesites>()
-                .HasIndex(notification => notification.AutomationKey)
-                .IsUnique()
-                .HasFilter("[AutomationKey] IS NOT NULL");
-
-            modelBuilder.Entity<MegbizhatosagiEsemeny>()
-                .HasIndex(item => item.KiadasiKulcsmozgasId)
-                .IsUnique()
-                .HasFilter("[Automatikus] = 1 AND [KiadasiKulcsmozgasId] IS NOT NULL");
 
             // Many-to-many between Kulcs (master keys) and Terem (rooms) for access rights
             modelBuilder.Entity<KulcsTerem>()
@@ -126,36 +128,18 @@ namespace ProjektLabor.Data
             );
         }
 
-        private static readonly System.Threading.SemaphoreSlim _saveLock = new(1, 1);
-
         public override int SaveChanges(bool acceptAllChangesOnSuccess)
         {
-            _saveLock.Wait();
-            try
-            {
-                ValidateBookings();
-                ValidateAuditLogAppendOnly();
-                return base.SaveChanges(acceptAllChangesOnSuccess);
-            }
-            finally
-            {
-                _saveLock.Release();
-            }
+            ValidateBookingsAsync(CancellationToken.None).GetAwaiter().GetResult();
+            ValidateAuditLogAppendOnly();
+            return base.SaveChanges(acceptAllChangesOnSuccess);
         }
 
-        public override async System.Threading.Tasks.Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, System.Threading.CancellationToken cancellationToken = default)
+        public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
         {
-            await _saveLock.WaitAsync(cancellationToken);
-            try
-            {
-                ValidateBookings();
-                ValidateAuditLogAppendOnly();
-                return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
-            }
-            finally
-            {
-                _saveLock.Release();
-            }
+            await ValidateBookingsAsync(cancellationToken);
+            ValidateAuditLogAppendOnly();
+            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
         }
 
         private void ValidateAuditLogAppendOnly()
@@ -168,28 +152,29 @@ namespace ProjektLabor.Data
             }
         }
 
-        private void ValidateBookings()
+        // Utolsó védvonal az átfedő foglalások ellen. A párhuzamos kérések sorbarendezését
+        // a hívó végpontok sp_getapplock + Serializable tranzakcióval végzik.
+        private async Task ValidateBookingsAsync(CancellationToken cancellationToken)
         {
             var changedBookings = ChangeTracker.Entries<Foglalas>()
-                .Where(e => e.State == Microsoft.EntityFrameworkCore.EntityState.Added || e.State == Microsoft.EntityFrameworkCore.EntityState.Modified)
-                .Select(e => e.Entity);
+                .Where(e => e.State is EntityState.Added or EntityState.Modified)
+                .Select(e => e.Entity)
+                .Where(booking => Services.BookingRules.IsActive(booking.Status))
+                .ToList();
             foreach (var booking in changedBookings)
             {
-                if (!Services.BookingRules.IsActive(booking.Status))
-                {
-                    continue;
-                }
-
-                var conflict = Foglalasok
+                var start = Services.AppTime.ToUtc(booking.StartTime);
+                var end = Services.AppTime.ToUtc(booking.EndTime);
+                var conflict = await Foglalasok
                     .Where(Services.BookingRules.ActiveBookings)
-                    .Any(f => f.Id != booking.Id &&
+                    .AnyAsync(f => f.Id != booking.Id &&
                         f.TeremId == booking.TeremId &&
-                        booking.StartTime < f.EndTime &&
-                        booking.EndTime > f.StartTime);
-                var maintenanceConflict = KarbantartasiIdosavok.Any(m =>
+                        start < f.EndTime &&
+                        end > f.StartTime, cancellationToken);
+                var maintenanceConflict = !conflict && await KarbantartasiIdosavok.AnyAsync(m =>
                     m.TeremId == booking.TeremId &&
-                    booking.StartTime < m.EndTime &&
-                    booking.EndTime > m.StartTime);
+                    start < m.EndTime &&
+                    end > m.StartTime, cancellationToken);
                 if (conflict || maintenanceConflict)
                 {
                     throw new InvalidOperationException(
@@ -198,6 +183,16 @@ namespace ProjektLabor.Data
                             : "Booking overlaps with a maintenance period.");
                 }
             }
+        }
+    }
+
+    public sealed class UtcDateTimeConverter : ValueConverter<DateTime, DateTime>
+    {
+        public UtcDateTimeConverter()
+            : base(
+                value => Services.AppTime.ToUtc(value),
+                value => DateTime.SpecifyKind(value, DateTimeKind.Utc))
+        {
         }
     }
 }

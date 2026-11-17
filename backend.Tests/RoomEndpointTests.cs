@@ -242,8 +242,8 @@ namespace backend.Tests
             var booking = Assert.Single(availability.Foglalt);
             Assert.Equal("Aktiv", booking.Statusz);
             Assert.Contains(availability.Szabad, slot =>
-                slot.StartTime == new DateTime(2026, 11, 2, 9, 30, 0) &&
-                slot.EndTime == new DateTime(2026, 11, 2, 11, 0, 0));
+                ProjektLabor.Services.AppTime.ToLocal(slot.StartTime) == new DateTime(2026, 11, 2, 9, 30, 0) &&
+                ProjektLabor.Services.AppTime.ToLocal(slot.EndTime) == new DateTime(2026, 11, 2, 11, 0, 0));
             Assert.Single(availability.Karbantartas);
         }
 
