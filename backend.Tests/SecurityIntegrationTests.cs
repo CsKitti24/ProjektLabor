@@ -279,7 +279,7 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
         var ticketRequest = new
         {
             teremId = 1,
-            kategoria = "Teszt",
+            kategoria = "Egyéb észrevétel",
             leiras = "Teszt hibajegy"
         };
 

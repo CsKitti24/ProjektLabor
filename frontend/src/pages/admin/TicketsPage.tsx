@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { FileText, Plus, X, AlertCircle, Check, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
+import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
 
 interface RoomOption {
   id: number
@@ -38,8 +39,25 @@ function formatDate(isoString?: string): string {
   }
 }
 
+// A backenddel egyező szabály: a lezárt hibajegy végleges, a megoldott újranyitható.
+const NEXT_STATUSES: Record<string, string[]> = {
+  Nyitva: ['Folyamatban', 'Megoldva', 'Zarva'],
+  Folyamatban: ['Nyitva', 'Megoldva', 'Zarva'],
+  Megoldva: ['Nyitva', 'Zarva'],
+  Zarva: [],
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  Nyitva: 'Nyitva',
+  Folyamatban: 'Folyamatban',
+  Megoldva: 'Megoldva',
+  Zarva: 'Lezárva',
+}
+
 function getStatusBadge(status: string | undefined) {
   switch (status) {
+    case 'Nyitva':
+      return <span className="badge badge-warning">Nyitva</span>
     case 'Uj':
     case 'Open':
     case 'Nyitott':
@@ -64,8 +82,12 @@ export default function TicketsPage() {
   const { user } = useAuth()
   const canCreateTicket =
     user?.role === 'Oktato' || user?.role === 'Portas' || user?.role === 'Adminisztrator'
+  const canChangeStatus = user?.role === 'Adminisztrator'
 
   const [tickets, setTickets] = useState<Ticket[]>([])
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [updatingTicketId, setUpdatingTicketId] = useState<number | string | null>(null)
   const [rooms, setRooms] = useState<RoomOption[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
@@ -84,7 +106,9 @@ export default function TicketsPage() {
     setIsLoading(true)
     setError('')
     client
-      .get<{ items?: Ticket[] } | Ticket[]>('/tickets')
+      .get<{ items?: Ticket[]; totalCount?: number } | Ticket[]>('/tickets', {
+        params: { page, pageSize: DEFAULT_PAGE_SIZE },
+      })
       .then((r) => {
         const list = Array.isArray(r.data)
           ? r.data
@@ -95,6 +119,7 @@ export default function TicketsPage() {
           throw new Error('A hibajegylista formátuma érvénytelen.')
         }
         setTickets(list)
+        setTotalCount(Array.isArray(r.data) ? list.length : (r.data?.totalCount ?? list.length))
         setError('')
       })
       .catch((err: unknown) => {
@@ -103,7 +128,7 @@ export default function TicketsPage() {
         setError(axErr.response?.data?.message || 'Nem sikerült betölteni a hibajegyeket.')
       })
       .finally(() => setIsLoading(false))
-  }, [])
+  }, [page])
 
   const loadRooms = useCallback(async () => {
     setIsLoadingRooms(true)
@@ -125,11 +150,28 @@ export default function TicketsPage() {
   }, [])
 
   useEffect(() => {
-    void Promise.resolve().then(() => {
-      loadTickets()
-      void loadRooms()
-    })
-  }, [loadRooms, loadTickets])
+    void Promise.resolve().then(() => loadTickets())
+  }, [loadTickets])
+
+  useEffect(() => {
+    void Promise.resolve().then(() => loadRooms())
+  }, [loadRooms])
+
+  const handleStatusChange = async (ticket: Ticket, statusz: string) => {
+    setUpdatingTicketId(ticket.id)
+    try {
+      await client.put(`/tickets/${ticket.id}/status`, { statusz })
+      setTickets((prev) => prev.map((item) => (item.id === ticket.id ? { ...item, statusz } : item)))
+      setError('')
+      setSuccessMsg(`A(z) #${ticket.id} hibajegy állapota: ${STATUS_LABELS[statusz] ?? statusz}.`)
+      setTimeout(() => setSuccessMsg(''), 3000)
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { message?: string } } }
+      setError(axErr.response?.data?.message || 'A hibajegy állapotának módosítása sikertelen.')
+    } finally {
+      setUpdatingTicketId(null)
+    }
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -238,7 +280,26 @@ export default function TicketsPage() {
                     <td style={{ color: 'var(--color-gray-700)', maxWidth: 300 }}>{t.leiras || '—'}</td>
                     <td>{t.felhasznaloNev || t.reporterName || '—'}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>{formatDate(t.createdAt)}</td>
-                    <td>{getStatusBadge(t.statusz || t.status)}</td>
+                    <td>
+                      {getStatusBadge(t.statusz || t.status)}
+                      {canChangeStatus && (NEXT_STATUSES[t.statusz || t.status || ''] ?? []).length > 0 && (
+                        <select
+                          aria-label={`#${t.id} hibajegy állapotának módosítása`}
+                          className="form-select"
+                          style={{ marginTop: 6, padding: '2px 6px', fontSize: 12 }}
+                          value=""
+                          disabled={updatingTicketId === t.id}
+                          onChange={(e) => {
+                            if (e.target.value) void handleStatusChange(t, e.target.value)
+                          }}
+                        >
+                          <option value="">Állapot módosítása…</option>
+                          {NEXT_STATUSES[t.statusz || t.status || ''].map((next) => (
+                            <option key={next} value={next}>{STATUS_LABELS[next] ?? next}</option>
+                          ))}
+                        </select>
+                      )}
+                    </td>
                   </tr>
                 ))
               )}
@@ -246,6 +307,8 @@ export default function TicketsPage() {
           </table>
         </div>
       )}
+
+      <Pagination page={page} pageSize={DEFAULT_PAGE_SIZE} totalCount={totalCount} onPageChange={setPage} />
 
       {/* Új hibajegy felugró ablak */}
       {showModal && (

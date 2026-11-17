@@ -87,7 +87,7 @@ namespace backend.Tests
             {
                 felhasznaloId = otherTeacherId,
                 TeremId = roomId,
-                Kategoria = "Projektor",
+                Kategoria = "Technikai hiba",
                 Leiras = "Nem kapcsol be a kivetítő"
             });
             Assert.Equal(HttpStatusCode.Created, ownResponse.StatusCode);
@@ -99,7 +99,7 @@ namespace backend.Tests
             var otherResponse = await otherTeacherClient.PostAsJsonAsync("/api/tickets", new
             {
                 TeremId = roomId,
-                Kategoria = "Projektor",
+                Kategoria = "Technikai hiba",
                 Leiras = "A másik oktató hibajegye"
             });
             Assert.Equal(HttpStatusCode.Created, otherResponse.StatusCode);
@@ -124,13 +124,13 @@ namespace backend.Tests
             Assert.Equal(HttpStatusCode.Created, (await portasClient.PostAsJsonAsync("/api/tickets", new
             {
                 TeremId = roomId,
-                Kategoria = "Projektor",
+                Kategoria = "Technikai hiba",
                 Leiras = "Portás által rögzített hiba"
             })).StatusCode);
             Assert.Equal(HttpStatusCode.Created, (await adminClient.PostAsJsonAsync("/api/tickets", new
             {
                 TeremId = roomId,
-                Kategoria = "Projektor",
+                Kategoria = "Technikai hiba",
                 Leiras = "Admin által rögzített hiba"
             })).StatusCode);
             var allTickets = await portasClient.GetFromJsonAsync<TicketListDto>("/api/tickets");
@@ -173,7 +173,7 @@ namespace backend.Tests
             var response = await directorClient.PostAsJsonAsync("/api/tickets", new
             {
                 TeremId = roomId,
-                Kategoria = "Projektor",
+                Kategoria = "Technikai hiba",
                 Leiras = "Nem kapcsol be"
             });
 

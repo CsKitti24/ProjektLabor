@@ -18,6 +18,27 @@ namespace ProjektLabor.Endpoints
             "Zarva"
         };
 
+        // A bejelentőfelületen választható kategóriák; a "Sérülés" kategóriát a rendszer
+        // kulcsátadáskor rögzített sérülésből hozza létre.
+        public static readonly string[] AllowedCategories =
+        [
+            "Technikai hiba",
+            "Bútorzat / Felszerelés",
+            "Zár / Kulcs probléma",
+            "Takarítási igény",
+            "Egyéb észrevétel",
+            "Sérülés"
+        ];
+
+        // Megengedett státuszváltások: a lezárt (Zarva) hibajegy végleges, a megoldott újranyitható.
+        private static readonly Dictionary<string, string[]> AllowedTransitions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Nyitva"] = ["Folyamatban", "Megoldva", "Zarva"],
+            ["Folyamatban"] = ["Nyitva", "Megoldva", "Zarva"],
+            ["Megoldva"] = ["Nyitva", "Zarva"],
+            ["Zarva"] = []
+        };
+
         public static RouteGroupBuilder MapTicketEndpoints(this IEndpointRouteBuilder routes)
         {
             var group = routes.MapGroup("/api/tickets")
@@ -167,6 +188,16 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = "A kategória és a leírás megadása kötelező." });
                 }
 
+                var canonicalCategory = AllowedCategories.FirstOrDefault(category =>
+                    category.Equals(request.Kategoria.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (canonicalCategory is null)
+                {
+                    return Results.BadRequest(new
+                    {
+                        message = $"Érvénytelen kategória: '{request.Kategoria}'. Megengedett: {string.Join(", ", AllowedCategories)}."
+                    });
+                }
+
                 var room = await db.Termek.FindAsync(request.TeremId);
                 if (room is null)
                 {
@@ -184,7 +215,7 @@ namespace ProjektLabor.Endpoints
                 {
                     FelhasznaloId = userId,
                     TeremId = request.TeremId,
-                    Kategoria = request.Kategoria.Trim(),
+                    Kategoria = canonicalCategory,
                     Leiras = request.Leiras.Trim(),
                     Statusz = "Nyitva",
                     CreatedAt = DateTime.UtcNow,
@@ -253,6 +284,20 @@ namespace ProjektLabor.Endpoints
                 }
 
                 var oldStatus = ticket.Statusz;
+                if (string.Equals(oldStatus, canonicalStatus, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Conflict(new { message = $"A hibajegy már '{canonicalStatus}' állapotú." });
+                }
+
+                if (!AllowedTransitions.TryGetValue(oldStatus, out var nextStatuses) ||
+                    !nextStatuses.Contains(canonicalStatus, StringComparer.OrdinalIgnoreCase))
+                {
+                    return Results.Conflict(new
+                    {
+                        message = $"A hibajegy '{oldStatus}' állapotból nem állítható '{canonicalStatus}' állapotba."
+                    });
+                }
+
                 ticket.Statusz = canonicalStatus;
                 ticket.UpdatedAt = DateTime.UtcNow;
 
@@ -283,6 +328,7 @@ namespace ProjektLabor.Endpoints
                 return Results.Ok(result);
             })
             .WithName("UpdateTicketStatus")
+            .Produces(StatusCodes.Status409Conflict)
             .WithSummary("Hibajegy státuszának módosítása")
             .RequireAuthorization("Adminisztrator")
             .Produces<TicketDto>(StatusCodes.Status200OK)

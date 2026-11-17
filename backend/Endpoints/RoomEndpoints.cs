@@ -267,9 +267,11 @@ namespace ProjektLabor.Endpoints
             // R5 – DELETE /api/rooms/{id} (Deaktiválás)
             group.MapDelete("/{id:int}", async (
                 int id,
+                bool? foglalasokLemondasa,
                 AppDbContext db,
                 AuditService auditService,
-                ClaimsPrincipal caller) =>
+                ClaimsPrincipal caller,
+                TimeProvider timeProvider) =>
             {
                 var room = await db.Termek.FindAsync(id);
                 if (room is null)
@@ -277,9 +279,44 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú terem nem található." });
                 }
 
+                // A még le nem zajlott aktív foglalások nem maradhatnak egy deaktivált teremben:
+                // vagy az admin kifejezetten kéri a lemondásukat, vagy a deaktiválás elmarad.
+                var now = timeProvider.GetUtcNow().UtcDateTime;
+                var futureBookings = await db.Foglalasok
+                    .Where(booking =>
+                        booking.TeremId == id &&
+                        booking.Status == BookingRules.ActiveStatus &&
+                        booking.EndTime > now)
+                    .ToListAsync();
+                if (futureBookings.Count > 0 && foglalasokLemondasa != true)
+                {
+                    return Results.Conflict(new
+                    {
+                        message = $"A teremnek {futureBookings.Count} jövőbeli aktív foglalása van. Deaktiválás előtt ezeket le kell mondani.",
+                        jovobeliFoglalasok = futureBookings.Count
+                    });
+                }
+
+                foreach (var booking in futureBookings)
+                {
+                    booking.Status = BookingRules.CancelledStatus;
+                    booking.UpdatedAt = now;
+                }
+
                 // Soft delete: deactivation
                 room.Aktivalva = false;
                 await db.SaveChangesAsync();
+
+                foreach (var booking in futureBookings)
+                {
+                    await auditService.LogAsync(
+                        caller,
+                        muveletTipus: "CANCEL",
+                        entitasTipus: "Foglalas",
+                        entitasId: booking.Id.ToString(),
+                        ujErtek: $"Status: {BookingRules.CancelledStatus}",
+                        indoklas: $"A(z) {room.Nev} terem deaktiválása miatt lemondva.");
+                }
 
                 await auditService.LogAsync(
                     caller,
@@ -291,6 +328,7 @@ namespace ProjektLabor.Endpoints
                 return Results.Ok(new { message = $"A(z) {id} azonosítójú terem sikeresen deaktiválva lett." });
             })
             .WithName("DeleteRoom")
+            .Produces(StatusCodes.Status409Conflict)
             .WithSummary("Terem deaktiválása")
             .RequireAuthorization("Adminisztrator")
             .Produces(StatusCodes.Status200OK)

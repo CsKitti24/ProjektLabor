@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { AxiosHeaders, type AxiosResponse } from 'axios'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import client from '../../api/client'
 import { useAuth, type UserRole } from '../../auth/AuthContext'
@@ -11,6 +11,7 @@ vi.mock('../../api/client', () => ({
   default: {
     get: vi.fn(),
     post: vi.fn(),
+    put: vi.fn(),
   },
 }))
 
@@ -60,5 +61,22 @@ describe('TicketsPage role access', () => {
     render(<TicketsPage />)
 
     expect(screen.queryByRole('button', { name: 'Új hibajegy' })).toBeNull()
+  })
+
+  it('lets administrators move a ticket only to an allowed next status', async () => {
+    setRole('Adminisztrator')
+    vi.mocked(client.get).mockImplementation((url) =>
+      Promise.resolve(axiosResponse(url === '/tickets'
+        ? { items: [{ id: 7, teremNev: 'A1', kategoria: 'Technikai hiba', leiras: 'Projektor', statusz: 'Megoldva' }], totalCount: 1 }
+        : [])))
+    vi.mocked(client.put).mockResolvedValue(axiosResponse({}))
+    render(<TicketsPage />)
+
+    const select = await screen.findByLabelText('#7 hibajegy állapotának módosítása')
+    expect(screen.queryByRole('option', { name: 'Folyamatban' })).toBeNull()
+    fireEvent.change(select, { target: { value: 'Zarva' } })
+
+    expect(await screen.findByText('A(z) #7 hibajegy állapota: Lezárva.')).toBeTruthy()
+    expect(client.put).toHaveBeenCalledWith('/tickets/7/status', { statusz: 'Zarva' })
   })
 })

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { List, AlertCircle, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
+import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
 
 interface KeyMovement {
   id: string | number
@@ -36,18 +37,21 @@ function formatDate(isoString?: string): string {
 
 export default function KeyMovementsPage() {
   const [movements, setMovements] = useState<KeyMovement[]>([])
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
 
   const fetchMovements = () => {
     setIsLoading(true)
     client
-      .get<{ items?: KeyMovement[] } | KeyMovement[]>('/key-movements', {
-        params: { page: 1, pageSize: 100 },
+      .get<{ items?: KeyMovement[]; totalCount?: number } | KeyMovement[]>('/key-movements', {
+        params: { page, pageSize: DEFAULT_PAGE_SIZE },
       })
       .then((r) => {
         const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
         setMovements(list)
+        setTotalCount(Array.isArray(r.data) ? list.length : (r.data?.totalCount ?? list.length))
         setError('')
       })
       .catch((err: unknown) => {
@@ -62,13 +66,14 @@ export default function KeyMovementsPage() {
   useEffect(() => {
     let ignore = false
     client
-      .get<{ items?: KeyMovement[] } | KeyMovement[]>('/key-movements', {
-        params: { page: 1, pageSize: 100 },
+      .get<{ items?: KeyMovement[]; totalCount?: number } | KeyMovement[]>('/key-movements', {
+        params: { page, pageSize: DEFAULT_PAGE_SIZE },
       })
       .then((r) => {
         if (!ignore) {
           const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
           setMovements(list)
+          setTotalCount(Array.isArray(r.data) ? list.length : (r.data?.totalCount ?? list.length))
           setError('')
         }
       })
@@ -86,7 +91,7 @@ export default function KeyMovementsPage() {
     return () => {
       ignore = true
     }
-  }, [])
+  }, [page])
 
   return (
     <div>
@@ -172,6 +177,7 @@ export default function KeyMovementsPage() {
           </table>
         </div>
       )}
+      <Pagination page={page} pageSize={DEFAULT_PAGE_SIZE} totalCount={totalCount} onPageChange={setPage} />
     </div>
   )
 }

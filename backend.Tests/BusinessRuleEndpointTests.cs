@@ -315,6 +315,92 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
         }
     }
 
+    [Fact]
+    public async Task IssuedKey_CannotBeDeactivatedOrMovedUntilReturned()
+    {
+        var (porter, _) = await CreateUserClientAsync(RoleNames.Portas);
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var instructorId = await SeedInstructorWithPinAsync();
+        var roomId = await SeedRoomAsync();
+        var otherRoomId = await SeedRoomAsync();
+        var keyId = await SeedKeyAsync(roomId, "Osztalykulcs");
+        var issue = await porter.PostAsJsonAsync("/api/key-movements/issue", new IssueKeyRequestDto
+        {
+            KulcsId = keyId,
+            AtvevoFelhasznaloId = instructorId,
+            Pin = Pin,
+            TeremAllapot = "Rendben"
+        });
+        Assert.Equal(HttpStatusCode.Created, issue.StatusCode);
+
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.DeleteAsync($"/api/keys/{keyId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await admin.PutAsJsonAsync($"/api/keys/{keyId}", new { teremId = otherRoomId })).StatusCode);
+        var renamed = await admin.PutAsJsonAsync($"/api/keys/{keyId}", new { szam = $"UJ-{keyId}" });
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+        var renamedKey = await renamed.Content.ReadFromJsonAsync<ProjektLabor.DTOs.Keys.KeyDto>();
+        Assert.Equal("Kiadva", renamedKey!.JelenlegiAllapot);
+
+        var returned = await porter.PostAsJsonAsync("/api/key-movements/return", new ReturnKeyRequestDto
+        {
+            KulcsId = keyId,
+            Pin = Pin,
+            TeremAllapot = "Rendben"
+        });
+        Assert.Equal(HttpStatusCode.OK, returned.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.DeleteAsync($"/api/keys/{keyId}")).StatusCode);
+    }
+
+    // ---------- Termek ----------
+
+    [Fact]
+    public async Task DeactivateRoom_WithFutureBookings_RequiresExplicitCancellation()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var (_, instructorId) = await CreateUserClientAsync(RoleNames.Oktato);
+        var roomId = await SeedRoomAsync();
+        var futureBookingId = await SeedBookingAsync(instructorId, roomId, DateTime.UtcNow.AddDays(3), BookingRules.ActiveStatus);
+
+        var refused = await admin.DeleteAsync($"/api/rooms/{roomId}");
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Contains("\"jovobeliFoglalasok\":1", await refused.Content.ReadAsStringAsync());
+
+        var confirmed = await admin.DeleteAsync($"/api/rooms/{roomId}?foglalasokLemondasa=true");
+        Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(BookingRules.CancelledStatus, (await db.Foglalasok.SingleAsync(item => item.Id == futureBookingId)).Status);
+        Assert.False((await db.Termek.SingleAsync(item => item.Id == roomId)).Aktivalva);
+    }
+
+    // ---------- Hibajegyek ----------
+
+    [Fact]
+    public async Task Ticket_RequiresKnownCategory_AndFollowsAllowedStatusTransitions()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var roomId = await SeedRoomAsync();
+
+        var unknownCategory = await admin.PostAsJsonAsync("/api/tickets",
+            new { teremId = roomId, kategoria = "Ismeretlen", leiras = "Teszt" });
+        Assert.Equal(HttpStatusCode.BadRequest, unknownCategory.StatusCode);
+
+        var created = await admin.PostAsJsonAsync("/api/tickets",
+            new { teremId = roomId, kategoria = "technikai hiba", leiras = "Nem működik a projektor" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var ticket = await created.Content.ReadFromJsonAsync<ProjektLabor.DTOs.Tickets.TicketDto>();
+        Assert.Equal("Technikai hiba", ticket!.Kategoria);
+
+        async Task<HttpStatusCode> SetStatus(string statusz) =>
+            (await admin.PutAsJsonAsync($"/api/tickets/{ticket.Id}/status", new { statusz })).StatusCode;
+
+        Assert.Equal(HttpStatusCode.OK, await SetStatus("Folyamatban"));
+        Assert.Equal(HttpStatusCode.Conflict, await SetStatus("Folyamatban"));
+        Assert.Equal(HttpStatusCode.OK, await SetStatus("Zarva"));
+        Assert.Equal(HttpStatusCode.Conflict, await SetStatus("Nyitva"));
+    }
+
     // ---------- Felhasználók ----------
 
     [Fact]
