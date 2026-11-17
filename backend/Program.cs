@@ -45,6 +45,19 @@ builder.Services
         };
         options.Events = new JwtBearerEvents
         {
+            // A böngésző a tokent HttpOnly sütiben küldi; ha nincs Authorization fejléc, onnan olvassuk.
+            OnMessageReceived = context =>
+            {
+                if (string.IsNullOrEmpty(context.Token) &&
+                    !context.Request.Headers.ContainsKey("Authorization") &&
+                    context.Request.Cookies.TryGetValue(AuthCookie.Name, out var cookieToken) &&
+                    !string.IsNullOrWhiteSpace(cookieToken))
+                {
+                    context.Token = cookieToken;
+                }
+
+                return Task.CompletedTask;
+            },
             OnTokenValidated = async context =>
             {
                 var subject = context.Principal?.FindFirst("sub")?.Value;
@@ -316,8 +329,14 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
     await AdminBootstrapper.InitializeAsync(dbContext, app.Configuration, logger);
 }
 
-app.MapPost("/api/auth/login", async (
+// Minden API-végpont egy közös csoportban van, hogy a DTO-k ellenőrző attribútumai
+// ([Required], [MaxLength], [EmailAddress] ...) mindenhol lefussanak.
+var api = app.MapGroup(string.Empty)
+    .AddEndpointFilterFactory(DataAnnotationsValidationFilter.Create);
+
+api.MapPost("/api/auth/login", async (
     LoginRequestDto request,
+    HttpContext httpContext,
     AuthService authService,
     AuditService auditService,
     ILogger<Program> logger) =>
@@ -341,6 +360,10 @@ app.MapPost("/api/auth/login", async (
             statusCode: StatusCodes.Status401Unauthorized);
     }
 
+    httpContext.Response.Cookies.Append(
+        AuthCookie.Name,
+        result.Token,
+        AuthCookie.CreateOptions(httpContext.Request, result.ExpiresAt));
     return Results.Ok(result);
 })
 .RequireRateLimiting("login")
@@ -352,9 +375,10 @@ app.MapPost("/api/auth/login", async (
 .Produces(StatusCodes.Status401Unauthorized)
 .WithOpenApi();
 
-app.MapPost("/api/auth/logout", async (HttpContext context, AuditService auditService) =>
+api.MapPost("/api/auth/logout", async (HttpContext context, AuditService auditService) =>
 {
     await auditService.LogAsync(context.User, "LOGOUT", "Authentication");
+    context.Response.Cookies.Delete(AuthCookie.Name, AuthCookie.CreateOptions(context.Request, null));
     return Results.Ok(new { message = "Sikeres kijelentkezés." });
 })
     .WithName("Logout")
@@ -365,7 +389,7 @@ app.MapPost("/api/auth/logout", async (HttpContext context, AuditService auditSe
     .Produces(StatusCodes.Status401Unauthorized)
     .WithOpenApi();
 
-app.MapGet("/api/auth/me", async (HttpContext context, AuthService authService) =>
+api.MapGet("/api/auth/me", async (HttpContext context, AuthService authService) =>
 {
     var user = await authService.GetCurrentUserAsync(context.User);
     return user is null
@@ -380,11 +404,18 @@ app.MapGet("/api/auth/me", async (HttpContext context, AuthService authService) 
 .Produces(StatusCodes.Status401Unauthorized)
 .WithOpenApi();
 
-app.MapGet("/api/health", async (AppDbContext dbContext, ILogger<Program> logger) =>
+// Az adatbázis-ellenőrzés legfeljebb ennyi ideig tarthat, hogy elérhetetlen adatbázisnál a
+// health-check gyorsan 503-at adjon, ne lógjon percekig.
+var healthDatabaseTimeout = TimeSpan.FromSeconds(
+    Math.Max(1, builder.Configuration.GetValue("HealthCheck:DatabaseTimeoutSeconds", 3)));
+
+api.MapGet("/api/health", async (AppDbContext dbContext, ILogger<Program> logger, CancellationToken requestAborted) =>
 {
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
+    timeout.CancelAfter(healthDatabaseTimeout);
     try
     {
-        if (await dbContext.Database.CanConnectAsync())
+        if (await dbContext.Database.CanConnectAsync(timeout.Token))
         {
             return Results.Ok(new { status = "ok", database = "connected" });
         }
@@ -392,6 +423,15 @@ app.MapGet("/api/health", async (AppDbContext dbContext, ILogger<Program> logger
         logger.LogWarning("Health check failed: database connection could not be established.");
         return Results.Json(
             new { status = "unhealthy", database = "disconnected" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (OperationCanceledException) when (!requestAborted.IsCancellationRequested)
+    {
+        logger.LogWarning(
+            "Health check failed: the database did not respond within {Timeout} seconds.",
+            healthDatabaseTimeout.TotalSeconds);
+        return Results.Json(
+            new { status = "unhealthy", database = "timeout" },
             statusCode: StatusCodes.Status503ServiceUnavailable);
     }
     catch (Exception ex)
@@ -409,18 +449,18 @@ app.MapGet("/api/health", async (AppDbContext dbContext, ILogger<Program> logger
 .Produces(StatusCodes.Status503ServiceUnavailable)
 .WithOpenApi();
 
-app.MapUserEndpoints();
-app.MapRoomEndpoints();
-app.MapKeyEndpoints();
-app.MapKeyMovementEndpoints();
-app.MapBookingEndpoints();
-app.MapTicketEndpoints();
-app.MapMaintenanceEndpoints();
-app.MapMasterAccessEndpoints();
-app.MapReliabilityEndpoints();
-app.MapNotificationEndpoints();
-app.MapSystemAdministrationEndpoints();
-app.MapReportEndpoints();
+api.MapUserEndpoints();
+api.MapRoomEndpoints();
+api.MapKeyEndpoints();
+api.MapKeyMovementEndpoints();
+api.MapBookingEndpoints();
+api.MapTicketEndpoints();
+api.MapMaintenanceEndpoints();
+api.MapMasterAccessEndpoints();
+api.MapReliabilityEndpoints();
+api.MapNotificationEndpoints();
+api.MapSystemAdministrationEndpoints();
+api.MapReportEndpoints();
 
 app.Run();
 

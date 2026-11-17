@@ -33,8 +33,7 @@ function axiosResponse<T>(data: T): AxiosResponse<T> {
 function setRole(role: UserRole) {
   vi.mocked(useAuth).mockReturnValue({
     user: { userId: 1, username: 'admin', role },
-    token: 'test-token',
-    login: vi.fn(async () => undefined),
+    login: vi.fn(async () => ({ userId: 1, username: 'test-user', role: 'Oktato' as UserRole })),
     logout: vi.fn(),
     isLoading: false,
   })

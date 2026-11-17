@@ -272,9 +272,9 @@ curl http://localhost:8000/api/health
 | Szolgáltatás | Elérési cím | Leírás |
 | :--- | :--- | :--- |
 | **Frontend UI** | `http://localhost:3000` | Webes felület (nginx szolgálja ki az éles buildet, az `/api` kéréseket továbbítja a backendre) |
-| **Backend REST API** | `http://localhost:8000` | Fő API kiszolgáló |
+| **Backend REST API** | `http://localhost:3000/api` | A frontend proxyján keresztül; közvetlenül (`http://localhost:8000`) csak a saját gépről érhető el |
 | **Swagger UI** | `http://localhost:8000/swagger` | API dokumentáció (Development környezetben) |
-| **MSSQL Adatbázis** | `localhost:1433` | SQL Server közvetlen elérés (DBeaver, Azure Data Studio stb.) |
+| **MSSQL Adatbázis** | `localhost:1433` | SQL Server közvetlen elérés (DBeaver, Azure Data Studio stb.), csak a saját gépről |
 
 Leállítás az adatok megőrzésével:
 ```bash

@@ -2,7 +2,7 @@
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useAuth } from './auth/AuthContext'
+import { useAuth, type UserRole } from './auth/AuthContext'
 import App from './App'
 
 vi.mock('./auth/AuthContext', () => ({
@@ -20,8 +20,7 @@ describe('App role-protected booking routes', () => {
   beforeEach(() => {
     vi.mocked(useAuth).mockReturnValue({
       user: { userId: 1, username: 'admin', role: 'Adminisztrator' },
-      token: 'test-token',
-      login: vi.fn(async () => undefined),
+      login: vi.fn(async () => ({ userId: 1, username: 'test-user', role: 'Oktato' as UserRole })),
       logout: vi.fn(),
       isLoading: false,
     })
@@ -53,8 +52,7 @@ describe('App role-protected booking routes', () => {
     async (path) => {
       vi.mocked(useAuth).mockReturnValue({
         user: { userId: 2, username: 'teacher', role: 'Oktato' },
-        token: 'test-token',
-        login: vi.fn(async () => undefined),
+        login: vi.fn(async () => ({ userId: 1, username: 'test-user', role: 'Oktato' as UserRole })),
         logout: vi.fn(),
         isLoading: false,
       })

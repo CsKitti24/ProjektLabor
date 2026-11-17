@@ -13,144 +13,85 @@ export interface User {
 
 interface AuthContextType {
   user: User | null
-  token: string | null
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<User>
   logout: () => void
   isLoading: boolean
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
 
+interface BackendUser {
+  id: number | string
+  username: string
+  nev?: string
+  email?: string
+  role: UserRole
+}
+
 interface BackendLoginResponse {
-  token?: string
-  Token?: string
-  expiresAt?: string
-  felhasznalo?: {
-    id: number | string
-    username: string
-    nev?: string
-    email?: string
-    role: UserRole
+  felhasznalo?: BackendUser
+}
+
+function toUser(data: BackendUser): User {
+  return {
+    userId: data.id,
+    username: data.username,
+    nev: data.nev,
+    email: data.email,
+    role: data.role,
   }
-  // Alternatív lapos struktúra esetére:
-  userId?: string | number
-  username?: string
-  role?: UserRole
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const storedRole = localStorage.getItem('user_role') as UserRole | null
-    const storedUsername = localStorage.getItem('username')
-    const storedUserId = localStorage.getItem('user_id')
-    const storedNev = localStorage.getItem('user_nev') ?? undefined
-    const storedEmail = localStorage.getItem('user_email') ?? undefined
-    const storedToken = localStorage.getItem('auth_token')
+  // A munkamenetet a HttpOnly süti tárolja; a felhasználó adatait induláskor a /auth/me adja vissza.
+  const [user, setUser] = useState<User | null>(null)
+  const [isLoading, setIsLoading] = useState<boolean>(true)
 
-    if (storedToken && storedRole && storedUsername) {
-      return {
-        userId: storedUserId ?? '',
-        username: storedUsername,
-        nev: storedNev,
-        email: storedEmail,
-        role: storedRole,
-      }
-    }
-    return null
-  })
-
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'))
-  const [isLoading, setIsLoading] = useState<boolean>(() => Boolean(localStorage.getItem('auth_token')))
-
-  // Kezdeti felhasználó adategyeztetés a backenddel /api/auth/me végponton
   useEffect(() => {
-    const currentToken = localStorage.getItem('auth_token')
-    if (!currentToken) {
-      return
-    }
-
+    let ignore = false
     client
-      .get<{ id: number; username: string; nev: string; email: string; role: UserRole }>('/auth/me')
+      .get<BackendUser>('/auth/me')
       .then((res) => {
-        if (res.data && res.data.username) {
-          const freshUser: User = {
-            userId: res.data.id,
-            username: res.data.username,
-            nev: res.data.nev,
-            email: res.data.email,
-            role: res.data.role,
-          }
-          setUser(freshUser)
-          localStorage.setItem('user_role', freshUser.role)
-          localStorage.setItem('username', freshUser.username)
-          localStorage.setItem('user_id', String(freshUser.userId))
-          if (freshUser.nev) localStorage.setItem('user_nev', freshUser.nev)
-          if (freshUser.email) localStorage.setItem('user_email', freshUser.email)
+        if (!ignore && res.data?.username && res.data.role) {
+          setUser(toUser(res.data))
         }
       })
       .catch(() => {
-        // Ha a token lejárt, a client interceptor kezeli a kijelentkeztetést
+        // Nincs érvényes munkamenet: a felhasználó nincs bejelentkezve.
       })
       .finally(() => {
-        setIsLoading(false)
+        if (!ignore) setIsLoading(false)
       })
+    return () => {
+      ignore = true
+    }
   }, [])
 
   const logout = useCallback(() => {
-    localStorage.removeItem('auth_token')
-    localStorage.removeItem('user_role')
-    localStorage.removeItem('username')
-    localStorage.removeItem('user_id')
-    localStorage.removeItem('user_nev')
-    localStorage.removeItem('user_email')
-    setToken(null)
     setUser(null)
     client.post('/auth/logout').catch(() => {})
   }, [])
 
   const login = useCallback(async (username: string, password: string) => {
-    // A backend LoginRequestDto a { Username, Jelszo } mezőket várja.
-    const payload = {
+    // A backend LoginRequestDto a { Username, Jelszo } mezőket várja; a tokent sütiben adja vissza.
+    const response = await client.post<BackendLoginResponse>('/auth/login', {
       username: username.trim(),
       jelszo: password,
-    }
-
-    const response = await client.post<BackendLoginResponse>('/auth/login', payload)
-    const data = response.data
-
-    const jwtToken = data.token || data.Token || ''
-    const userInfo = data.felhasznalo
-
-    const resolvedRole = userInfo?.role || data.role
-    if (!jwtToken || !resolvedRole) {
-      // Hiányos válasz esetén nem találgatunk szerepkört: a bejelentkezés sikertelennek számít.
-      throw new Error('A bejelentkezési válasz nem tartalmaz tokent vagy szerepkört.')
-    }
-    const resolvedUsername: string = userInfo?.username || data.username || username.trim()
-    const resolvedUserId: string | number = userInfo?.id ?? data.userId ?? ''
-    const resolvedNev: string = userInfo?.nev || ''
-    const resolvedEmail: string = userInfo?.email || ''
-
-    localStorage.setItem('auth_token', jwtToken)
-    setToken(jwtToken)
-
-    localStorage.setItem('user_role', resolvedRole)
-    localStorage.setItem('username', resolvedUsername)
-    localStorage.setItem('user_id', String(resolvedUserId))
-    if (resolvedNev) localStorage.setItem('user_nev', resolvedNev)
-    if (resolvedEmail) localStorage.setItem('user_email', resolvedEmail)
-
-    setUser({
-      userId: resolvedUserId,
-      username: resolvedUsername,
-      nev: resolvedNev,
-      email: resolvedEmail,
-      role: resolvedRole,
     })
+
+    const userInfo = response.data?.felhasznalo
+    if (!userInfo?.username || !userInfo.role) {
+      // Hiányos válasz esetén nem találgatunk szerepkört: a bejelentkezés sikertelennek számít.
+      throw new Error('A bejelentkezési válasz nem tartalmaz felhasználót vagy szerepkört.')
+    }
+
+    const loggedIn = toUser(userInfo)
+    setUser(loggedIn)
+    return loggedIn
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, login, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   )

@@ -41,8 +41,7 @@ export default function LoginModal({ onClose }: LoginModalProps) {
     setIsLoading(true)
 
     try {
-      await login(username.trim(), password)
-      const role = (localStorage.getItem('user_role') as UserRole) || 'Oktato'
+      const { role } = await login(username.trim(), password)
       onClose()
       navigate(getDashboardPath(role))
     } catch (err: unknown) {
