@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { PlusCircle, ArrowLeft, Check, AlertCircle, Calendar, Filter, Sparkles, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
+import { localDateInputValue, localDateTimeToIso } from '../../utils/dateTime'
 
 interface Room {
   id: number | string
@@ -38,10 +39,7 @@ export default function NewBookingPage() {
   const navigate = useNavigate()
   const [rooms, setRooms] = useState<Room[]>([])
   const [roomId, setRoomId] = useState('')
-  const [date, setDate] = useState(() => {
-    const today = new Date()
-    return today.toISOString().split('T')[0]
-  })
+  const [date, setDate] = useState(() => localDateInputValue())
   const [selectedSlotIndex, setSelectedSlotIndex] = useState(0)
   const [customStart, setCustomStart] = useState('08:00')
   const [customEnd, setCustomEnd] = useState('09:30')
@@ -129,8 +127,8 @@ export default function NewBookingPage() {
     setError('')
     setIsLoading(true)
 
-    const startIso = `${date}T${start}:00`
-    const endIso = `${date}T${end}:00`
+    const startIso = localDateTimeToIso(date, start)
+    const endIso = localDateTimeToIso(date, end)
 
     try {
       await client.post('/bookings', {

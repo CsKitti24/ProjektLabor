@@ -17,21 +17,28 @@ public static class BookingRules
     public static readonly TimeSpan OpeningTime = new(8, 0, 0);
     public static readonly TimeSpan ClosingTime = new(20, 0, 0);
 
+    /// <summary>
+    /// A nyitvatartási és idősáv-szabályokat az intézmény helyi idejében ellenőrzi.
+    /// A megjelölés nélküli időpontokat helyi időnek, a többit a megadott időzónájuk szerint értelmezi.
+    /// </summary>
     public static string? ValidateTimeRange(DateTime start, DateTime end)
     {
-        if (start >= end)
+        var localStart = AppTime.ToLocal(start);
+        var localEnd = AppTime.ToLocal(end);
+
+        if (localStart >= localEnd)
         {
             return "A kezdési időpontnak meg kell előznie a befejezési időpontot.";
         }
 
-        if (start.TimeOfDay < OpeningTime || end.TimeOfDay > ClosingTime ||
-            start.Date != end.Date)
+        if (localStart.TimeOfDay < OpeningTime || localEnd.TimeOfDay > ClosingTime ||
+            localStart.Date != localEnd.Date)
         {
             return "A foglalásnak egy napon belül 08:00 és 20:00 közé kell esnie.";
         }
 
-        var startOffset = (start - start.Date.Add(OpeningTime)).TotalMinutes;
-        var duration = (end - start).TotalMinutes;
+        var startOffset = (localStart - localStart.Date.Add(OpeningTime)).TotalMinutes;
+        var duration = (localEnd - localStart).TotalMinutes;
         if (startOffset % SlotMinutes != 0 || duration % SlotMinutes != 0)
         {
             return "A foglalás kezdete és hossza csak 45 perces időszelethez igazodhat.";
@@ -57,6 +64,9 @@ public static class BookingRules
         {
             return timeError;
         }
+
+        start = AppTime.ToUtc(start);
+        end = AppTime.ToUtc(end);
 
         if (await db.Foglalasok
                 .Where(ActiveBookings)

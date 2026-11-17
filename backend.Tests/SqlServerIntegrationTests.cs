@@ -316,6 +316,93 @@ public sealed class SqlServerIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task SqlServer_ConvertsLegacyLocalBookingAndMaintenanceTimesToUtcAndBack()
+    {
+        const string migrationBeforeUtc = "20261110181630_BackfillMasterKeyRooms";
+        const string utcMigration = "20261117190736_ConvertBookingAndMaintenanceTimesToUtc";
+        var databaseName = $"ProjektLaborIntegration_{Guid.NewGuid():N}";
+        var testConnection = await CreateIsolatedDatabaseAsync(databaseName);
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlServer(testConnection)
+                .Options;
+            int winterBookingId;
+            int summerBookingId;
+            int maintenanceId;
+
+            await using (var db = new AppDbContext(options))
+            {
+                await db.GetService<IMigrator>().MigrateAsync(migrationBeforeUtc);
+
+                var user = CreateUser(RoleNames.Oktato);
+                var room = new Terem { Nev = $"UTC-{Guid.NewGuid():N}"[..20], Kapacitas = 10 };
+                db.AddRange(user, room);
+                await db.SaveChangesAsync();
+
+                // A régi adatok budapesti helyi időben, megjelölés nélkül kerültek az adatbázisba.
+                const string insertBooking = """
+                    INSERT INTO [Foglalasok] ([FelhasznaloId], [TeremId], [StartTime], [EndTime], [Status], [CreatedAt], [UpdatedAt])
+                    OUTPUT INSERTED.[Id]
+                    VALUES (@userId, @roomId, @start, @end, N'Aktiv', SYSUTCDATETIME(), SYSUTCDATETIME());
+                    """;
+                winterBookingId = await InsertLegacyRowAsync(
+                    db, insertBooking,
+                    ("@userId", user.Id), ("@roomId", room.Id),
+                    ("@start", new DateTime(2026, 11, 2, 10, 15, 0)),
+                    ("@end", new DateTime(2026, 11, 2, 11, 0, 0)));
+                summerBookingId = await InsertLegacyRowAsync(
+                    db, insertBooking,
+                    ("@userId", user.Id), ("@roomId", room.Id),
+                    ("@start", new DateTime(2026, 7, 1, 8, 0, 0)),
+                    ("@end", new DateTime(2026, 7, 1, 8, 45, 0)));
+                maintenanceId = await InsertLegacyRowAsync(
+                    db,
+                    """
+                    INSERT INTO [KarbantartasiIdosavok] ([FelhasznaloId], [TeremId], [StartTime], [EndTime], [CreatedAt])
+                    OUTPUT INSERTED.[Id]
+                    VALUES (@userId, @roomId, @start, @end, SYSUTCDATETIME());
+                    """,
+                    ("@userId", user.Id), ("@roomId", room.Id),
+                    ("@start", new DateTime(2026, 11, 2, 12, 0, 0)),
+                    ("@end", new DateTime(2026, 11, 2, 13, 0, 0)));
+
+                await db.GetService<IMigrator>().MigrateAsync(utcMigration);
+            }
+
+            await using (var db = new AppDbContext(options))
+            {
+                var winter = await db.Foglalasok.AsNoTracking().SingleAsync(item => item.Id == winterBookingId);
+                var summer = await db.Foglalasok.AsNoTracking().SingleAsync(item => item.Id == summerBookingId);
+                var maintenance = await db.KarbantartasiIdosavok.AsNoTracking().SingleAsync(item => item.Id == maintenanceId);
+
+                Assert.Equal(new DateTime(2026, 11, 2, 9, 15, 0, DateTimeKind.Utc), winter.StartTime);
+                Assert.Equal(new DateTime(2026, 11, 2, 10, 0, 0, DateTimeKind.Utc), winter.EndTime);
+                Assert.Equal(new DateTime(2026, 7, 1, 6, 0, 0, DateTimeKind.Utc), summer.StartTime);
+                Assert.Equal(new DateTime(2026, 7, 1, 6, 45, 0, DateTimeKind.Utc), summer.EndTime);
+                Assert.Equal(new DateTime(2026, 11, 2, 11, 0, 0, DateTimeKind.Utc), maintenance.StartTime);
+                Assert.Equal(DateTimeKind.Utc, winter.StartTime.Kind);
+
+                await db.GetService<IMigrator>().MigrateAsync(migrationBeforeUtc);
+            }
+
+            await using (var db = new AppDbContext(options))
+            {
+                var winter = await db.Foglalasok.AsNoTracking().SingleAsync(item => item.Id == winterBookingId);
+                var summer = await db.Foglalasok.AsNoTracking().SingleAsync(item => item.Id == summerBookingId);
+
+                Assert.Equal(new DateTime(2026, 11, 2, 10, 15, 0), winter.StartTime);
+                Assert.Equal(new DateTime(2026, 7, 1, 8, 0, 0), summer.StartTime);
+            }
+        }
+        finally
+        {
+            await DropIsolatedDatabaseAsync(databaseName);
+        }
+    }
+
     private static async Task ExerciseSqlBackedEndpointsAsync(
         string connectionString,
         int keyId,
@@ -365,7 +452,7 @@ public sealed class SqlServerIntegrationTests
         using var instructorClient = factory.CreateClient();
         instructorClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer", authService.GenerateJwtToken(instructorUser));
-        var bookingDate = DateTime.UtcNow.Date.AddDays(1);
+        var bookingDate = TestTime.LocalToday.AddDays(1);
         while (bookingDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
         {
             bookingDate = bookingDate.AddDays(1);

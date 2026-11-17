@@ -75,7 +75,7 @@ public static class ReportEndpoints
         }
 
         var start = ToStart(day);
-        var end = start.AddDays(1);
+        var end = ToStart(day.AddDays(1));
         var traffic = await GetTrafficAsync(start, end, db, cancellationToken);
 
         return Results.Ok(new DailyReportResponse(
@@ -93,7 +93,7 @@ public static class ReportEndpoints
         CancellationToken cancellationToken)
     {
         var day = datum is null
-            ? DateOnly.FromDateTime(DateTime.UtcNow)
+            ? AppTime.LocalDate(DateTime.UtcNow)
             : TryParseDate(datum, out var parsed)
                 ? parsed
                 : (DateOnly?)null;
@@ -116,7 +116,7 @@ public static class ReportEndpoints
         }
 
         var start = ToStart(monday);
-        var end = start.AddDays(7);
+        var end = ToStart(monday.AddDays(7));
         var traffic = await GetTrafficAsync(start, end, db, cancellationToken);
 
         return Results.Ok(new WeeklyReportResponse(
@@ -191,7 +191,8 @@ public static class ReportEndpoints
                 });
             var availableHours = Math.Max(
                 0,
-                (end - start).TotalDays * (BookingRules.ClosingTime - BookingRules.OpeningTime).TotalHours -
+                (endDay.DayNumber - startDay.DayNumber + 1) *
+                (BookingRules.ClosingTime - BookingRules.OpeningTime).TotalHours -
                 maintenanceHours);
             var utilization = availableHours == 0
                 ? 0
@@ -355,7 +356,7 @@ public static class ReportEndpoints
         out DateOnly end,
         out string error)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = AppTime.LocalDate(DateTime.UtcNow);
         start = today.AddDays(1 - today.Day);
         end = today;
         error = string.Empty;
@@ -400,8 +401,9 @@ public static class ReportEndpoints
             DateTimeStyles.None,
             out date);
 
+    // A riportnapok az intézmény helyi naptári napjai; a határokat UTC-re váltjuk.
     private static DateTime ToStart(DateOnly date) =>
-        date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        AppTime.LocalToUtc(date, TimeOnly.MinValue);
 
     private static bool IsIssue(string movementType) =>
         movementType == IssueMovement || movementType == LegacyIssueMovement;

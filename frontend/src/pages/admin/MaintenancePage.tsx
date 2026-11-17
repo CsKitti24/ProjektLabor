@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { Wrench, Plus, X, AlertCircle, Check, Trash2, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
+import { localDateInputValue, localDateTimeToIso, localInputToIso } from '../../utils/dateTime'
 
 interface RoomOption {
   id: number
@@ -67,7 +68,7 @@ export default function MaintenancePage() {
 
   const [showModal, setShowModal] = useState(false)
   const [teremId, setTeremId] = useState('')
-  const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [startDate, setStartDate] = useState(() => localDateInputValue())
   const [startTime, setStartTime] = useState('07:00')
   const [endTime, setEndTime] = useState('08:00')
   const [leiras, setLeiras] = useState('')
@@ -126,8 +127,8 @@ export default function MaintenancePage() {
   }
 
   const createMaintenance = async () => {
-    const startIso = `${startDate}T${startTime}:00`
-    const endIso = `${startDate}T${endTime}:00`
+    const startIso = localDateTimeToIso(startDate, startTime)
+    const endIso = localDateTimeToIso(startDate, endTime)
     await client.post('/maintenance', {
       teremId: Number(teremId),
       startTime: startIso,
@@ -191,8 +192,8 @@ export default function MaintenancePage() {
         const end = addMinutes(startDateTime.toISOString(), duration)
         await client.put(`/bookings/${booking.foglalasId}`, {
           teremId: Number(moveRoomIds[booking.foglalasId]),
-          startTime: `${start}:00`,
-          endTime: `${end}:00`,
+          startTime: localInputToIso(start),
+          endTime: localInputToIso(end),
         })
         setConflicts((current) => current.filter((item) => item.foglalasId !== booking.foglalasId))
       }

@@ -483,12 +483,14 @@ namespace ProjektLabor.Endpoints
 
                 if (tol.HasValue)
                 {
-                    query = query.Where(km => km.Idopont >= tol.Value);
+                    var tolUtc = AppTime.ToUtc(tol.Value);
+                    query = query.Where(km => km.Idopont >= tolUtc);
                 }
 
                 if (ig.HasValue)
                 {
-                    query = query.Where(km => km.Idopont <= ig.Value);
+                    var igUtc = AppTime.ToUtc(ig.Value);
+                    query = query.Where(km => km.Idopont <= igUtc);
                 }
 
                 int totalCount = await query.CountAsync();

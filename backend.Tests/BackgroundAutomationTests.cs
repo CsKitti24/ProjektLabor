@@ -169,7 +169,8 @@ public class BackgroundAutomationTests
     public async Task NoShow_SetsAuditLogAndAllowsRebooking()
     {
         await using var db = CreateDb();
-        var startTime = new DateTime(2026, 4, 4, 8, 45, 0, DateTimeKind.Utc); // 08:45 is a valid slot
+        // 06:45 UTC = 08:45 budapesti nyári idő, ami érvényes 45 perces idősáv.
+        var startTime = new DateTime(2026, 4, 4, 6, 45, 0, DateTimeKind.Utc);
         var endTime = startTime.AddMinutes(45);
         var (booking, _) = await SeedBookingAsync(db, "Aktiv", startTime);
         booking.EndTime = endTime;

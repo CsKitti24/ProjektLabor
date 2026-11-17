@@ -98,7 +98,7 @@ namespace backend.Tests
             var (client, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("Foglalas Terem 1");
 
-            var start = DateTime.UtcNow.Date.AddDays(1).AddHours(10).AddMinutes(15);
+            var start = TestTime.LocalToday.AddDays(1).AddHours(10).AddMinutes(15);
             var end = start.AddMinutes(90);
 
             // 1. Create first booking
@@ -140,7 +140,7 @@ namespace backend.Tests
             var (client2, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("Foglalas Terem 2");
 
-            var start = DateTime.UtcNow.Date.AddDays(2).AddHours(10).AddMinutes(15);
+            var start = TestTime.LocalToday.AddDays(2).AddHours(10).AddMinutes(15);
             var end = start.AddMinutes(90);
 
             await client1.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
@@ -178,7 +178,7 @@ namespace backend.Tests
             var (client, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("Foglalas Terem 3");
 
-            var start = DateTime.UtcNow.Date.AddDays(3).AddHours(14);
+            var start = TestTime.LocalToday.AddDays(3).AddHours(14);
             var end = start.AddMinutes(45);
 
             var createRes = await client.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
@@ -210,7 +210,7 @@ namespace backend.Tests
             var (client, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("Speciális Igény Terem");
 
-            var start = DateTime.UtcNow.Date.AddDays(4).AddHours(8).AddMinutes(45);
+            var start = TestTime.LocalToday.AddDays(4).AddHours(8).AddMinutes(45);
             var end = start.AddMinutes(90);
             var specialNeeds = "Projektor, laboratóriumi szoftverek, beépített hangosítás";
 
@@ -253,7 +253,7 @@ namespace backend.Tests
             var (client, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("Auto Aktiv Terem");
 
-            var start = DateTime.UtcNow.Date.AddDays(5).AddHours(8).AddMinutes(45); // 08:45 is a valid 45-min slot
+            var start = TestTime.LocalToday.AddDays(5).AddHours(8).AddMinutes(45); // 08:45 is a valid 45-min slot
             var end = start.AddMinutes(45);
 
             // Act - Instructor creates booking
@@ -279,7 +279,7 @@ namespace backend.Tests
             var (client2, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("Szomszédos Sáv Terem");
 
-            var startSlot1 = DateTime.UtcNow.Date.AddDays(6).AddHours(8);
+            var startSlot1 = TestTime.LocalToday.AddDays(6).AddHours(8);
             var endSlot1 = startSlot1.AddMinutes(45); // 08:00 - 08:45
 
             var startSlot2 = endSlot1; // 08:45 - 09:30 (starts exactly when previous ends)
@@ -314,7 +314,7 @@ namespace backend.Tests
             var (client2, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("Konkurens Terem");
 
-            var start = DateTime.UtcNow.Date.AddDays(7).AddHours(11);
+            var start = TestTime.LocalToday.AddDays(7).AddHours(11);
             var end = start.AddMinutes(45);
 
             var req1 = new CreateBookingRequestDto { TeremId = roomId, StartTime = start, EndTime = end };
@@ -340,7 +340,7 @@ namespace backend.Tests
             var (client2, _) = await CreateAuthenticatedUserAsync("Oktato");
             var roomId = await SeedRoomAsync("NoShow Felszabadítás Terem");
 
-            var start = DateTime.UtcNow.Date.AddDays(8).AddHours(14);
+            var start = TestTime.LocalToday.AddDays(8).AddHours(14);
             var end = start.AddMinutes(90);
 
             // 1. Create first booking

@@ -113,12 +113,14 @@ namespace ProjektLabor.Endpoints
 
                 if (tol.HasValue)
                 {
-                    query = query.Where(f => f.EndTime >= tol.Value);
+                    var tolUtc = AppTime.ToUtc(tol.Value);
+                    query = query.Where(f => f.EndTime >= tolUtc);
                 }
 
                 if (ig.HasValue)
                 {
-                    query = query.Where(f => f.StartTime <= ig.Value);
+                    var igUtc = AppTime.ToUtc(ig.Value);
+                    query = query.Where(f => f.StartTime <= igUtc);
                 }
 
                 int totalCount = await query.CountAsync();
@@ -228,6 +230,9 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = timeError });
                 }
 
+                var startUtc = AppTime.ToUtc(request.StartTime);
+                var endUtc = AppTime.ToUtc(request.EndTime);
+
                 var room = await db.Termek.FindAsync(request.TeremId);
                 if (room is null)
                 {
@@ -269,7 +274,7 @@ namespace ProjektLabor.Endpoints
 
                 // Check for overlapping active bookings in the room
                 var validationError = await BookingRules.ValidateAsync(
-                    db, request.TeremId, request.StartTime, request.EndTime);
+                    db, request.TeremId, startUtc, endUtc);
                 if (validationError is not null)
                 {
                     return Results.Conflict(new { message = validationError });
@@ -279,8 +284,8 @@ namespace ProjektLabor.Endpoints
                 {
                     FelhasznaloId = targetUserId,
                     TeremId = request.TeremId,
-                    StartTime = request.StartTime,
-                    EndTime = request.EndTime,
+                    StartTime = startUtc,
+                    EndTime = endUtc,
                     Status = "Aktiv",
                     SpecialisIgenyek = string.IsNullOrWhiteSpace(request.SpecialisIgenyek) ? null : request.SpecialisIgenyek.Trim(),
                     CreatedAt = DateTime.UtcNow,
@@ -385,8 +390,8 @@ namespace ProjektLabor.Endpoints
                     await SqlServerLocking.AcquireAsync(db, $"room-booking:{roomId}");
                 }
 
-                var newStart = request.StartTime ?? booking.StartTime;
-                var newEnd = request.EndTime ?? booking.EndTime;
+                var newStart = request.StartTime.HasValue ? AppTime.ToUtc(request.StartTime.Value) : booking.StartTime;
+                var newEnd = request.EndTime.HasValue ? AppTime.ToUtc(request.EndTime.Value) : booking.EndTime;
                 var newRoomId = requestedRoomId;
                 var targetRoom = newRoomId == booking.TeremId
                     ? booking.Terem
