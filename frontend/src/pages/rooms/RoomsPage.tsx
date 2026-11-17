@@ -121,13 +121,30 @@ export default function RoomsPage() {
   const handleDeleteRoom = async (id: number | string, name: string) => {
     if (!window.confirm(`Biztosan törölni szeretnéd a(z) "${name}" termet?`)) return
 
-    try {
-      await client.delete(`/rooms/${id}`)
-      setSuccessMsg('Terem sikeresen törölve.')
+    const removeRoom = (message: string) => {
+      setSuccessMsg(message)
       setTimeout(() => setSuccessMsg(''), 4000)
       setRooms((prev) => prev.filter((r) => r.id !== id))
+    }
+
+    try {
+      await client.delete(`/rooms/${id}`)
+      removeRoom('Terem sikeresen törölve.')
     } catch (err: unknown) {
-      const axErr = err as { response?: { data?: { message?: string } } }
+      const axErr = err as { response?: { status?: number; data?: { message?: string; jovobeliFoglalasok?: number } } }
+      const futureCount = axErr.response?.data?.jovobeliFoglalasok
+      if (axErr.response?.status === 409 && futureCount) {
+        // A teremnek jövőbeli foglalásai vannak: csak kifejezett megerősítésre mondjuk le őket.
+        if (!window.confirm(`${axErr.response?.data?.message}\n\nLemondod mind a(z) ${futureCount} foglalást, és törlöd a termet?`)) return
+        try {
+          await client.delete(`/rooms/${id}`, { params: { foglalasokLemondasa: true } })
+          removeRoom(`Terem törölve, ${futureCount} jövőbeli foglalás lemondva.`)
+        } catch (retryErr: unknown) {
+          const retryAxErr = retryErr as { response?: { data?: { message?: string } } }
+          alert(retryAxErr.response?.data?.message || 'A terem törlése sikertelen.')
+        }
+        return
+      }
       alert(axErr.response?.data?.message || 'A terem törlése sikertelen.')
     }
   }

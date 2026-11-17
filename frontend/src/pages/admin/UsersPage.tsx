@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Users, AlertCircle, Check, Shield } from 'lucide-react'
 import client from '../../api/client'
+import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
 
 interface UserItem {
   id: number | string
@@ -35,6 +36,8 @@ function getRoleLabel(role: string): string {
 
 export default function UsersPage() {
   const [users, setUsers] = useState<UserItem[]>([])
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
@@ -49,13 +52,14 @@ export default function UsersPage() {
   useEffect(() => {
     let ignore = false
     client
-      .get<{ items?: UserItem[] } | UserItem[]>('/users', {
-        params: { page: 1, pageSize: 100 },
+      .get<{ items?: UserItem[]; totalCount?: number } | UserItem[]>('/users', {
+        params: { page, pageSize: DEFAULT_PAGE_SIZE },
       })
       .then((r) => {
         if (!ignore) {
           const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
           setUsers(list)
+          setTotalCount(Array.isArray(r.data) ? list.length : (r.data?.totalCount ?? list.length))
           setError('')
         }
       })
@@ -72,7 +76,7 @@ export default function UsersPage() {
     return () => {
       ignore = true
     }
-  }, [])
+  }, [page])
 
   const handleEditStart = (user: UserItem) => {
     setEditingId(user.id)
@@ -391,6 +395,7 @@ export default function UsersPage() {
           </table>
         </div>
       )}
+      <Pagination page={page} pageSize={DEFAULT_PAGE_SIZE} totalCount={totalCount} onPageChange={setPage} />
     </div>
   )
 }

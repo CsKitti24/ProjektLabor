@@ -44,7 +44,7 @@ describe('admin administration pages', () => {
   beforeEach(() => {
     vi.mocked(client.get).mockImplementation((url) => {
       if (url === '/users') return Promise.resolve(axiosResponse({ items: [{ id: 4, username: 'user', nev: 'Teszt User', role: 'Oktato' }] }))
-      if (url === '/audit?page=1&pageSize=100') return Promise.resolve(axiosResponse({ items: [{ id: 1, muveletTipus: 'UPDATE', entitasTipus: 'Felhasznalo', entitasId: '4', felhasznaloNev: 'Admin', letrehozasIdeje: '2026-11-10T20:00:00Z' }], totalCount: 1 }))
+      if (url === '/audit?page=1&pageSize=50') return Promise.resolve(axiosResponse({ items: [{ id: 1, muveletTipus: 'UPDATE', entitasTipus: 'Felhasznalo', entitasId: '4', felhasznaloNev: 'Admin', letrehozasIdeje: '2026-11-10T20:00:00Z' }], totalCount: 1 }))
       return Promise.resolve(axiosResponse([{ kulcs: 'no_show_idokorlat_perc', ertek: '15', leiras: 'Perc' }]))
     })
     vi.mocked(client.put).mockResolvedValue(axiosResponse({}))
@@ -76,7 +76,7 @@ describe('admin administration pages', () => {
     expect(await screen.findByText('UPDATE')).toBeTruthy()
     expect(screen.getByText('Admin')).toBeTruthy()
     expect(screen.getByText('Felhasznalo #4')).toBeTruthy()
-    expect(client.get).toHaveBeenCalledWith('/audit?page=1&pageSize=100')
+    expect(client.get).toHaveBeenCalledWith('/audit?page=1&pageSize=50')
   })
 
   it('allows only administrators to edit parameter values', async () => {

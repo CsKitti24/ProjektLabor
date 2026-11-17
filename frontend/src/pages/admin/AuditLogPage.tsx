@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AlertCircle, ClipboardList, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
+import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
 
 interface AuditLog {
   id: number
@@ -26,6 +27,8 @@ function formatDate(value: string): string {
 
 export default function AuditLogPage() {
   const [logs, setLogs] = useState<AuditLog[]>([])
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [reload, setReload] = useState(0)
@@ -33,10 +36,11 @@ export default function AuditLogPage() {
   useEffect(() => {
     let ignore = false
     client
-      .get<AuditResponse>('/audit?page=1&pageSize=100')
+      .get<AuditResponse>(`/audit?page=${page}&pageSize=${DEFAULT_PAGE_SIZE}`)
       .then((response) => {
         if (!ignore) {
           setLogs(response.data.items ?? [])
+          setTotalCount(response.data.totalCount ?? response.data.items?.length ?? 0)
           setError('')
         }
       })
@@ -52,7 +56,7 @@ export default function AuditLogPage() {
     return () => {
       ignore = true
     }
-  }, [reload])
+  }, [reload, page])
 
   return (
     <div>
@@ -107,6 +111,7 @@ export default function AuditLogPage() {
           </table>
         </div>
       )}
+      <Pagination page={page} pageSize={DEFAULT_PAGE_SIZE} totalCount={totalCount} onPageChange={setPage} />
     </div>
   )
 }

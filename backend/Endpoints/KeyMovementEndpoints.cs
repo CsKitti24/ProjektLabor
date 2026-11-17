@@ -648,11 +648,11 @@ namespace ProjektLabor.Endpoints
                     db, logger, cancellationToken);
                 var timeZone = AutomationParameterReader.GetTimeZone(configuration, logger);
 
-                // Csak az aktív kulcsok legutolsó mozgását kérdezzük le, és abból a kiadásokat.
+                // Minden kulcs legutolsó mozgását nézzük (a kint lévő, közben deaktivált kulcsot is),
+                // és abból a kiadásokat.
                 var latestIssues = await db.Kulcsmozgasok
                     .AsNoTracking()
                     .Where(movement =>
-                        movement.Kulcs.Aktivalva &&
                         !db.Kulcsmozgasok.Any(newer =>
                             newer.KulcsId == movement.KulcsId &&
                             (newer.Idopont > movement.Idopont ||

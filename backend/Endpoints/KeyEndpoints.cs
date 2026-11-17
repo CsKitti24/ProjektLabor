@@ -56,19 +56,7 @@ namespace ProjektLabor.Endpoints
                         .ThenByDescending(km => km.Id)
                         .FirstOrDefault();
 
-                    string allapot;
-                    if (!k.Aktivalva)
-                    {
-                        allapot = "Deaktivalt";
-                    }
-                    else if (lastMovement != null && KeyMovementTypes.IsIssue(lastMovement.MozgasTipus))
-                    {
-                        allapot = "Kiadva";
-                    }
-                    else
-                    {
-                        allapot = "Szabad";
-                    }
+                    var allapot = GetState(k, lastMovement);
 
                     return new KeyDto
                     {
@@ -112,11 +100,7 @@ namespace ProjektLabor.Endpoints
                     .ThenByDescending(km => km.Id)
                     .FirstOrDefault();
 
-                string allapot = !k.Aktivalva
-                    ? "Deaktivalt"
-                    : (lastMovement != null && KeyMovementTypes.IsIssue(lastMovement.MozgasTipus))
-                        ? "Kiadva"
-                        : "Szabad";
+                var allapot = GetState(k, lastMovement);
 
                 var dto = new KeyDto
                 {
@@ -232,6 +216,20 @@ namespace ProjektLabor.Endpoints
                 var changes = new List<string>();
                 var previousType = key.Tipus;
                 var previousRoomId = key.TeremId;
+                var isIssued = await IsIssuedAsync(db, id);
+
+                // Kint lévő kulcs típusa, terme és aktív állapota nem változhat, különben a kulcs
+                // visszavétele és a késések nyilvántartása elromlana.
+                if (isIssued &&
+                    ((!string.IsNullOrWhiteSpace(request.Tipus) && request.Tipus != key.Tipus) ||
+                     (request.TeremId.HasValue && request.TeremId.Value != key.TeremId) ||
+                     request.Aktivalva == false))
+                {
+                    return Results.Conflict(new
+                    {
+                        message = "A kulcs jelenleg ki van adva: a típusa, terme és aktív állapota csak a visszavétel után módosítható."
+                    });
+                }
 
                 if (!string.IsNullOrWhiteSpace(request.Szam) && request.Szam.Trim() != key.Szam)
                 {
@@ -269,7 +267,10 @@ namespace ProjektLabor.Endpoints
 
                 if (previousType == "Mesterkulcs" && key.Tipus != "Mesterkulcs")
                 {
+                    // Osztálykulccsá váláskor a mesterkulcs-termek és -jogosultságok is megszűnnek.
                     db.KulcsTermek.RemoveRange(key.KulcsTeremKapcsok);
+                    db.MesterkulcsJogosultsagok.RemoveRange(
+                        await db.MesterkulcsJogosultsagok.Where(access => access.KulcsId == key.Id).ToListAsync());
                 }
                 else if (key.Tipus == "Mesterkulcs" &&
                          (previousType != key.Tipus || previousRoomId != key.TeremId) &&
@@ -304,7 +305,7 @@ namespace ProjektLabor.Endpoints
                     Aktivalva = key.Aktivalva,
                     TeremId = key.TeremId,
                     TeremNev = room?.Nev ?? string.Empty,
-                    JelenlegiAllapot = key.Aktivalva ? "Szabad" : "Deaktivalt"
+                    JelenlegiAllapot = !key.Aktivalva ? "Deaktivalt" : isIssued ? "Kiadva" : "Szabad"
                 };
 
                 return Results.Ok(result);
@@ -331,6 +332,11 @@ namespace ProjektLabor.Endpoints
                 if (key is null)
                 {
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú kulcs nem található." });
+                }
+
+                if (await IsIssuedAsync(db, id))
+                {
+                    return Results.Conflict(new { message = "A kulcs jelenleg ki van adva, ezért csak a visszavétel után deaktiválható." });
                 }
 
                 key.Aktivalva = false;
@@ -577,6 +583,24 @@ namespace ProjektLabor.Endpoints
             .WithOpenApi();
 
             return group;
+        }
+
+        // Kint lévő kulcsnál a "Kiadva" állapot az erősebb, hogy egy (régebben) kiadva deaktivált
+        // kulcs is visszavehető maradjon.
+        private static string GetState(Kulcs key, Kulcsmozgas? lastMovement) =>
+            lastMovement != null && KeyMovementTypes.IsIssue(lastMovement.MozgasTipus)
+                ? "Kiadva"
+                : key.Aktivalva ? "Szabad" : "Deaktivalt";
+
+        private static async Task<bool> IsIssuedAsync(AppDbContext db, int keyId)
+        {
+            var lastType = await db.Kulcsmozgasok
+                .Where(movement => movement.KulcsId == keyId)
+                .OrderByDescending(movement => movement.Idopont)
+                .ThenByDescending(movement => movement.Id)
+                .Select(movement => movement.MozgasTipus)
+                .FirstOrDefaultAsync();
+            return KeyMovementTypes.IsIssue(lastType);
         }
 
         private static bool IsIssuedRoomUnknown(Kulcs key, Kulcsmozgas? lastMovement, string state) =>

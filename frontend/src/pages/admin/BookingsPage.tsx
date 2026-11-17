@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { CalendarDays, Search, AlertCircle } from 'lucide-react'
 import client from '../../api/client'
+import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
 
 interface Booking {
   id: string | number
@@ -66,25 +67,28 @@ function getStatusBadge(status: string | undefined) {
 
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [search, setSearch] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
     client
-      .get<{ items?: Booking[] } | Booking[]>('/bookings', {
-        params: { page: 1, pageSize: 100 },
+      .get<{ items?: Booking[]; totalCount?: number } | Booking[]>('/bookings', {
+        params: { page, pageSize: DEFAULT_PAGE_SIZE },
       })
       .then((r) => {
         const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
         setBookings(list)
+        setTotalCount(Array.isArray(r.data) ? list.length : (r.data?.totalCount ?? list.length))
       })
       .catch((err: unknown) => {
         const axErr = err as { response?: { data?: { message?: string } } }
         setError(axErr.response?.data?.message || 'Nem sikerült betölteni a foglalásokat.')
       })
       .finally(() => setIsLoading(false))
-  }, [])
+  }, [page])
 
   const filtered = bookings.filter((b) => {
     const q = search.toLowerCase()
@@ -172,6 +176,7 @@ export default function BookingsPage() {
           </table>
         </div>
       )}
+      <Pagination page={page} pageSize={DEFAULT_PAGE_SIZE} totalCount={totalCount} onPageChange={setPage} />
     </div>
   )
 }
