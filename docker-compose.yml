@@ -17,8 +17,10 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    # Csak a saját gépről érhető el (a böngésző a frontend nginx proxyján át, a 3000-es porton éri el
+    # az API-t); a hálózat felé nincs nyitott backend-port.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - Authentication__Jwt__Issuer=${JWT_ISSUER:?Set JWT_ISSUER in .env}
@@ -46,8 +48,9 @@ services:
   mssql:
     platform: linux/amd64
     image: mcr.microsoft.com/mssql/server:2022-latest
+    # Csak a saját gépről érhető el (pl. DBeaver, Azure Data Studio); a hálózat felé nem.
     ports:
-      - "1433:1433"
+      - "127.0.0.1:1433:1433"
     environment:
       - ACCEPT_EULA=${ACCEPT_EULA:-Y}
       - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}

@@ -37,8 +37,7 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      await login(username.trim(), password)
-      const role = (localStorage.getItem('user_role') as UserRole) || 'Oktato'
+      const { role } = await login(username.trim(), password)
       navigate(getDashboardPath(role))
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } } }

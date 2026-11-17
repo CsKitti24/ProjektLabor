@@ -73,6 +73,42 @@ public class SecurityHardeningTests : IClassFixture<WebApplicationFactory<Progra
         Assert.InRange(entries, limit, limit * 2);
     }
 
+    [Fact]
+    public async Task Login_SetsHttpOnlyCookie_ThatAuthenticatesAndIsClearedOnLogout()
+    {
+        const string password = "CookieJelszo1!";
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Felhasznalok.Add(new ProjektLabor.Models.Felhasznalo
+            {
+                Username = "suti.teszt",
+                Email = "suti.teszt@test.hu",
+                Nev = "Süti Teszt",
+                Role = RoleNames.Oktato,
+                JelszoHash = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 4)
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // A kliens kezeli a sütiket, Authorization fejlécet nem küldünk.
+        using var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = true });
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
+
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { username = "suti.teszt", jelszo = password });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var setCookie = Assert.Single(login.Headers.GetValues("Set-Cookie"));
+        Assert.StartsWith($"{AuthCookie.Name}=", setCookie);
+        Assert.Contains("httponly", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=strict", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("path=/api", setCookie, StringComparison.OrdinalIgnoreCase);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/me")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/auth/logout", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
+    }
+
     [Theory]
     [InlineData("http://localhost:3000", true)]
     [InlineData("https://evil.example", false)]

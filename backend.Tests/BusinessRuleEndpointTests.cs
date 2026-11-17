@@ -515,6 +515,52 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
         Assert.DoesNotContain(list.Oktatok, item => item.UserId == inactiveId);
     }
 
+    // ---------- Bemenet-ellenőrzés ----------
+
+    [Fact]
+    public async Task InvalidInput_IsRejectedWithBadRequest_InsteadOfReachingTheDatabase()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var (instructor, _) = await CreateUserClientAsync(RoleNames.Oktato);
+        var roomId = await SeedRoomAsync();
+
+        var tooLongUsername = await admin.PostAsJsonAsync("/api/users", new
+        {
+            username = new string('x', 60),
+            email = "valid@test.hu",
+            jelszo = "Hosszujelszo1!",
+            nev = "Teszt",
+            role = RoleNames.Oktato
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, tooLongUsername.StatusCode);
+        Assert.Contains("50", await tooLongUsername.Content.ReadAsStringAsync());
+
+        var invalidEmail = await admin.PostAsJsonAsync("/api/users", new
+        {
+            username = "ervenyes.nev",
+            email = "nem-email",
+            jelszo = "Hosszujelszo1!",
+            nev = "Teszt",
+            role = RoleNames.Oktato
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidEmail.StatusCode);
+
+        var start = TestTime.LocalToday.AddDays(5).AddHours(10).AddMinutes(15);
+        var tooLongNeeds = await instructor.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
+        {
+            TeremId = roomId,
+            StartTime = start,
+            EndTime = start.AddMinutes(45),
+            SpecialisIgenyek = new string('a', 501)
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, tooLongNeeds.StatusCode);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.False(await db.Felhasznalok.AnyAsync(user => user.Email == "nem-email" || user.Username.Length > 50));
+        Assert.False(await db.Foglalasok.AnyAsync(booking => booking.TeremId == roomId));
+    }
+
     // ---------- Segédfüggvények ----------
 
     private async Task<(HttpClient Client, int UserId)> CreateUserClientAsync(string role, bool active = true)
