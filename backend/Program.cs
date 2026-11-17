@@ -1,4 +1,6 @@
 using System.Text;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -43,7 +45,7 @@ builder.Services
         };
         options.Events = new JwtBearerEvents
         {
-            OnTokenValidated = context =>
+            OnTokenValidated = async context =>
             {
                 var subject = context.Principal?.FindFirst("sub")?.Value;
                 var role = context.Principal?.FindFirst("role")?.Value;
@@ -52,9 +54,22 @@ builder.Services
                     !RoleNames.All.Contains(role, StringComparer.Ordinal))
                 {
                     context.Fail("The token must contain a valid user ID and role.");
+                    return;
                 }
 
-                return Task.CompletedTask;
+                // A token csak addig érvényes, amíg a felhasználó létezik, aktív, és a szerepköre
+                // megegyezik a tokenben lévővel. Így a törlés/inaktiválás és a szerepkör-változás
+                // azonnal hat, nem csak a token lejártakor.
+                var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                var user = await db.Felhasznalok
+                    .AsNoTracking()
+                    .Where(item => item.Id == userId)
+                    .Select(item => new { item.Role, item.Aktiv })
+                    .SingleOrDefaultAsync(context.HttpContext.RequestAborted);
+                if (user is null || !user.Aktiv || !string.Equals(user.Role, role, StringComparison.Ordinal))
+                {
+                    context.Fail("The user no longer exists, is inactive, or has a different role.");
+                }
             }
         };
     });
@@ -148,67 +163,69 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     }
 });
 
+// A frontend élesben ugyanarról a címről, proxyn keresztül éri el az API-t, így CORS-ra csak
+// fejlesztéskor van szükség. Csak a konfigurációban felsorolt originök engedélyezettek.
+// Megadható listaként (appsettings) vagy vesszővel elválasztott szövegként (környezeti változó).
+var corsSection = builder.Configuration.GetSection("Cors:AllowedOrigins");
+var allowedOrigins = (corsSection.Get<string[]>() ?? [])
+    .Concat((corsSection.Value ?? string.Empty)
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.AllowAnyOrigin()
-            .AllowAnyHeader()
-            .AllowAnyMethod();
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
     });
+});
+
+// A frontend nginx-e proxyként továbbítja a kéréseket; a kliens valódi IP-címét (kéréskorláthoz,
+// naplózáshoz) csak privát hálózatból (pl. a Docker belső hálózatából) érkező proxytól fogadjuk el.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    foreach (var network in new[] { "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16" })
+    {
+        options.KnownNetworks.Add(Microsoft.AspNetCore.HttpOverrides.IPNetwork.Parse(network));
+    }
+});
+
+// Jelszópróbálgatás elleni védelem: kliens-IP-nként percenként korlátozott számú bejelentkezés.
+var loginPermitLimit = builder.Configuration.GetValue("RateLimiting:LoginPermitLimitPerMinute", 10);
+builder.Services.AddMemoryCache();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { message = "Túl sok bejelentkezési kísérlet. Kérjük, próbáld újra egy perc múlva." },
+            cancellationToken);
+    };
+    options.AddPolicy("login", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = loginPermitLimit,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        }));
 });
 
 var app = builder.Build();
 
+app.UseForwardedHeaders();
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
-app.Use(async (context, next) =>
-{
-    await next();
-
-    var statusCode = context.Response.StatusCode;
-    var accessDenied = statusCode is StatusCodes.Status401Unauthorized or StatusCodes.Status403Forbidden;
-    var rejectedMutation =
-        context.Request.Method is "POST" or "PUT" or "PATCH" or "DELETE" &&
-        statusCode is >= StatusCodes.Status400BadRequest and < StatusCodes.Status500InternalServerError;
-    if ((!accessDenied && !rejectedMutation) ||
-        context.Request.Path.StartsWithSegments("/api/auth/login"))
-    {
-        return;
-    }
-
-    await using var auditScope = context.RequestServices
-        .GetRequiredService<IServiceScopeFactory>()
-        .CreateAsyncScope();
-    var dbContext = auditScope.ServiceProvider.GetRequiredService<AppDbContext>();
-    int? userId = null;
-    var subject = context.User.Identity?.IsAuthenticated == true
-        ? context.User.FindFirst("sub")?.Value
-        : null;
-    if (int.TryParse(subject, out var parsedUserId) &&
-        parsedUserId > 0 &&
-        await dbContext.Felhasznalok.AnyAsync(user => user.Id == parsedUserId, context.RequestAborted))
-    {
-        userId = parsedUserId;
-    }
-
-    var path = context.Request.Path.Value ?? "/";
-    dbContext.AuditLogok.Add(new ProjektLabor.Models.AuditLog
-    {
-        FelhasznaloId = userId,
-        MuveletTipus = accessDenied
-            ? statusCode == StatusCodes.Status401Unauthorized
-                ? "ACCESS_UNAUTHENTICATED"
-                : "ACCESS_FORBIDDEN"
-            : "OPERATION_REJECTED",
-        EntitasTipus = "API",
-        EntitasId = path.Length > 50 ? path[..50] : path,
-        Indoklas = $"{context.Request.Method} request returned {statusCode}.",
-        LetrehozasIdeje = DateTime.UtcNow
-    });
-    await dbContext.SaveChangesAsync(context.RequestAborted);
-});
+app.UseMiddleware<AccessAuditMiddleware>();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 if (app.Environment.IsDevelopment())
 {
@@ -282,7 +299,7 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
                 delaySeconds);
             if (attempt < maxRetries)
             {
-                Thread.Sleep(TimeSpan.FromSeconds(delaySeconds));
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
             }
             else
             {
@@ -294,7 +311,6 @@ if (app.Configuration.GetValue<bool>("ApplyMigrations") ||
         }
     }
 
-    await DemoUserBootstrapper.InitializeAsync(dbContext, app.Configuration, logger);
     await AdminBootstrapper.InitializeAsync(dbContext, app.Configuration, logger);
 }
 
@@ -325,6 +341,7 @@ app.MapPost("/api/auth/login", async (
 
     return Results.Ok(result);
 })
+.RequireRateLimiting("login")
 .WithName("Login")
 .WithSummary("Felhasználói bejelentkezés – JWT token kiadás")
 .WithTags("Auth")
@@ -403,31 +420,6 @@ app.MapNotificationEndpoints();
 app.MapSystemAdministrationEndpoints();
 app.MapReportEndpoints();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast(
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]))
-        .ToArray();
-
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.RequireAuthorization("Authenticated")
-.WithOpenApi();
-
 app.Run();
 
 public partial class Program { }
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

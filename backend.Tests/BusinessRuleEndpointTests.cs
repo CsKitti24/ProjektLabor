@@ -310,27 +310,35 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
     }
 
     [Fact]
-    public async Task ChangeRole_OfLastActiveAdministrator_ReturnsConflict()
+    public async Task ChangeRole_OfSelf_ReturnsBadRequest()
     {
-        // A hívó admin inaktív, így a célpont az egyetlen aktív adminisztrátor.
-        var (caller, _) = await CreateUserClientAsync(RoleNames.Adminisztrator, active: false);
-        var (_, lastAdminId) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var (admin, adminId) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+
+        var response = await admin.PutAsJsonAsync(
+            $"/api/users/{adminId}/role",
+            new ChangeRoleRequestDto { UjRole = RoleNames.Oktato });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Token_OfDeactivatedOrDemotedUser_IsRejectedImmediately()
+    {
+        var (deactivated, deactivatedId) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var (demoted, demotedId) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        Assert.Equal(HttpStatusCode.OK, (await deactivated.GetAsync("/api/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await demoted.GetAsync("/api/users")).StatusCode);
+
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            foreach (var other in db.Felhasznalok.Where(user =>
-                         user.Role == RoleNames.Adminisztrator && user.Id != lastAdminId))
-            {
-                other.Aktiv = false;
-            }
+            (await db.Felhasznalok.SingleAsync(user => user.Id == deactivatedId)).Aktiv = false;
+            (await db.Felhasznalok.SingleAsync(user => user.Id == demotedId)).Role = RoleNames.Oktato;
             await db.SaveChangesAsync();
         }
 
-        var response = await caller.PutAsJsonAsync(
-            $"/api/users/{lastAdminId}/role",
-            new ChangeRoleRequestDto { UjRole = RoleNames.Oktato });
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await deactivated.GetAsync("/api/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await demoted.GetAsync("/api/users")).StatusCode);
     }
 
     // ---------- Segédfüggvények ----------

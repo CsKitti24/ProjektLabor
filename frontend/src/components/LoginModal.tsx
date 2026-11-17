@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { X, Lock, User, AlertCircle, ArrowRight } from 'lucide-react'
 import { useAuth, type UserRole } from '../auth/AuthContext'
+import { DEMO_ACCOUNTS, SHOW_DEMO_ACCOUNTS } from '../auth/demoAccounts'
 
 interface LoginModalProps {
   onClose: () => void
@@ -21,12 +22,6 @@ function getDashboardPath(role: UserRole): string {
   }
 }
 
-const DEMO_ACCOUNTS = [
-  { label: 'Oktató', username: 'demo-oktato', pass: 'DemoOktato2026!' },
-  { label: 'Portás', username: 'demo-portas', pass: 'DemoPortas2026!' },
-  { label: 'Adminisztrátor', username: 'demo-admin', pass: 'DemoAdmin2026!' },
-  { label: 'Igazgató', username: 'demo-igazgato', pass: 'DemoIgazgato2026!' },
-]
 
 export default function LoginModal({ onClose }: LoginModalProps) {
   const { login } = useAuth()
@@ -156,23 +151,24 @@ export default function LoginModal({ onClose }: LoginModalProps) {
           </button>
         </form>
 
-        {/* Letisztult demó gyorsválasztó a 3. bemutatóhoz */}
-        <div className="demo-selector-container">
-          <div className="demo-selector-title">Gyorskitöltés a bemutatóhoz:</div>
-          <div className="demo-selector-buttons">
-            {DEMO_ACCOUNTS.map((acc) => (
-              <button
-                key={acc.username}
-                type="button"
-                className="demo-pill-btn"
-                onClick={() => handleSelectDemo(acc.username, acc.pass)}
-                title={`Kiválasztás: ${acc.username}`}
-              >
-                {acc.label}
-              </button>
-            ))}
+        {SHOW_DEMO_ACCOUNTS && (
+          <div className="demo-selector-container">
+            <div className="demo-selector-title">Gyorskitöltés a bemutatóhoz:</div>
+            <div className="demo-selector-buttons">
+              {DEMO_ACCOUNTS.map((acc) => (
+                <button
+                  key={acc.username}
+                  type="button"
+                  className="demo-pill-btn"
+                  onClick={() => handleSelectDemo(acc.username, acc.pass)}
+                  title={`Kiválasztás: ${acc.username}`}
+                >
+                  {acc.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <style>{`

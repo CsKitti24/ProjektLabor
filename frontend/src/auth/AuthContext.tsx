@@ -109,11 +109,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const login = useCallback(async (username: string, password: string) => {
-    // A C# backend DTO a { Username, Jelszo } mezőket várja, de küldjük el mindkét variációt
+    // A backend LoginRequestDto a { Username, Jelszo } mezőket várja.
     const payload = {
       username: username.trim(),
       jelszo: password,
-      password: password,
     }
 
     const response = await client.post<BackendLoginResponse>('/auth/login', payload)
@@ -122,16 +121,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const jwtToken = data.token || data.Token || ''
     const userInfo = data.felhasznalo
 
-    const resolvedRole: UserRole = (userInfo?.role || data.role || 'Oktato') as UserRole
+    const resolvedRole = userInfo?.role || data.role
+    if (!jwtToken || !resolvedRole) {
+      // Hiányos válasz esetén nem találgatunk szerepkört: a bejelentkezés sikertelennek számít.
+      throw new Error('A bejelentkezési válasz nem tartalmaz tokent vagy szerepkört.')
+    }
     const resolvedUsername: string = userInfo?.username || data.username || username.trim()
     const resolvedUserId: string | number = userInfo?.id ?? data.userId ?? ''
     const resolvedNev: string = userInfo?.nev || ''
     const resolvedEmail: string = userInfo?.email || ''
 
-    if (jwtToken) {
-      localStorage.setItem('auth_token', jwtToken)
-      setToken(jwtToken)
-    }
+    localStorage.setItem('auth_token', jwtToken)
+    setToken(jwtToken)
 
     localStorage.setItem('user_role', resolvedRole)
     localStorage.setItem('username', resolvedUsername)

@@ -42,6 +42,13 @@ public static partial class AdminBootstrapper
             logger.LogInformation("Initial administrator account created.");
         }
 
+        // Bemutatóhoz használt demófelhasználók: csak kifejezett bekapcsolásra (DemoUsers:Enabled=true)
+        // és csak akkor jönnek létre, ha a szerepkörhöz jelszó is meg van adva.
+        if (!configuration.GetValue<bool>("DemoUsers:Enabled"))
+        {
+            return;
+        }
+
         foreach (var demoUser in DemoUsers)
         {
             var password = configuration[$"DemoUsers:{demoUser.ConfigurationKey}:Password"];

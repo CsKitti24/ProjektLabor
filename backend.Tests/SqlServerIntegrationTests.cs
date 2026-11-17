@@ -32,17 +32,11 @@ public sealed class SqlServerIntegrationTests
 
     public SqlServerIntegrationTests()
     {
-        var configuredConnection = Environment.GetEnvironmentVariable("SQLSERVER_TEST_CONNECTION");
-        if (string.IsNullOrWhiteSpace(configuredConnection))
-        {
-            throw new InvalidOperationException(
-                "Set SQLSERVER_TEST_CONNECTION to a SQL Server connection for the SQL integration tests.");
-        }
-
-        _connectionString = configuredConnection;
+        // Kapcsolat nélkül a tesztek a SqlServerFact attribútum miatt kihagyásra kerülnek.
+        _connectionString = Environment.GetEnvironmentVariable(SqlServerFactAttribute.ConnectionVariable) ?? string.Empty;
     }
 
-    [Fact]
+    [SqlServerFact]
     public async Task SqlServer_MigratesBackfillsAndSupportsAutomationTransactionsAndEndpoints()
     {
         var databaseName = $"ProjektLaborIntegration_{Guid.NewGuid():N}";
@@ -218,7 +212,7 @@ public sealed class SqlServerIntegrationTests
         }
     }
 
-    [Fact]
+    [SqlServerFact]
     public async Task SqlServer_EveningKeyReturnNotificationIsPersistentAndUniquePerPorter()
     {
         var databaseName = $"ProjektLaborEveningNotification_{Guid.NewGuid():N}";
@@ -316,7 +310,7 @@ public sealed class SqlServerIntegrationTests
         }
     }
 
-    [Fact]
+    [SqlServerFact]
     public async Task SqlServer_ConvertsLegacyLocalBookingAndMaintenanceTimesToUtcAndBack()
     {
         const string migrationBeforeUtc = "20261110181630_BackfillMasterKeyRooms";
@@ -815,7 +809,7 @@ public sealed class SqlServerIntegrationTests
         return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
-    [Fact]
+    [SqlServerFact]
     public async Task IsolatedSqlServerDatabase_AppliesMigrationsAndTestsBootstrapAuthentication()
     {
         var databaseName = $"ProjektLaborBootstrap_{Guid.NewGuid():N}";
@@ -845,21 +839,21 @@ public sealed class SqlServerIntegrationTests
                 role => Convert.ToBase64String(RandomNumberGenerator.GetBytes(18)));
             var settings = new Dictionary<string, string?>
             {
-                ["BootstrapDemoUsers:Enabled"] = "true"
+                ["BootstrapAdmin:Username"] = $"sql_admin_{suffix}",
+                ["BootstrapAdmin:Password"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(18)),
+                ["DemoUsers:Enabled"] = "true"
             };
             foreach (var role in RoleNames.All)
             {
-                var username = $"sql_{role.ToLowerInvariant()}_{suffix}";
-                settings[$"BootstrapDemoUsers:{role}:Username"] = username;
-                settings[$"BootstrapDemoUsers:{role}:Password"] = roleConfiguration[role];
+                settings[$"DemoUsers:{role}:Password"] = roleConfiguration[role];
             }
 
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
-            await DemoUserBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
-            await DemoUserBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
+            await AdminBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
+            await AdminBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
 
             var users = await db.Felhasznalok
-                .Where(user => user.Username.EndsWith(suffix))
+                .Where(user => user.Username.StartsWith("demo-"))
                 .ToListAsync();
             Assert.Equal(RoleNames.All.Length, users.Count);
 
