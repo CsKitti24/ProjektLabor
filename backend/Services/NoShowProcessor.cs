@@ -29,17 +29,10 @@ public sealed class NoShowProcessor
             return 0;
         }
 
-        // 1. Foglalások, amelyekhez már felvették a kulcsot (korai felvétel is számít).
-        var candidateIds = candidates.Select(booking => (int?)booking.Id).ToList();
-        var collectedBookingIds = (await _db.Kulcsmozgasok
-                .Where(movement =>
-                    candidateIds.Contains(movement.FoglalasId) &&
-                    (movement.MozgasTipus == KeyMovementTypes.Issue || movement.MozgasTipus == KeyMovementTypes.LegacyIssue) &&
-                    movement.Idopont <= nowUtc)
-                .Select(movement => movement.FoglalasId!.Value)
-                .Distinct()
-                .ToListAsync(cancellationToken))
-            .ToHashSet();
+        // 1. Foglalások, amelyekhez már felvették a kulcsot (korai felvétel is számít,
+        //    és a foglaláshoz nem kötött, de az oktatónak erre a teremre kiadott kulcs is).
+        var collectedBookingIds = await BookingKeyPickup.GetBookingIdsWithKeyPickupAsync(
+            _db, candidates, nowUtc, cancellationToken);
 
         // 2. Termek, amelyeknek valamelyik (saját vagy mester-) kulcsa jelenleg ki van adva.
         var roomIds = candidates.Select(booking => booking.TeremId).Distinct().ToList();

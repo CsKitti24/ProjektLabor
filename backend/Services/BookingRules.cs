@@ -16,6 +16,9 @@ public static class BookingRules
         booking => booking.Status != CancelledStatus && booking.Status != NoShowStatus;
 
     public const int SlotMinutes = 45;
+
+    // A kulcs legkorábban ennyivel a foglalás kezdete előtt vehető fel.
+    public static readonly TimeSpan KeyIssueLeadTime = TimeSpan.FromHours(2);
     public static readonly TimeSpan OpeningTime = new(8, 0, 0);
     public static readonly TimeSpan ClosingTime = new(20, 0, 0);
 

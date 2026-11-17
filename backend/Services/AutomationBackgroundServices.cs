@@ -127,3 +127,26 @@ public sealed class DailyKeyClosingBackgroundService : AutomationBackgroundServi
         await processor.ProcessAsync(TimeProvider.GetUtcNow().UtcDateTime, cancellationToken);
     }
 }
+
+public sealed class BookingCompletionBackgroundService : AutomationBackgroundService
+{
+    private readonly IServiceScopeFactory _scopeFactory;
+
+    public BookingCompletionBackgroundService(
+        IServiceScopeFactory scopeFactory,
+        TimeProvider timeProvider,
+        ILogger<BookingCompletionBackgroundService> logger)
+        : base(timeProvider, logger)
+    {
+        _scopeFactory = scopeFactory;
+    }
+
+    protected override string JobName => "Booking completion";
+
+    protected override async Task ProcessOnceAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var processor = scope.ServiceProvider.GetRequiredService<BookingCompletionProcessor>();
+        await processor.ProcessAsync(TimeProvider.GetUtcNow().UtcDateTime, cancellationToken);
+    }
+}

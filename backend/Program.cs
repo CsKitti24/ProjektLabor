@@ -106,9 +106,11 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<NoShowProcessor>();
 builder.Services.AddScoped<BookingExpiryNotificationProcessor>();
 builder.Services.AddScoped<DailyKeyClosingProcessor>();
+builder.Services.AddScoped<BookingCompletionProcessor>();
 builder.Services.AddHostedService<NoShowBackgroundService>();
 builder.Services.AddHostedService<BookingExpiryNotificationBackgroundService>();
 builder.Services.AddHostedService<DailyKeyClosingBackgroundService>();
+builder.Services.AddHostedService<BookingCompletionBackgroundService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
