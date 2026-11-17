@@ -61,7 +61,7 @@ namespace ProjektLabor.Endpoints
                     {
                         allapot = "Deaktivalt";
                     }
-                    else if (lastMovement != null && (lastMovement.MozgasTipus == "Kiadás" || lastMovement.MozgasTipus == "Kiadas"))
+                    else if (lastMovement != null && KeyMovementTypes.IsIssue(lastMovement.MozgasTipus))
                     {
                         allapot = "Kiadva";
                     }
@@ -78,7 +78,8 @@ namespace ProjektLabor.Endpoints
                         Aktivalva = k.Aktivalva,
                         TeremId = k.TeremId,
                         TeremNev = k.Terem?.Nev ?? string.Empty,
-                        JelenlegiAllapot = allapot
+                        JelenlegiAllapot = allapot,
+                        KiadottTeremIsmeretlen = IsIssuedRoomUnknown(k, lastMovement, allapot)
                     };
                 }).ToList();
 
@@ -113,7 +114,7 @@ namespace ProjektLabor.Endpoints
 
                 string allapot = !k.Aktivalva
                     ? "Deaktivalt"
-                    : (lastMovement != null && (lastMovement.MozgasTipus == "Kiadás" || lastMovement.MozgasTipus == "Kiadas"))
+                    : (lastMovement != null && KeyMovementTypes.IsIssue(lastMovement.MozgasTipus))
                         ? "Kiadva"
                         : "Szabad";
 
@@ -125,7 +126,8 @@ namespace ProjektLabor.Endpoints
                     Aktivalva = k.Aktivalva,
                     TeremId = k.TeremId,
                     TeremNev = k.Terem?.Nev ?? string.Empty,
-                    JelenlegiAllapot = allapot
+                    JelenlegiAllapot = allapot,
+                    KiadottTeremIsmeretlen = IsIssuedRoomUnknown(k, lastMovement, allapot)
                 };
 
                 return Results.Ok(dto);
@@ -374,7 +376,7 @@ namespace ProjektLabor.Endpoints
 
                 string allapot = !key.Aktivalva
                     ? "Deaktivalt"
-                    : (lastMovement != null && (lastMovement.MozgasTipus == "Kiadás" || lastMovement.MozgasTipus == "Kiadas"))
+                    : (lastMovement != null && KeyMovementTypes.IsIssue(lastMovement.MozgasTipus))
                         ? "Kiadva"
                         : "Szabad";
 
@@ -576,5 +578,10 @@ namespace ProjektLabor.Endpoints
 
             return group;
         }
+
+        private static bool IsIssuedRoomUnknown(Kulcs key, Kulcsmozgas? lastMovement, string state) =>
+            state == "Kiadva" &&
+            key.Tipus == "Mesterkulcs" &&
+            lastMovement is { TeremId: null, FoglalasId: null };
     }
 }

@@ -2,6 +2,7 @@ using System.Data;
 using System.Globalization;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.KeyMovements;
 using ProjektLabor.DTOs.Keys;
@@ -36,7 +37,7 @@ namespace ProjektLabor.Endpoints
 
                 var recipients = db.Felhasznalok
                     .AsNoTracking()
-                    .Where(user => user.Role == RoleNames.Oktato);
+                    .Where(user => user.Role == RoleNames.Oktato && user.Aktiv);
                 if (key.Tipus == "Mesterkulcs")
                 {
                     recipients = recipients.Where(user => db.MesterkulcsJogosultsagok.Any(
@@ -87,9 +88,7 @@ namespace ProjektLabor.Endpoints
                     : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
                 await SqlServerLocking.AcquireAsync(db, $"key-issue:{request.KulcsId}");
 
-                var key = await db.Kulcsok
-                    .Include(k => k.Kulcsmozgasok)
-                    .FirstOrDefaultAsync(k => k.Id == request.KulcsId);
+                var key = await db.Kulcsok.FirstOrDefaultAsync(k => k.Id == request.KulcsId);
 
                 if (key is null)
                 {
@@ -101,20 +100,14 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = "Deaktivált kulcs nem adható ki." });
                 }
 
-                // Check if key is already issued
-                var lastMovement = key.Kulcsmozgasok?
-                    .OrderByDescending(m => m.Idopont)
-                    .ThenByDescending(m => m.Id)
-                    .FirstOrDefault();
-
-                if (lastMovement != null && (lastMovement.MozgasTipus == "Kiadás" || lastMovement.MozgasTipus == "Kiadas"))
+                var lastMovement = await GetLatestMovementAsync(db, key.Id);
+                if (lastMovement != null && KeyMovementTypes.IsIssue(lastMovement.MozgasTipus))
                 {
                     return Results.Conflict(new { message = "A kulcs jelenleg ki van adva, előbb vissza kell venni." });
                 }
 
-                int recipientId;
-                string recipientName;
-                string? recipientPinHash;
+                var now = timeProvider.GetUtcNow().UtcDateTime;
+                Felhasznalo recipient;
                 int issueRoomId;
                 if (request.FoglalasId.HasValue)
                 {
@@ -125,9 +118,20 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.NotFound(new { message = $"A(z) {request.FoglalasId.Value} azonosítójú foglalás nem található." });
                     }
-                    if (booking.Status != "Aktiv")
+                    if (booking.Status != BookingRules.ActiveStatus)
                     {
                         return Results.BadRequest(new { message = $"A foglalás nem aktív (jelenlegi státusz: {booking.Status})." });
+                    }
+                    if (now >= booking.EndTime)
+                    {
+                        return Results.BadRequest(new { message = "A foglalás már véget ért, ehhez nem adható ki kulcs." });
+                    }
+                    if (booking.StartTime - now > KeyIssueLeadTime)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            message = $"A kulcs legkorábban a foglalás kezdete előtt {KeyIssueLeadTime.TotalHours:0} órával adható ki."
+                        });
                     }
                     if (booking.Felhasznalo.Role != RoleNames.Oktato)
                     {
@@ -158,9 +162,7 @@ namespace ProjektLabor.Endpoints
                     }
 
                     issueRoomId = booking.TeremId;
-                    recipientId = booking.FelhasznaloId;
-                    recipientName = booking.Felhasznalo.Nev;
-                    recipientPinHash = booking.Felhasznalo.PinHash;
+                    recipient = booking.Felhasznalo;
                 }
                 else
                 {
@@ -172,14 +174,13 @@ namespace ProjektLabor.Endpoints
                         });
                     }
 
-                    var recipient = await db.Felhasznalok
-                        .Where(user => user.Id == request.AtvevoFelhasznaloId.Value)
-                        .Select(user => new { user.Id, user.Nev, user.Role, user.PinHash })
-                        .SingleOrDefaultAsync();
-                    if (recipient is null)
+                    var requestedRecipient = await db.Felhasznalok
+                        .SingleOrDefaultAsync(user => user.Id == request.AtvevoFelhasznaloId.Value);
+                    if (requestedRecipient is null)
                     {
                         return Results.NotFound(new { message = "A megadott átvevő nem található." });
                     }
+                    recipient = requestedRecipient;
                     if (recipient.Role != RoleNames.Oktato)
                     {
                         return Results.BadRequest(new { message = "Kulcs átvevője csak oktató lehet." });
@@ -201,18 +202,19 @@ namespace ProjektLabor.Endpoints
                     issueRoomId = key.Tipus == "Mesterkulcs"
                         ? request.TeremId!.Value
                         : key.TeremId;
-                    recipientId = recipient.Id;
-                    recipientName = recipient.Nev;
-                    recipientPinHash = recipient.PinHash;
                 }
 
-                if (string.IsNullOrWhiteSpace(recipientPinHash))
+                if (!recipient.Aktiv)
                 {
-                    return Results.Conflict(new { message = "Az átvevő még nem állított be PIN-kódot." });
+                    return Results.BadRequest(new { message = "Inaktivált felhasználó nem vehet át kulcsot." });
                 }
-                if (!BCrypt.Net.BCrypt.Verify(request.Pin, recipientPinHash))
+
+                var recipientId = recipient.Id;
+                var recipientName = recipient.Nev;
+                var pinResult = await CheckRecipientPinAsync(db, transaction, recipient, request.Pin, now);
+                if (pinResult is not null)
                 {
-                    return Results.Forbid();
+                    return pinResult;
                 }
                 if (key.Tipus == "Mesterkulcs" &&
                     !await db.MesterkulcsJogosultsagok.AnyAsync(access =>
@@ -221,13 +223,13 @@ namespace ProjektLabor.Endpoints
                     return Results.Forbid();
                 }
 
-                var now = timeProvider.GetUtcNow().UtcDateTime;
                 var movement = new Kulcsmozgas
                 {
                     KulcsId = key.Id,
                     FoglalasId = request.FoglalasId,
+                    TeremId = issueRoomId,
                     AtvevoFelhasznaloId = recipientId,
-                    MozgasTipus = "Kiadás",
+                    MozgasTipus = KeyMovementTypes.Issue,
                     Idopont = now,
                     OperátorId = operatorId.Value,
                     Megjegyzes = request.Megjegyzes ?? string.Empty,
@@ -324,21 +326,15 @@ namespace ProjektLabor.Endpoints
                     : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
                 await SqlServerLocking.AcquireAsync(db, $"key-issue:{request.KulcsId}");
 
-                var key = await db.Kulcsok
-                    .Include(k => k.Kulcsmozgasok)
-                    .FirstOrDefaultAsync(k => k.Id == request.KulcsId);
+                var key = await db.Kulcsok.FirstOrDefaultAsync(k => k.Id == request.KulcsId);
 
                 if (key is null)
                 {
                     return Results.NotFound(new { message = $"A(z) {request.KulcsId} azonosítójú kulcs nem található." });
                 }
 
-                var lastMovement = key.Kulcsmozgasok?
-                    .OrderByDescending(m => m.Idopont)
-                    .ThenByDescending(m => m.Id)
-                    .FirstOrDefault();
-
-                if (lastMovement == null || (lastMovement.MozgasTipus != "Kiadás" && lastMovement.MozgasTipus != "Kiadas"))
+                var lastMovement = await GetLatestMovementAsync(db, key.Id);
+                if (lastMovement == null || !KeyMovementTypes.IsIssue(lastMovement.MozgasTipus))
                 {
                     return Results.Conflict(new { message = "A kulcs jelenleg nincs kiadva, nem lehet visszavenni." });
                 }
@@ -356,26 +352,64 @@ namespace ProjektLabor.Endpoints
                 {
                     return Results.Conflict(new { message = "A kulcs korábbi átvevője nem azonosítható, ezért PIN-ellenőrzéssel nem vehető vissza." });
                 }
-                var recipientPinHash = await db.Felhasznalok
-                    .Where(user => user.Id == recipientId.Value)
-                    .Select(user => user.PinHash)
-                    .SingleOrDefaultAsync();
-                if (string.IsNullOrWhiteSpace(recipientPinHash))
+                var recipient = await db.Felhasznalok.SingleOrDefaultAsync(user => user.Id == recipientId.Value);
+                if (recipient is null)
                 {
-                    return Results.Conflict(new { message = "Az átvevő még nem állított be PIN-kódot." });
-                }
-                if (!BCrypt.Net.BCrypt.Verify(request.Pin, recipientPinHash))
-                {
-                    return Results.Forbid();
+                    return Results.Conflict(new { message = "A kulcs korábbi átvevője nem található." });
                 }
 
                 var now = timeProvider.GetUtcNow().UtcDateTime;
+                var pinResult = await CheckRecipientPinAsync(db, transaction, recipient, request.Pin, now);
+                if (pinResult is not null)
+                {
+                    return pinResult;
+                }
+
+                // A visszavétel ugyanarra a teremre vonatkozik, amelyre a kulcsot kiadták
+                // (mesterkulcsnál ez eltérhet a kulcs saját termétől).
+                var issuedRoomId = lastMovement.TeremId
+                    ?? (lastMovement.FoglalasId.HasValue
+                        ? await db.Foglalasok
+                            .Where(booking => booking.Id == lastMovement.FoglalasId.Value)
+                            .Select(booking => (int?)booking.TeremId)
+                            .SingleOrDefaultAsync()
+                        : null)
+                    ?? (key.Tipus == "Mesterkulcs" ? null : key.TeremId);
+
+                int returnRoomId;
+                if (issuedRoomId.HasValue)
+                {
+                    if (request.TeremId.HasValue && request.TeremId.Value != issuedRoomId.Value)
+                    {
+                        return Results.BadRequest(new { message = "A megadott terem nem egyezik a kiadás termével." });
+                    }
+                    returnRoomId = issuedRoomId.Value;
+                }
+                else
+                {
+                    // Régi adat: foglalás nélkül kiadott mesterkulcs, a kiadás terme nincs tárolva.
+                    if (!request.TeremId.HasValue)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            message = "A mesterkulcs kiadásának terme nem ismert, ezért a visszavételnél meg kell adni, melyik teremből hozták vissza.",
+                            teremMegadasaSzukseges = true
+                        });
+                    }
+                    if (!await db.KulcsTermek.AnyAsync(access =>
+                            access.KulcsId == key.Id && access.TeremId == request.TeremId.Value))
+                    {
+                        return Results.BadRequest(new { message = "A mesterkulcs nincs hozzárendelve a megadott teremhez." });
+                    }
+                    returnRoomId = request.TeremId.Value;
+                }
                 var returnMovement = new Kulcsmozgas
                 {
                     KulcsId = key.Id,
                     FoglalasId = lastMovement.FoglalasId,
+                    TeremId = returnRoomId,
                     AtvevoFelhasznaloId = recipientId,
-                    MozgasTipus = "Visszavétel",
+                    MozgasTipus = KeyMovementTypes.Return,
                     Idopont = now,
                     OperátorId = operatorId.Value,
                     Megjegyzes = request.Megjegyzes ?? string.Empty,
@@ -388,7 +422,7 @@ namespace ProjektLabor.Endpoints
                 var conditionTicket = AddConditionTicket(
                     db,
                     operatorId.Value,
-                    key.TeremId,
+                    returnRoomId,
                     returnMovement.SerulesLeiras,
                     now);
                 await db.SaveChangesAsync();
@@ -410,12 +444,7 @@ namespace ProjektLabor.Endpoints
                     await transaction.CommitAsync();
                 }
                 var opUser = await db.Felhasznalok.FindAsync(operatorId.Value);
-                var recipientName = recipientId.HasValue
-                    ? await db.Felhasznalok
-                        .Where(user => user.Id == recipientId.Value)
-                        .Select(user => user.Nev)
-                        .SingleOrDefaultAsync()
-                    : null;
+                var recipientName = recipient.Nev;
 
                 var result = new KeyMovementItemDto
                 {
@@ -601,51 +630,64 @@ namespace ProjektLabor.Endpoints
                     db, logger, cancellationToken);
                 var timeZone = AutomationParameterReader.GetTimeZone(configuration, logger);
 
-                // Load all active keys with their movements, room and bookings
-                var keysWithLastMovement = await db.Kulcsok
+                // Csak az aktív kulcsok legutolsó mozgását kérdezzük le, és abból a kiadásokat.
+                var latestIssues = await db.Kulcsmozgasok
                     .AsNoTracking()
-                    .Where(k => k.Aktivalva)
-                    .Include(k => k.Terem)
-                    .Include(k => k.Kulcsmozgasok)
-                        .ThenInclude(km => km.AtvevoFelhasznalo)
-                    .Include(k => k.Kulcsmozgasok)
-                        .ThenInclude(km => km.Foglalas)
-                            .ThenInclude(f => f!.Felhasznalo)
-                    .ToListAsync();
+                    .Where(movement =>
+                        movement.Kulcs.Aktivalva &&
+                        !db.Kulcsmozgasok.Any(newer =>
+                            newer.KulcsId == movement.KulcsId &&
+                            (newer.Idopont > movement.Idopont ||
+                             (newer.Idopont == movement.Idopont && newer.Id > movement.Id))))
+                    .Where(movement =>
+                        movement.MozgasTipus == KeyMovementTypes.Issue ||
+                        movement.MozgasTipus == KeyMovementTypes.LegacyIssue)
+                    .Select(movement => new
+                    {
+                        movement.KulcsId,
+                        KulcsSzam = movement.Kulcs.Szam,
+                        RoomId = movement.TeremId ?? movement.Kulcs.TeremId,
+                        movement.Idopont,
+                        movement.FoglalasId,
+                        FoglalasVege = movement.Foglalas != null ? (DateTime?)movement.Foglalas.EndTime : null,
+                        BirtokosNev = movement.AtvevoFelhasznalo != null
+                            ? movement.AtvevoFelhasznalo.Nev
+                            : movement.Foglalas != null ? movement.Foglalas.Felhasznalo.Nev : null,
+                        BirtokosEmail = movement.AtvevoFelhasznalo != null
+                            ? movement.AtvevoFelhasznalo.Email
+                            : movement.Foglalas != null ? movement.Foglalas.Felhasznalo.Email : null
+                    })
+                    .ToListAsync(cancellationToken);
+
+                var roomIds = latestIssues.Select(item => item.RoomId).Distinct().ToList();
+                var roomNames = await db.Termek
+                    .AsNoTracking()
+                    .Where(room => roomIds.Contains(room.Id))
+                    .ToDictionaryAsync(room => room.Id, room => room.Nev, cancellationToken);
 
                 var overdueList = new List<OverdueKeyDto>();
-
-                foreach (var key in keysWithLastMovement)
+                foreach (var last in latestIssues)
                 {
-                    var last = key.Kulcsmozgasok?
-                        .OrderByDescending(m => m.Idopont)
-                        .ThenByDescending(m => m.Id)
-                        .FirstOrDefault();
-
-                    if (last != null && (last.MozgasTipus == "Kiadás" || last.MozgasTipus == "Kiadas"))
+                    var deadline = KeyReturnDeadlineCalculator.GetDeadlineUtc(
+                        last.Idopont,
+                        last.FoglalasVege,
+                        closingTime,
+                        timeZone);
+                    if (now > deadline)
                     {
-                        var deadline = KeyReturnDeadlineCalculator.GetDeadlineUtc(
-                            last.Idopont,
-                            last.Foglalas?.EndTime,
-                            closingTime,
-                            timeZone);
-                        if (now > deadline)
+                        overdueList.Add(new OverdueKeyDto
                         {
-                            overdueList.Add(new OverdueKeyDto
-                            {
-                                KulcsId = key.Id,
-                                KulcsSzam = key.Szam,
-                                TeremId = key.TeremId,
-                                TeremNev = key.Terem?.Nev ?? string.Empty,
-                                KiadasIdeje = last.Idopont,
-                                FoglalasId = last.FoglalasId,
-                                FoglalasVége = last.Foglalas?.EndTime,
-                                BirtokosNev = last.AtvevoFelhasznalo?.Nev ?? last.Foglalas?.Felhasznalo?.Nev,
-                                BirtokosEmail = last.AtvevoFelhasznalo?.Email ?? last.Foglalas?.Felhasznalo?.Email,
-                                KésésPercekben = Math.Round((now - deadline).TotalMinutes, 1)
-                            });
-                        }
-
+                            KulcsId = last.KulcsId,
+                            KulcsSzam = last.KulcsSzam,
+                            TeremId = last.RoomId,
+                            TeremNev = roomNames.GetValueOrDefault(last.RoomId, string.Empty),
+                            KiadasIdeje = last.Idopont,
+                            FoglalasId = last.FoglalasId,
+                            FoglalasVége = last.FoglalasVege,
+                            BirtokosNev = last.BirtokosNev,
+                            BirtokosEmail = last.BirtokosEmail,
+                            KésésPercekben = Math.Round((now - deadline).TotalMinutes, 1)
+                        });
                     }
                 }
 
@@ -660,6 +702,69 @@ namespace ProjektLabor.Endpoints
             .WithOpenApi();
 
             return group;
+        }
+
+        // A kulcs legkorábban ennyivel a foglalás kezdete előtt vehető fel.
+        private static readonly TimeSpan KeyIssueLeadTime = TimeSpan.FromHours(2);
+        private const int MaxPinAttempts = 5;
+        private static readonly TimeSpan PinLockDuration = TimeSpan.FromMinutes(15);
+
+        private static Task<Kulcsmozgas?> GetLatestMovementAsync(AppDbContext db, int keyId) =>
+            db.Kulcsmozgasok
+                .Where(movement => movement.KulcsId == keyId)
+                .OrderByDescending(movement => movement.Idopont)
+                .ThenByDescending(movement => movement.Id)
+                .FirstOrDefaultAsync();
+
+        /// <summary>
+        /// Ellenőrzi az átvevő PIN-kódját. Sikeres ellenőrzésnél null-t ad vissza.
+        /// Hibás PIN esetén a próbálkozást elmenti (a tranzakciót is lezárja), és
+        /// <see cref="MaxPinAttempts"/> egymás utáni hiba után ideiglenesen zárolja a PIN-t.
+        /// </summary>
+        private static async Task<IResult?> CheckRecipientPinAsync(
+            AppDbContext db,
+            IDbContextTransaction? transaction,
+            Felhasznalo recipient,
+            string pin,
+            DateTime now)
+        {
+            if (string.IsNullOrWhiteSpace(recipient.PinHash))
+            {
+                return Results.Conflict(new { message = "Az átvevő még nem állított be PIN-kódot." });
+            }
+
+            if (recipient.PinZarolvaEddig > now)
+            {
+                return Results.Json(
+                    new
+                    {
+                        message = $"Túl sok hibás PIN-próbálkozás. A PIN {AppTime.ToLocal(recipient.PinZarolvaEddig.Value):HH:mm}-ig zárolva van."
+                    },
+                    statusCode: StatusCodes.Status429TooManyRequests);
+            }
+
+            if (BCrypt.Net.BCrypt.Verify(pin, recipient.PinHash))
+            {
+                // A nullázás a művelet többi változásával együtt mentődik.
+                recipient.PinHibasProbalkozasok = 0;
+                recipient.PinZarolvaEddig = null;
+                return null;
+            }
+
+            recipient.PinHibasProbalkozasok++;
+            if (recipient.PinHibasProbalkozasok >= MaxPinAttempts)
+            {
+                recipient.PinHibasProbalkozasok = 0;
+                recipient.PinZarolvaEddig = now.Add(PinLockDuration);
+            }
+
+            await db.SaveChangesAsync();
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync();
+            }
+
+            return Results.Forbid();
         }
 
         private static int? GetCallerId(ClaimsPrincipal caller)

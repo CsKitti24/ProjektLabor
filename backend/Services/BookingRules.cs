@@ -7,6 +7,8 @@ namespace ProjektLabor.Services;
 
 public static class BookingRules
 {
+    public const string ActiveStatus = "Aktiv";
+    public const string DoneStatus = "Kesz";
     public const string CancelledStatus = "Megszuntetve";
     public const string NoShowStatus = "NoShow";
 

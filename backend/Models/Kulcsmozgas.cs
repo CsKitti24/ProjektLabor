@@ -17,6 +17,9 @@ namespace ProjektLabor.Models
         public int? FoglalasId { get; set; }
         public Foglalas? Foglalas { get; set; }
 
+        // A terem, amelyre a kulcsot kiadták (mesterkulcsnál ez eltérhet a kulcs saját termétől).
+        public int? TeremId { get; set; }
+
         public int? AtvevoFelhasznaloId { get; set; }
         public Felhasznalo? AtvevoFelhasznalo { get; set; }
 

@@ -139,6 +139,9 @@ namespace backend.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("Aktiv")
+                        .HasColumnType("bit");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -160,6 +163,12 @@ namespace backend.Migrations
                     b.Property<string>("PinHash")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
+
+                    b.Property<int>("PinHibasProbalkozasok")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("PinZarolvaEddig")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Role")
                         .IsRequired()
@@ -395,6 +404,9 @@ namespace backend.Migrations
                     b.Property<string>("TeremAllapot")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("TeremId")
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 

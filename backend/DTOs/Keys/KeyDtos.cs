@@ -11,6 +11,10 @@ namespace ProjektLabor.DTOs.Keys
         public int TeremId { get; set; }
         public string TeremNev { get; set; } = string.Empty;
         public string JelenlegiAllapot { get; set; } = string.Empty; // Szabad | Kiadva | Deaktivalt
+
+        // Igaz, ha a kulcs egy régi, foglalás nélküli mesterkulcs-kiadás miatt van kint, és a kiadás
+        // terme nem ismert. Ilyenkor visszavételkor meg kell adni a termet.
+        public bool KiadottTeremIsmeretlen { get; set; }
     }
 
     public class CreateKeyRequestDto

@@ -9,6 +9,12 @@ interface KeyItem {
   teremNev?: string
   jelenlegiAllapot?: string
   aktivalva?: boolean
+  kiadottTeremIsmeretlen?: boolean
+}
+
+interface KeyRoom {
+  id: number
+  nev: string
 }
 
 export default function KeyReturnPage() {
@@ -18,6 +24,9 @@ export default function KeyReturnPage() {
   const [teremAllapot, setTeremAllapot] = useState('')
   const [serulesLeiras, setSerulesLeiras] = useState('')
   const [megjegyzes, setMegjegyzes] = useState('')
+  // Régi, foglalás nélküli mesterkulcs-kiadásnál a kiadás terme nem ismert: ilyenkor a portás választja ki.
+  const [roomsByKey, setRoomsByKey] = useState<Record<string, KeyRoom[]>>({})
+  const [returnRoomId, setReturnRoomId] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -45,10 +54,38 @@ export default function KeyReturnPage() {
     fetchIssuedKeys()
   }, [])
 
+  const selectedKey = issuedKeys.find((k) => String(k.id) === keyId)
+  const needsRoom = Boolean(selectedKey?.kiadottTeremIsmeretlen)
+
+  const roomOptions = roomsByKey[keyId] ?? []
+
+  useEffect(() => {
+    if (!needsRoom || !keyId || roomsByKey[keyId]) {
+      return
+    }
+
+    let ignore = false
+    client
+      .get<KeyRoom[]>(`/keys/${keyId}/rooms`)
+      .then((r) => {
+        if (!ignore) setRoomsByKey((prev) => ({ ...prev, [keyId]: r.data }))
+      })
+      .catch(() => {
+        if (!ignore) setError('Nem sikerült betölteni a mesterkulcshoz rendelt termeket.')
+      })
+    return () => {
+      ignore = true
+    }
+  }, [keyId, needsRoom, roomsByKey])
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (!keyId || !pin || !teremAllapot.trim()) {
       setError('Válaszd ki a kulcsot, add meg az átvevő PIN-kódját és a terem állapotát.')
+      return
+    }
+    if (needsRoom && !returnRoomId) {
+      setError('Válaszd ki, melyik teremből hozták vissza a mesterkulcsot.')
       return
     }
 
@@ -58,6 +95,7 @@ export default function KeyReturnPage() {
     try {
       await client.post('/key-movements/return', {
         kulcsId: Number(keyId),
+        teremId: needsRoom ? Number(returnRoomId) : undefined,
         pin,
         teremAllapot: teremAllapot.trim(),
         serulesLeiras: serulesLeiras.trim() || undefined,
@@ -69,6 +107,7 @@ export default function KeyReturnPage() {
       setTeremAllapot('')
       setSerulesLeiras('')
       setMegjegyzes('')
+      setReturnRoomId('')
       fetchIssuedKeys()
       setTimeout(() => setSuccess(''), 4000)
     } catch (err: unknown) {
@@ -115,7 +154,10 @@ export default function KeyReturnPage() {
               id="return-key"
               className="form-select"
               value={keyId}
-              onChange={(e) => setKeyId(e.target.value)}
+              onChange={(e) => {
+                setKeyId(e.target.value)
+                setReturnRoomId('')
+              }}
               required
             >
               {issuedKeys.length === 0 ? (
@@ -129,6 +171,29 @@ export default function KeyReturnPage() {
               )}
             </select>
           </div>
+
+          {needsRoom && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="return-room">
+                Melyik teremből hozták vissza? *
+              </label>
+              <select
+                id="return-room"
+                className="form-select"
+                value={returnRoomId}
+                onChange={(e) => setReturnRoomId(e.target.value)}
+                required
+              >
+                <option value="">Válassz termet…</option>
+                {roomOptions.map((room) => (
+                  <option key={room.id} value={room.id}>{room.nev}</option>
+                ))}
+              </select>
+              <p style={{ fontSize: 12, color: 'var(--color-gray-500)', marginTop: 4 }}>
+                Ezt a mesterkulcsot még a terem rögzítése előtt adták ki, ezért a kiadás terme nem ismert.
+              </p>
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label" htmlFor="return-pin">Az átvevő PIN-kódja *</label>
