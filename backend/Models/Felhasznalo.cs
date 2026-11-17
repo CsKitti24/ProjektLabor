@@ -24,8 +24,6 @@ namespace ProjektLabor.Models
         [Required, MaxLength(100)]
         public string Nev { get; set; } = string.Empty;
 
-        public DateTime? SzuletesiDatum { get; set; }
-
         [Required]
         public string Role { get; set; } = string.Empty;
 

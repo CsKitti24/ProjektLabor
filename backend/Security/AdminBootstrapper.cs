@@ -9,14 +9,6 @@ namespace ProjektLabor.Security;
 
 public static partial class AdminBootstrapper
 {
-    private static readonly DemoUserDefinition[] DemoUsers =
-    [
-        new("demo-oktato", "Oktato", "Demo Oktato"),
-        new("demo-portas", "Portas", "Demo Portas"),
-        new("demo-admin", "Adminisztrator", "Demo Adminisztrator"),
-        new("demo-igazgato", "UzemeltetesiIgazgato", "Demo Uzemeltetesi Igazgato")
-    ];
-
     public static async Task InitializeAsync(
         AppDbContext db,
         IConfiguration configuration,
@@ -41,43 +33,6 @@ public static partial class AdminBootstrapper
             await db.SaveChangesAsync(cancellationToken);
             logger.LogInformation("Initial administrator account created.");
         }
-
-        // Bemutatóhoz használt demófelhasználók: csak kifejezett bekapcsolásra (DemoUsers:Enabled=true)
-        // és csak akkor jönnek létre, ha a szerepkörhöz jelszó is meg van adva.
-        if (!configuration.GetValue<bool>("DemoUsers:Enabled"))
-        {
-            return;
-        }
-
-        foreach (var demoUser in DemoUsers)
-        {
-            var password = configuration[$"DemoUsers:{demoUser.ConfigurationKey}:Password"];
-            if (string.IsNullOrWhiteSpace(password))
-            {
-                logger.LogWarning(
-                    "Demo user {Username} was not seeded because its password is not configured.",
-                    demoUser.Username);
-                continue;
-            }
-
-            ValidateCredentials(demoUser.Username, password, $"DemoUsers:{demoUser.ConfigurationKey}");
-            if (await db.Felhasznalok.AnyAsync(user => user.Username == demoUser.Username, cancellationToken))
-            {
-                continue;
-            }
-
-            db.Felhasznalok.Add(new Felhasznalo
-            {
-                Username = demoUser.Username,
-                Email = $"{demoUser.Username}@localhost",
-                JelszoHash = BCryptHasher.HashPassword(password, workFactor: 12),
-                Nev = demoUser.DisplayName,
-                Role = demoUser.Role
-            });
-        }
-
-        await db.SaveChangesAsync(cancellationToken);
-        logger.LogInformation("Configured demo users have been seeded idempotently.");
     }
 
     private static void ValidateCredentials(string? username, string? password, string configurationKey)
@@ -96,16 +51,4 @@ public static partial class AdminBootstrapper
 
     [GeneratedRegex("^[A-Za-z0-9._-]+$", RegexOptions.CultureInvariant)]
     private static partial Regex UsernamePattern();
-
-    private sealed record DemoUserDefinition(string Username, string Role, string DisplayName)
-    {
-        public string ConfigurationKey => Role switch
-        {
-            "Oktato" => "Oktato",
-            "Portas" => "Portas",
-            "Adminisztrator" => "Adminisztrator",
-            "UzemeltetesiIgazgato" => "UzemeltetesiIgazgato",
-            _ => throw new InvalidOperationException($"Unsupported demo role: {Role}")
-        };
-    }
 }

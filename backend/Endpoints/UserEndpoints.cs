@@ -57,7 +57,6 @@ namespace ProjektLabor.Endpoints
                         Email = u.Email,
                         Role = u.Role,
                         Aktiv = u.Aktiv,
-                        SzuletesiDatum = u.SzuletesiDatum,
                         CreatedAt = u.CreatedAt,
                         UpdatedAt = u.UpdatedAt
                     })
@@ -92,7 +91,6 @@ namespace ProjektLabor.Endpoints
                         Email = u.Email,
                         Role = u.Role,
                         Aktiv = u.Aktiv,
-                        SzuletesiDatum = u.SzuletesiDatum,
                         CreatedAt = u.CreatedAt,
                         UpdatedAt = u.UpdatedAt
                     })
@@ -160,7 +158,6 @@ namespace ProjektLabor.Endpoints
                     Email = request.Email.Trim().ToLowerInvariant(),
                     Nev = request.Nev.Trim(),
                     Role = canonicalRole,
-                    SzuletesiDatum = request.SzuletesiDatum,
                     JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.Jelszo, workFactor: 12),
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
@@ -184,7 +181,6 @@ namespace ProjektLabor.Endpoints
                     Email = user.Email,
                     Role = user.Role,
                     Aktiv = user.Aktiv,
-                    SzuletesiDatum = user.SzuletesiDatum,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
                 };
@@ -247,12 +243,6 @@ namespace ProjektLabor.Endpoints
                     changes.Add("Jelszo modosult");
                 }
 
-                if (request.SzuletesiDatum.HasValue && request.SzuletesiDatum != user.SzuletesiDatum)
-                {
-                    changes.Add($"SzuletesiDatum: '{user.SzuletesiDatum}' -> '{request.SzuletesiDatum}'");
-                    user.SzuletesiDatum = request.SzuletesiDatum;
-                }
-
                 if (changes.Count > 0)
                 {
                     user.UpdatedAt = DateTime.UtcNow;
@@ -274,7 +264,6 @@ namespace ProjektLabor.Endpoints
                     Email = user.Email,
                     Role = user.Role,
                     Aktiv = user.Aktiv,
-                    SzuletesiDatum = user.SzuletesiDatum,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
                 };
@@ -462,7 +451,6 @@ namespace ProjektLabor.Endpoints
                     Email = user.Email,
                     Role = user.Role,
                     Aktiv = user.Aktiv,
-                    SzuletesiDatum = user.SzuletesiDatum,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
                 });

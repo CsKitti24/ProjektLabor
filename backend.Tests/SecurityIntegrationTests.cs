@@ -436,56 +436,6 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
-    public async Task DemoUserBootstrap_CreatesBcryptAccountsOnce_AndNeverOverwritesExistingUsers()
-    {
-        var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase($"DemoBootstrapTestDb_{Guid.NewGuid():N}")
-            .Options;
-        await using var db = new AppDbContext(options);
-        const string existingPassword = "Existing-account-password-2026";
-        var existing = new Felhasznalo
-        {
-            Username = "demo-oktato",
-            Email = "demo-oktato@localhost",
-            Nev = "Meglévő fiók",
-            Role = RoleNames.Oktato,
-            JelszoHash = BCryptHasher.HashPassword(existingPassword)
-        };
-        db.Felhasznalok.Add(existing);
-        await db.SaveChangesAsync();
-
-        var settings = new Dictionary<string, string?>
-        {
-            ["DemoUsers:Enabled"] = "true"
-        };
-        foreach (var configKey in new[] { "Oktato", "Portas", "Adminisztrator", "UzemeltetesiIgazgato" })
-        {
-            settings[$"DemoUsers:{configKey}:Password"] = $"Demo-{configKey}-password-2026";
-        }
-
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
-        await AdminBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
-        await AdminBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
-
-        var accounts = await db.Felhasznalok.OrderBy(user => user.Username).ToListAsync();
-        Assert.Equal(4, accounts.Count);
-        Assert.True(BCryptHasher.Verify(existingPassword, existing.JelszoHash));
-
-        foreach (var (configKey, role) in new[]
-                 {
-                     ("Portas", RoleNames.Portas),
-                     ("Adminisztrator", RoleNames.Adminisztrator),
-                     ("UzemeltetesiIgazgato", RoleNames.UzemeltetesiIgazgato)
-                 })
-        {
-            var account = Assert.Single(accounts, user => user.Role == role);
-            var password = settings[$"DemoUsers:{configKey}:Password"]!;
-            Assert.True(BCryptHasher.Verify(password, account.JelszoHash));
-            Assert.NotEqual(password, account.JelszoHash);
-        }
-    }
-
-    [Fact]
     public void JwtConfiguration_UsesDevelopmentOnlyValues_AndRejectsMissingOrShortSigningKeys()
     {
         var repositoryRoot = FindRepositoryRoot();

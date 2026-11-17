@@ -394,8 +394,7 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
   "email":          "string (kötelező, max 100, egyedi, email formátum)",
   "jelszo":         "string (kötelező, min 8 karakter)",
   "nev":            "string (kötelező, max 100)",
-  "role":           "string (kötelező: Oktato|Portas|Adminisztrator|UzemeltetesiIgazgato)",
-  "szuletesiDatum": "date (opcionális, ISO 8601)"
+  "role":           "string (kötelező: Oktato|Portas|Adminisztrator|UzemeltetesiIgazgato)"
 }
 ```
 
@@ -429,8 +428,7 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 {
   "email":          "string (opcionális, email formátum)",
   "nev":            "string (opcionális, max 100)",
-  "ujJelszo":       "string (opcionális, min 8 karakter)",
-  "szuletesiDatum": "date (opcionális)"
+  "ujJelszo":       "string (opcionális, min 8 karakter)"
 }
 ```
 
@@ -1293,7 +1291,6 @@ public class CreateUserRequestDto
     public string Nev { get; set; } = string.Empty;
     [Required]
     public string Role { get; set; } = string.Empty;
-    public DateTime? SzuletesiDatum { get; set; }
 }
 
 // DTOs/Users/UserDto.cs

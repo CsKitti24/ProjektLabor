@@ -58,7 +58,6 @@ erDiagram
         string JelszoHash
         string PinHash
         string Nev
-        date SzuletesiDatum
         string Role
         datetime CreatedAt
         datetime UpdatedAt
@@ -241,8 +240,21 @@ A `.env` fájlban add meg a kulcsokat:
 - `MSSQL_SA_PASSWORD`: Erős adatbázis rendszergazda jelszó.
 - `JWT_SIGNING_KEY`: Legalább 32 bájtos véletlenszerű kulcs (pl. `openssl rand -base64 48`).
 - `BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD`: Az induló adminisztrátori fiók adatai.
-- `DEMO_USERS_ENABLED`: `true` esetén létrejönnek a bemutatóhoz használt demófiókok (`demo-oktato`, `demo-portas`, `demo-admin`, `demo-igazgato`) a `DEMO_*_PASSWORD` jelszavakkal, és a bejelentkezési oldalon megjelennek a gyorskitöltő gombok. A jelszavak nyilvánosak, ezért internetről elérhető telepítésnél állítsd `false`-ra.
 - *(Opcionális)* `CORS_ALLOWED_ORIGINS`: vesszővel elválasztott originök, ha a frontendet nem a beépített proxyn keresztül éred el.
+
+### Közös kezdő felhasználók
+
+A migrációk minden adatbázisba felveszik az alábbi fiókokat (`SeedRoleUsersAndReliabilitySample`):
+
+| Felhasználónév | Jelszó | Szerepkör |
+| :--- | :--- | :--- |
+| `admin` | `Adminjelszo1!` | Adminisztrátor |
+| `oktato` | `Oktatojelszo1!` | Oktató |
+| `portas` | `Portasjelszo1!` | Portás |
+| `igazgato` | `Igazgatojelszo1!` | Üzemeltetési igazgató |
+
+Az `oktato` fiók kulcsátvételi PIN-je `4729`.
+A jelszavak ismertek, ezért internetről elérhető telepítés előtt változtasd meg őket.
 
 ### 2. Alkalmazás indítása konténerben
 ```bash

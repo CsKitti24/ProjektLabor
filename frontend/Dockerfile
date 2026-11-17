@@ -7,9 +7,6 @@ RUN npm ci
 
 COPY . .
 
-# A bejelentkezési oldal demó gyorsgombjai csak akkor jelennek meg, ha ez "true".
-ARG VITE_DEMO_ACCOUNTS=false
-ENV VITE_DEMO_ACCOUNTS=$VITE_DEMO_ACCOUNTS
 RUN npm run build
 
 # --- Kiszolgálás: statikus fájlok nginx-szel, az /api kérések továbbítása a backendre ---
