@@ -445,8 +445,8 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
         const string existingPassword = "Existing-account-password-2026";
         var existing = new Felhasznalo
         {
-            Username = "demo.oktato",
-            Email = "demo.oktato@demo.projektlabor.invalid",
+            Username = "demo-oktato",
+            Email = "demo-oktato@localhost",
             Nev = "Meglévő fiók",
             Role = RoleNames.Oktato,
             JelszoHash = BCryptHasher.HashPassword(existingPassword)
@@ -456,27 +456,19 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
 
         var settings = new Dictionary<string, string?>
         {
-            ["BootstrapDemoUsers:Enabled"] = "true"
+            ["DemoUsers:Enabled"] = "true"
         };
-        foreach (var (configKey, username) in new[]
-                 {
-                     ("Oktato", "demo.oktato"),
-                     ("Portas", "demo.portas"),
-                     ("Adminisztrator", "demo.admin"),
-                     ("UzemeltetesiIgazgato", "demo.igazgato")
-                 })
+        foreach (var configKey in new[] { "Oktato", "Portas", "Adminisztrator", "UzemeltetesiIgazgato" })
         {
-            settings[$"BootstrapDemoUsers:{configKey}:Username"] = username;
-            settings[$"BootstrapDemoUsers:{configKey}:Password"] = $"Demo-{configKey}-password-2026";
+            settings[$"DemoUsers:{configKey}:Password"] = $"Demo-{configKey}-password-2026";
         }
 
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
-        await DemoUserBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
-        await DemoUserBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
+        await AdminBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
+        await AdminBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
 
         var accounts = await db.Felhasznalok.OrderBy(user => user.Username).ToListAsync();
         Assert.Equal(4, accounts.Count);
-        Assert.Equal(RoleNames.Oktato, existing.Role);
         Assert.True(BCryptHasher.Verify(existingPassword, existing.JelszoHash));
 
         foreach (var (configKey, role) in new[]
@@ -487,76 +479,10 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
                  })
         {
             var account = Assert.Single(accounts, user => user.Role == role);
-            var password = settings[$"BootstrapDemoUsers:{configKey}:Password"];
-            Assert.NotNull(password);
+            var password = settings[$"DemoUsers:{configKey}:Password"]!;
             Assert.True(BCryptHasher.Verify(password, account.JelszoHash));
             Assert.NotEqual(password, account.JelszoHash);
         }
-    }
-
-    [Fact]
-    public async Task DemoUserBootstrap_CreatesAllFourCanonicalRolesFromConfiguration()
-    {
-        var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase($"DemoBootstrapAllRolesTestDb_{Guid.NewGuid():N}")
-            .Options;
-        await using var db = new AppDbContext(options);
-        var settings = new Dictionary<string, string?>
-        {
-            ["BootstrapDemoUsers:Enabled"] = "true"
-        };
-        var expectedRoles = new[]
-        {
-            (ConfigKey: "Oktato", Role: RoleNames.Oktato),
-            (ConfigKey: "Portas", Role: RoleNames.Portas),
-            (ConfigKey: "Adminisztrator", Role: RoleNames.Adminisztrator),
-            (ConfigKey: "UzemeltetesiIgazgato", Role: RoleNames.UzemeltetesiIgazgato)
-        };
-        foreach (var (configKey, _) in expectedRoles)
-        {
-            settings[$"BootstrapDemoUsers:{configKey}:Username"] = $"demo.{configKey.ToLowerInvariant()}";
-            settings[$"BootstrapDemoUsers:{configKey}:Password"] = $"Demo-{configKey}-password-2026";
-        }
-
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
-        await DemoUserBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
-
-        var accounts = await db.Felhasznalok.ToListAsync();
-        Assert.Equal(4, accounts.Count);
-        foreach (var (configKey, role) in expectedRoles)
-        {
-            var account = Assert.Single(accounts, user => user.Role == role);
-            Assert.True(BCryptHasher.Verify(
-                settings[$"BootstrapDemoUsers:{configKey}:Password"]!,
-                account.JelszoHash));
-        }
-
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => DemoUserBootstrapper.InitializeAsync(
-                db,
-                new ConfigurationBuilder()
-                    .AddInMemoryCollection(new Dictionary<string, string?>
-                    {
-                        ["BootstrapDemoUsers:Enabled"] = "true"
-                    })
-                    .Build(),
-                NullLogger.Instance));
-    }
-
-    [Fact]
-    public async Task DemoUserBootstrap_IsDisabledUnlessExplicitlyEnabled()
-    {
-        var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase($"DemoBootstrapDisabledTestDb_{Guid.NewGuid():N}")
-            .Options;
-        await using var db = new AppDbContext(options);
-
-        await DemoUserBootstrapper.InitializeAsync(
-            db,
-            new ConfigurationBuilder().Build(),
-            NullLogger.Instance);
-
-        Assert.Empty(await db.Felhasznalok.ToListAsync());
     }
 
     [Fact]

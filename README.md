@@ -241,7 +241,8 @@ A `.env` fájlban add meg a kulcsokat:
 - `MSSQL_SA_PASSWORD`: Erős adatbázis rendszergazda jelszó.
 - `JWT_SIGNING_KEY`: Legalább 32 bájtos véletlenszerű kulcs (pl. `openssl rand -base64 48`).
 - `BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD`: Az induló adminisztrátori fiók adatai.
-- *(Opcionális)* `BOOTSTRAP_DEMO_USERS_ENABLED=true`: Automatikus tesztfelhasználók generálása a 4 szerepkörhöz.
+- `DEMO_USERS_ENABLED`: `true` esetén létrejönnek a bemutatóhoz használt demófiókok (`demo-oktato`, `demo-portas`, `demo-admin`, `demo-igazgato`) a `DEMO_*_PASSWORD` jelszavakkal, és a bejelentkezési oldalon megjelennek a gyorskitöltő gombok. A jelszavak nyilvánosak, ezért internetről elérhető telepítésnél állítsd `false`-ra.
+- *(Opcionális)* `CORS_ALLOWED_ORIGINS`: vesszővel elválasztott originök, ha a frontendet nem a beépített proxyn keresztül éred el.
 
 ### 2. Alkalmazás indítása konténerben
 ```bash
@@ -258,7 +259,7 @@ curl http://localhost:8000/api/health
 
 | Szolgáltatás | Elérési cím | Leírás |
 | :--- | :--- | :--- |
-| **Frontend UI** | `http://localhost:3000` | Webes felhasználói felület és bejelentkezés |
+| **Frontend UI** | `http://localhost:3000` | Webes felület (nginx szolgálja ki az éles buildet, az `/api` kéréseket továbbítja a backendre) |
 | **Backend REST API** | `http://localhost:8000` | Fő API kiszolgáló |
 | **Swagger UI** | `http://localhost:8000/swagger` | API dokumentáció (Development környezetben) |
 | **MSSQL Adatbázis** | `localhost:1433` | SQL Server közvetlen elérés (DBeaver, Azure Data Studio stb.) |
@@ -291,7 +292,8 @@ dotnet test ProjektLabor.sln --configuration Release \
 
 Az SQL Server-integrációs tesztek kizárólag erre elkülönített teszt SQL
 Server-példányon futtathatók. A teszt ideiglenes `ProjektLaborIntegration_*`
-adatbázisokat hoz létre és töröl.
+adatbázisokat hoz létre és töröl. Ha a `SQLSERVER_TEST_CONNECTION` környezeti
+változó nincs beállítva, ezek a tesztek kihagyásra kerülnek (nem buknak el).
 
 ### Frontend fejlesztés (Node.js 20+)
 ```bash

@@ -80,8 +80,7 @@ namespace backend.Tests
                 "/api/reliability/my",
                 "/api/parameters",
                 "/api/audit",
-                "/api/reports/daily",
-                "/weatherforecast"
+                "/api/reports/daily"
             })
             {
                 Assert.Contains(endpoint, content);

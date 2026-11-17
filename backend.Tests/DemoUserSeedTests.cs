@@ -68,6 +68,21 @@ public sealed class DemoUserSeedTests
         }
     }
 
+    [Fact]
+    public async Task DemoUsers_AreNotSeeded_UnlessExplicitlyEnabled()
+    {
+        await using var db = CreateContext();
+        var configuration = new ConfigurationBuilder()
+            .AddConfiguration(CreateConfiguration())
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["DemoUsers:Enabled"] = "false" })
+            .Build();
+
+        await AdminBootstrapper.InitializeAsync(db, configuration, NullLogger.Instance);
+
+        var user = Assert.Single(await db.Felhasznalok.ToListAsync());
+        Assert.Equal("bootstrap-admin", user.Username);
+    }
+
     private static AppDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -83,6 +98,7 @@ public sealed class DemoUserSeedTests
             {
                 ["BootstrapAdmin:Username"] = "bootstrap-admin",
                 ["BootstrapAdmin:Password"] = "BootstrapPassword2026!",
+                ["DemoUsers:Enabled"] = "true",
                 ["DemoUsers:Oktato:Password"] = "DemoOktato2026!",
                 ["DemoUsers:Portas:Password"] = "DemoPortas2026!",
                 ["DemoUsers:Adminisztrator:Password"] = "DemoAdmin2026!",

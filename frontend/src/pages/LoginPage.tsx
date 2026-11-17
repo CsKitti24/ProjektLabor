@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Lock, User, AlertCircle, ArrowRight, ArrowLeft } from 'lucide-react'
 import { useAuth, type UserRole } from '../auth/AuthContext'
+import { DEMO_ACCOUNTS, SHOW_DEMO_ACCOUNTS } from '../auth/demoAccounts'
 
 function getDashboardPath(role: UserRole): string {
   switch (role) {
@@ -17,12 +18,6 @@ function getDashboardPath(role: UserRole): string {
   }
 }
 
-const DEMO_ACCOUNTS = [
-  { label: 'Oktató', username: 'demo-oktato', pass: 'DemoOktato2026!' },
-  { label: 'Portás', username: 'demo-portas', pass: 'DemoPortas2026!' },
-  { label: 'Adminisztrátor', username: 'demo-admin', pass: 'DemoAdmin2026!' },
-  { label: 'Igazgató', username: 'demo-igazgato', pass: 'DemoIgazgato2026!' },
-]
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -141,22 +136,24 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="demo-selector-container">
-          <div className="demo-selector-title">Gyorskitöltés a bemutatóhoz:</div>
-          <div className="demo-selector-buttons">
-            {DEMO_ACCOUNTS.map((acc) => (
-              <button
-                key={acc.username}
-                type="button"
-                className="demo-pill-btn"
-                onClick={() => handleSelectDemo(acc.username, acc.pass)}
-                title={`Kiválasztás: ${acc.username}`}
-              >
-                {acc.label}
-              </button>
-            ))}
+        {SHOW_DEMO_ACCOUNTS && (
+          <div className="demo-selector-container">
+            <div className="demo-selector-title">Gyorskitöltés a bemutatóhoz:</div>
+            <div className="demo-selector-buttons">
+              {DEMO_ACCOUNTS.map((acc) => (
+                <button
+                  key={acc.username}
+                  type="button"
+                  className="demo-pill-btn"
+                  onClick={() => handleSelectDemo(acc.username, acc.pass)}
+                  title={`Kiválasztás: ${acc.username}`}
+                >
+                  {acc.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <style>{`
