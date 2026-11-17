@@ -195,6 +195,64 @@ public class BackgroundAutomationTests
     }
 
     [Fact]
+    public async Task NoShow_DoesNotMarkNoShow_WhenOwnerTookRoomKeyWithoutBookingLink_EvenAfterReturn()
+    {
+        await using var db = CreateDb();
+        var startTime = new DateTime(2026, 4, 4, 10, 0, 0, DateTimeKind.Utc);
+        var (booking, operatorUser) = await SeedBookingAsync(db, "Aktiv", startTime);
+        var key = await AddKeyAsync(db, booking.TeremId, "NS-UNLINKED");
+        // A portás foglalás nélkül adta ki a kulcsot a foglaló oktatónak, aki már vissza is hozta.
+        await AddMovementAsync(db, key.Id, null, operatorUser.Id, "Kiadás", startTime.AddMinutes(-5), booking.FelhasznaloId);
+        await AddMovementAsync(db, key.Id, null, operatorUser.Id, "Visszavétel", startTime.AddMinutes(70), booking.FelhasznaloId);
+
+        var processor = new NoShowProcessor(db, NullLogger<NoShowProcessor>.Instance);
+
+        Assert.Equal(0, await processor.ProcessAsync(startTime.AddMinutes(75), default));
+        Assert.Equal("Aktiv", booking.Status);
+    }
+
+    [Fact]
+    public async Task BookingCompletion_MarksFinishedBookingWithKeyPickupAsDone_Once()
+    {
+        await using var db = CreateDb();
+        var startTime = new DateTime(2026, 4, 4, 10, 0, 0, DateTimeKind.Utc);
+        var (withPickup, operatorUser) = await SeedBookingAsync(db, "Aktiv", startTime);
+        var (withoutPickup, _) = await SeedBookingAsync(db, "Aktiv", startTime);
+        var key = await AddKeyAsync(db, withPickup.TeremId, "BC-1");
+        await AddMovementAsync(db, key.Id, withPickup.Id, operatorUser.Id, "Kiadás", startTime.AddMinutes(-5), withPickup.FelhasznaloId);
+
+        var processor = new BookingCompletionProcessor(db, NullLogger<BookingCompletionProcessor>.Instance);
+
+        Assert.Equal(0, await processor.ProcessAsync(withPickup.EndTime.AddMinutes(-1), default));
+        Assert.Equal(1, await processor.ProcessAsync(withPickup.EndTime, default));
+        Assert.Equal(0, await processor.ProcessAsync(withPickup.EndTime.AddMinutes(1), default));
+
+        Assert.Equal("Kesz", withPickup.Status);
+        Assert.Equal("Aktiv", withoutPickup.Status);
+        Assert.Single(await db.AuditLogok.Where(entry => entry.AutomationKey == $"BookingCompleted:{withPickup.Id}").ToListAsync());
+    }
+
+    [Fact]
+    public async Task DailyClosing_StillPenalizesKeyThatIsOutForLongerThanTheProcessingWindow()
+    {
+        await using var db = CreateDb();
+        var (booking, operatorUser) = await SeedBookingAsync(
+            db, "Aktiv", new DateTime(2026, 4, 4, 8, 0, 0, DateTimeKind.Utc));
+        var key = await AddKeyAsync(db, booking.TeremId, "DC-OLD");
+        await AddMovementAsync(db, key.Id, booking.Id, operatorUser.Id, "Kiadás", new DateTime(2026, 4, 4, 9, 0, 0, DateTimeKind.Utc));
+        var processor = new DailyKeyClosingProcessor(
+            db,
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Automation:TimeZoneId"] = "UTC" })
+                .Build(),
+            NullLogger<DailyKeyClosingProcessor>.Instance);
+
+        // Három héttel később fut először (pl. leállás után): a kulcs még kint van, így pontot kap.
+        Assert.Equal(1, await processor.ProcessAsync(new DateTime(2026, 4, 25, 12, 0, 0, DateTimeKind.Utc), default));
+        Assert.Equal(0, await processor.ProcessAsync(new DateTime(2026, 4, 25, 12, 1, 0, DateTimeKind.Utc), default));
+    }
+
+    [Fact]
     public async Task BookingExpiryNotification_IsCreatedOnceForActiveBooking()
     {
         await using var db = CreateDb();

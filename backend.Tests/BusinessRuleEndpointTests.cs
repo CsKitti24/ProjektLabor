@@ -128,6 +128,52 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
     }
 
     [Fact]
+    public async Task IssueKey_WithoutBooking_IsLinkedToRecipientsCurrentBookingForThatRoom()
+    {
+        var (porter, _) = await CreateUserClientAsync(RoleNames.Portas);
+        var instructorId = await SeedInstructorWithPinAsync();
+        var roomId = await SeedRoomAsync();
+        var otherRoomId = await SeedRoomAsync();
+        var keyId = await SeedKeyAsync(roomId, "Osztalykulcs");
+        await SeedBookingAsync(instructorId, otherRoomId, DateTime.UtcNow.AddMinutes(30), BookingRules.ActiveStatus);
+        var bookingId = await SeedBookingAsync(instructorId, roomId, DateTime.UtcNow.AddMinutes(30), BookingRules.ActiveStatus);
+
+        var response = await porter.PostAsJsonAsync("/api/key-movements/issue", new IssueKeyRequestDto
+        {
+            KulcsId = keyId,
+            AtvevoFelhasznaloId = instructorId,
+            Pin = Pin,
+            TeremAllapot = "Rendben"
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var movement = await response.Content.ReadFromJsonAsync<ProjektLabor.DTOs.Keys.KeyMovementItemDto>();
+        Assert.Equal(bookingId, movement!.FoglalasId);
+    }
+
+    [Fact]
+    public async Task IssueKey_WithoutBooking_StaysUnlinkedWhenNoBookingIsDue()
+    {
+        var (porter, _) = await CreateUserClientAsync(RoleNames.Portas);
+        var instructorId = await SeedInstructorWithPinAsync();
+        var roomId = await SeedRoomAsync();
+        var keyId = await SeedKeyAsync(roomId, "Osztalykulcs");
+        await SeedBookingAsync(instructorId, roomId, DateTime.UtcNow.AddDays(2), BookingRules.ActiveStatus);
+
+        var response = await porter.PostAsJsonAsync("/api/key-movements/issue", new IssueKeyRequestDto
+        {
+            KulcsId = keyId,
+            AtvevoFelhasznaloId = instructorId,
+            Pin = Pin,
+            TeremAllapot = "Rendben"
+        });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var movement = await response.Content.ReadFromJsonAsync<ProjektLabor.DTOs.Keys.KeyMovementItemDto>();
+        Assert.Null(movement!.FoglalasId);
+    }
+
+    [Fact]
     public async Task IssueKey_AfterFiveWrongPins_LocksPinEvenForCorrectPin()
     {
         var (porter, _) = await CreateUserClientAsync(RoleNames.Portas);

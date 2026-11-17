@@ -128,7 +128,7 @@ export default function KeyIssuePage() {
     setIsLoading(true)
 
     try {
-      await client.post('/key-movements/issue', {
+      const response = await client.post<{ foglalasId?: number | null }>('/key-movements/issue', {
         kulcsId: Number(keyId),
         atvevoFelhasznaloId: Number(userId),
         teremId: selectedKey?.tipus === 'Mesterkulcs' ? Number(roomId) : undefined,
@@ -138,7 +138,12 @@ export default function KeyIssuePage() {
         megjegyzes: megjegyzes.trim() || undefined,
       })
 
-      setSuccess('A kulcs kiadása sikeresen rögzítve a rendszerben!')
+      const bookingId = response.data?.foglalasId
+      setSuccess(
+        bookingId
+          ? `A kulcs kiadása rögzítve, és az átvevő #${bookingId} foglalásához kapcsolódik.`
+          : 'A kulcs kiadása rögzítve. Az átvevőnek nincs erre a teremre szóló, most esedékes foglalása.'
+      )
       setPin('')
       setTeremAllapot('')
       setSerulesLeiras('')

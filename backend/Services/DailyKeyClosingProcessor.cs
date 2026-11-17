@@ -29,26 +29,92 @@ public sealed class DailyKeyClosingProcessor
         _logger = logger;
     }
 
+    // A kiadás határideje legkésőbb a kiadást követő napi zárás; ennél régebbi, már visszahozott
+    // kiadásokkal nincs teendő. A tartalék a leállás utáni pótlást (catch-up) is lefedi.
+    private static readonly TimeSpan ProcessingWindow = TimeSpan.FromDays(7);
+
     public async Task<int> ProcessAsync(DateTime nowUtc, CancellationToken cancellationToken)
     {
         var closingTime = await AutomationParameterReader.GetClosingTimeAsync(
             _db, _logger, cancellationToken);
         var timeZone = AutomationParameterReader.GetTimeZone(_configuration, _logger);
+        var windowStart = nowUtc.Subtract(ProcessingWindow);
 
+        // Csak az ablakon belüli és a még vissza nem hozott kiadásokat töltjük be.
         var issuedMovements = await _db.Kulcsmozgasok
-            .Include(movement => movement.Foglalas)
+            .AsNoTracking()
             .Where(movement =>
-                (movement.MozgasTipus == IssueMovement ||
-                 movement.MozgasTipus == LegacyIssueMovement))
+                (movement.MozgasTipus == IssueMovement || movement.MozgasTipus == LegacyIssueMovement) &&
+                (movement.Idopont >= windowStart ||
+                 !_db.Kulcsmozgasok.Any(candidate =>
+                     candidate.KulcsId == movement.KulcsId &&
+                     candidate.MozgasTipus == ReturnMovement &&
+                     candidate.Idopont > movement.Idopont)))
+            .Select(movement => new
+            {
+                movement.Id,
+                movement.KulcsId,
+                movement.FoglalasId,
+                movement.Idopont,
+                RecipientId = movement.AtvevoFelhasznaloId ??
+                              (movement.Foglalas != null ? (int?)movement.Foglalas.FelhasznaloId : null)
+            })
+            .ToListAsync(cancellationToken);
+        if (issuedMovements.Count == 0)
+        {
+            return 0;
+        }
+
+        // Kötegelt előtöltés: visszavételek, meglévő pontok, értesítések és auditbejegyzések.
+        var movementIds = issuedMovements.Select(movement => movement.Id).ToList();
+        var nullableMovementIds = movementIds.Select(id => (int?)id).ToList();
+        var keyIds = issuedMovements.Select(movement => movement.KulcsId).Distinct().ToList();
+        var earliestIssue = issuedMovements.Min(movement => movement.Idopont);
+        var returnsByKey = (await _db.Kulcsmozgasok
+                .AsNoTracking()
+                .Where(candidate =>
+                    keyIds.Contains(candidate.KulcsId) &&
+                    candidate.MozgasTipus == ReturnMovement &&
+                    candidate.Idopont > earliestIssue)
+                .Select(candidate => new { candidate.KulcsId, candidate.Idopont })
+                .ToListAsync(cancellationToken))
+            .ToLookup(candidate => candidate.KulcsId, candidate => candidate.Idopont);
+        var scoredMovementIds = (await _db.MegbizhatosagiEsemenyek
+                .AsNoTracking()
+                .Where(item => nullableMovementIds.Contains(item.KiadasiKulcsmozgasId))
+                .Select(item => item.KiadasiKulcsmozgasId!.Value)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+        var existingNotificationKeys = (await _db.Ertesitesek
+                .AsNoTracking()
+                .Where(notification =>
+                    nullableMovementIds.Contains(notification.KulcsmozgasId) &&
+                    notification.AutomationKey != null)
+                .Select(notification => notification.AutomationKey!)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+        var candidateAuditKeys = movementIds
+            .SelectMany(id => new[]
+            {
+                $"{EveningNotificationType}:{id}",
+                $"DailyKeyClosing:UnresolvedRecipient:{id}"
+            })
+            .ToList();
+        var existingAuditKeys = (await _db.AuditLogok
+                .AsNoTracking()
+                .Where(entry => entry.AutomationKey != null && candidateAuditKeys.Contains(entry.AutomationKey))
+                .Select(entry => entry.AutomationKey!)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+        var porterIds = await _db.Felhasznalok
+            .Where(user => user.Role == RoleNames.Portas && user.Aktiv)
+            .Select(user => user.Id)
             .ToListAsync(cancellationToken);
 
         var createdCount = 0;
         var createdNotificationCount = 0;
         var unresolvedRecipientCount = 0;
-        var porterIds = await _db.Felhasznalok
-            .Where(user => user.Role == RoleNames.Portas)
-            .Select(user => user.Id)
-            .ToListAsync(cancellationToken);
+        var now = AsUtc(nowUtc);
         foreach (var movement in issuedMovements)
         {
             var issuedAtUtc = AsUtc(movement.Idopont);
@@ -62,22 +128,14 @@ public sealed class DailyKeyClosingProcessor
                 continue;
             }
 
-            var returnedByNow = await _db.Kulcsmozgasok.AnyAsync(
-                candidate =>
-                    candidate.KulcsId == movement.KulcsId &&
-                    candidate.MozgasTipus == ReturnMovement &&
-                    candidate.Idopont > movement.Idopont &&
-                    candidate.Idopont <= nowUtc,
-                cancellationToken);
+            var returnTimes = returnsByKey[movement.KulcsId];
+            var returnedByNow = returnTimes.Any(returnedAt => returnedAt > movement.Idopont && returnedAt <= nowUtc);
             if (!returnedByNow)
             {
                 foreach (var porterId in porterIds)
                 {
                     var automationKey = $"{EveningNotificationType}:{movement.Id}:{porterId}";
-                    var alreadyNotified = await _db.Ertesitesek.AnyAsync(
-                        notification => notification.AutomationKey == automationKey,
-                        cancellationToken);
-                    if (alreadyNotified)
+                    if (!existingNotificationKeys.Add(automationKey))
                     {
                         continue;
                     }
@@ -88,22 +146,17 @@ public sealed class DailyKeyClosingProcessor
                         CimzettFelhasznaloId = porterId,
                         KulcsmozgasId = movement.Id,
                         ErtesitesTipus = EveningNotificationType,
-                        IdoPont = AsUtc(nowUtc),
+                        IdoPont = now,
                         Hatarido = deadlineUtc,
                         Allapot = "Kesz",
                         AutomationKey = automationKey,
-                        CreatedAt = AsUtc(nowUtc)
+                        CreatedAt = now
                     });
                     createdNotificationCount++;
                 }
 
                 var auditAutomationKey = $"{EveningNotificationType}:{movement.Id}";
-                if (porterIds.Count > 0 &&
-                    !_db.AuditLogok.Local.Any(entry =>
-                        entry.AutomationKey == auditAutomationKey) &&
-                    !await _db.AuditLogok.AnyAsync(
-                        entry => entry.AutomationKey == auditAutomationKey,
-                        cancellationToken))
+                if (porterIds.Count > 0 && existingAuditKeys.Add(auditAutomationKey))
                 {
                     _db.AuditLogok.Add(new AuditLog
                     {
@@ -113,33 +166,23 @@ public sealed class DailyKeyClosingProcessor
                         AutomationKey = auditAutomationKey,
                         UjErtek = EveningNotificationType,
                         Indoklas = "Esti kulcsvisszaadási értesítés létrehozása a portaszolgálatnak",
-                        LetrehozasIdeje = AsUtc(nowUtc)
+                        LetrehozasIdeje = now
                     });
                 }
             }
 
-            var alreadyReturnedByDeadline = await _db.Kulcsmozgasok.AnyAsync(
-                candidate =>
-                    candidate.KulcsId == movement.KulcsId &&
-                    candidate.MozgasTipus == ReturnMovement &&
-                    candidate.Idopont > movement.Idopont &&
-                    candidate.Idopont <= deadlineUtc,
-                cancellationToken);
-            if (alreadyReturnedByDeadline)
+            var returnedByDeadline = returnTimes.Any(returnedAt => returnedAt > movement.Idopont && returnedAt <= deadlineUtc);
+            if (returnedByDeadline)
             {
                 continue;
             }
 
-            var recipientId = movement.AtvevoFelhasznaloId ?? movement.Foglalas?.FelhasznaloId;
-            if (!recipientId.HasValue)
+            if (!movement.RecipientId.HasValue)
             {
                 unresolvedRecipientCount++;
                 var automationKey = $"DailyKeyClosing:UnresolvedRecipient:{movement.Id}";
-                var alreadyLogged = await _db.AuditLogok
-                    .AnyAsync(entry => entry.AutomationKey == automationKey, cancellationToken);
-                if (!alreadyLogged)
+                if (existingAuditKeys.Add(automationKey))
                 {
-                    var loggedAt = AsUtc(nowUtc);
                     _db.AuditLogok.Add(new AuditLog
                     {
                         MuveletTipus = "Automatizálási adatprobléma",
@@ -148,25 +191,21 @@ public sealed class DailyKeyClosingProcessor
                         AutomationKey = automationKey,
                         UjErtek = $"KulcsId: {movement.KulcsId}; FoglalasId: nincs; AtvevoFelhasznaloId: nincs",
                         Indoklas = "Napi zárás: a kiadáshoz nem tartozik foglalás vagy rögzített átvevő; pontlevonás nem történt.",
-                        LetrehozasIdeje = loggedAt
+                        LetrehozasIdeje = now
                     });
                 }
 
                 continue;
             }
 
-            var alreadyScored = await _db.MegbizhatosagiEsemenyek.AnyAsync(
-                item => item.KiadasiKulcsmozgasId == movement.Id,
-                cancellationToken);
-            if (alreadyScored)
+            if (!scoredMovementIds.Add(movement.Id))
             {
                 continue;
             }
 
-            var now = AsUtc(nowUtc);
             _db.MegbizhatosagiEsemenyek.Add(new MegbizhatosagiEsemeny
             {
-                FelhasznaloId = recipientId.Value,
+                FelhasznaloId = movement.RecipientId.Value,
                 KulcsId = movement.KulcsId,
                 FoglalasId = movement.FoglalasId,
                 KiadasiKulcsmozgasId = movement.Id,
@@ -184,7 +223,7 @@ public sealed class DailyKeyClosingProcessor
                 MuveletTipus = "Automatikus büntetőpont",
                 EntitasTipus = "Kulcsmozgas",
                 EntitasId = movement.Id.ToString(CultureInfo.InvariantCulture),
-                UjErtek = $"{PenaltyEventType}: +{PenaltyPoints}; FelhasznaloId: {recipientId.Value}",
+                UjErtek = $"{PenaltyEventType}: +{PenaltyPoints}; FelhasznaloId: {movement.RecipientId.Value}",
                 Indoklas = "Napi zárási feldolgozás",
                 LetrehozasIdeje = now
             });
@@ -198,7 +237,7 @@ public sealed class DailyKeyClosingProcessor
                 unresolvedRecipientCount);
         }
 
-        if (createdCount > 0 || createdNotificationCount > 0 || _db.ChangeTracker.HasChanges())
+        if (_db.ChangeTracker.HasChanges())
         {
             await _db.SaveChangesAsync(cancellationToken);
             if (createdCount > 0)

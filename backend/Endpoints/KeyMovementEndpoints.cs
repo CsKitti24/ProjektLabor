@@ -126,11 +126,11 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.BadRequest(new { message = "A foglalás már véget ért, ehhez nem adható ki kulcs." });
                     }
-                    if (booking.StartTime - now > KeyIssueLeadTime)
+                    if (booking.StartTime - now > BookingRules.KeyIssueLeadTime)
                     {
                         return Results.BadRequest(new
                         {
-                            message = $"A kulcs legkorábban a foglalás kezdete előtt {KeyIssueLeadTime.TotalHours:0} órával adható ki."
+                            message = $"A kulcs legkorábban a foglalás kezdete előtt {BookingRules.KeyIssueLeadTime.TotalHours:0} órával adható ki."
                         });
                     }
                     if (booking.Felhasznalo.Role != RoleNames.Oktato)
@@ -216,6 +216,24 @@ namespace ProjektLabor.Endpoints
                 {
                     return pinResult;
                 }
+
+                // Ha a portás nem adott meg foglalást, a kiadást az átvevő erre a teremre szóló,
+                // éppen esedékes aktív foglalásához kötjük; így a foglalás nem lesz tévesen no-show.
+                var linkedBookingId = request.FoglalasId;
+                if (!linkedBookingId.HasValue)
+                {
+                    var latestStart = now.Add(BookingRules.KeyIssueLeadTime);
+                    linkedBookingId = await db.Foglalasok
+                        .Where(booking =>
+                            booking.FelhasznaloId == recipientId &&
+                            booking.TeremId == issueRoomId &&
+                            booking.Status == BookingRules.ActiveStatus &&
+                            booking.EndTime > now &&
+                            booking.StartTime <= latestStart)
+                        .OrderBy(booking => booking.StartTime)
+                        .Select(booking => (int?)booking.Id)
+                        .FirstOrDefaultAsync();
+                }
                 if (key.Tipus == "Mesterkulcs" &&
                     !await db.MesterkulcsJogosultsagok.AnyAsync(access =>
                         access.KulcsId == key.Id && access.FelhasznaloId == recipientId))
@@ -226,7 +244,7 @@ namespace ProjektLabor.Endpoints
                 var movement = new Kulcsmozgas
                 {
                     KulcsId = key.Id,
-                    FoglalasId = request.FoglalasId,
+                    FoglalasId = linkedBookingId,
                     TeremId = issueRoomId,
                     AtvevoFelhasznaloId = recipientId,
                     MozgasTipus = KeyMovementTypes.Issue,
@@ -252,7 +270,7 @@ namespace ProjektLabor.Endpoints
                     muveletTipus: "KEY_ISSUE",
                     entitasTipus: "Kulcsmozgas",
                     entitasId: movement.Id.ToString(),
-                    ujErtek: $"KulcsId: {key.Id}, FoglalasId: {request.FoglalasId}, AtvevoFelhasznaloId: {recipientId}, TeremAllapot: {movement.TeremAllapot}, SerulesLeiras: {movement.SerulesLeiras}");
+                    ujErtek: $"KulcsId: {key.Id}, FoglalasId: {linkedBookingId}, AtvevoFelhasznaloId: {recipientId}, TeremAllapot: {movement.TeremAllapot}, SerulesLeiras: {movement.SerulesLeiras}");
                 if (conditionTicket is not null)
                 {
                     await auditService.LogAsync(
@@ -274,7 +292,7 @@ namespace ProjektLabor.Endpoints
                     MozgasTipus = movement.MozgasTipus,
                     Idopont = movement.Idopont,
                     FoglalasId = movement.FoglalasId,
-                    FoglalasFelhasznaloNev = request.FoglalasId.HasValue ? recipientName : null,
+                    FoglalasFelhasznaloNev = linkedBookingId.HasValue ? recipientName : null,
                     AtvevoFelhasznaloId = recipientId,
                     AtvevoNev = recipientName,
                     OperatorId = operatorId.Value,
@@ -704,8 +722,6 @@ namespace ProjektLabor.Endpoints
             return group;
         }
 
-        // A kulcs legkorábban ennyivel a foglalás kezdete előtt vehető fel.
-        private static readonly TimeSpan KeyIssueLeadTime = TimeSpan.FromHours(2);
         private const int MaxPinAttempts = 5;
         private static readonly TimeSpan PinLockDuration = TimeSpan.FromMinutes(15);
 
