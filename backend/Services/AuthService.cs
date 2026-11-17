@@ -41,9 +41,9 @@ namespace ProjektLabor.Services
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.Username == request.Username);
 
-            if (user is null)
+            if (user is null || !user.Aktiv)
             {
-                _logger.LogWarning("Bejelentkezési kísérlet nem létező felhasználóval: {Username}", request.Username);
+                _logger.LogWarning("Bejelentkezési kísérlet nem létező vagy inaktív felhasználóval: {Username}", request.Username);
                 await _auditService.LogForUserAsync(
                     null,
                     "LOGIN_FAILED",
@@ -132,7 +132,7 @@ namespace ProjektLabor.Services
 
             var user = await _db.Felhasznalok
                 .AsNoTracking()
-                .Where(u => u.Id == userId)
+                .Where(u => u.Id == userId && u.Aktiv)
                 .Select(u => new CurrentUserDto
                 {
                     Id = u.Id,

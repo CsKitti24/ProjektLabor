@@ -135,11 +135,32 @@ namespace ProjektLabor.Data
             return base.SaveChanges(acceptAllChangesOnSuccess);
         }
 
+        // Az InMemory provider (tesztek) nem ismeri a tranzakciót és az sp_getapplock zárat, ezért ott
+        // az ütközésvizsgálatot és a mentést folyamaton belül sorba állítjuk. SQL Serveren ez nem fut,
+        // ott a végpontok alkalmazászára + Serializable tranzakciója védi a párhuzamos foglalásokat.
+        private static readonly SemaphoreSlim InMemorySaveLock = new(1, 1);
+
         public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
         {
-            await ValidateBookingsAsync(cancellationToken);
-            ValidateAuditLogAppendOnly();
-            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            var serializeInProcess = Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory";
+            if (serializeInProcess)
+            {
+                await InMemorySaveLock.WaitAsync(cancellationToken);
+            }
+
+            try
+            {
+                await ValidateBookingsAsync(cancellationToken);
+                ValidateAuditLogAppendOnly();
+                return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+            }
+            finally
+            {
+                if (serializeInProcess)
+                {
+                    InMemorySaveLock.Release();
+                }
+            }
         }
 
         private void ValidateAuditLogAppendOnly()

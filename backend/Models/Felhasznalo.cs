@@ -29,6 +29,13 @@ namespace ProjektLabor.Models
         [Required]
         public string Role { get; set; } = string.Empty;
 
+        // Törlés helyett inaktiválás: az előzmények (foglalások, kulcsmozgások) megmaradnak.
+        public bool Aktiv { get; set; } = true;
+
+        // PIN-próbálgatás elleni védelem a kulcsátvételnél.
+        public int PinHibasProbalkozasok { get; set; }
+        public DateTime? PinZarolvaEddig { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

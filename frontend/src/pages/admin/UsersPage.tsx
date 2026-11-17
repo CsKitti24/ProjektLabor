@@ -8,6 +8,12 @@ interface UserItem {
   nev?: string
   role: string
   email?: string
+  aktiv?: boolean
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  const axErr = err as { response?: { data?: { message?: string } } }
+  return axErr.response?.data?.message || fallback
 }
 
 const ROLES = ['Oktato', 'Portas', 'Adminisztrator', 'UzemeltetesiIgazgato']
@@ -38,6 +44,7 @@ export default function UsersPage() {
   const [editPassword, setEditPassword] = useState('')
   const [editPasswordConfirmation, setEditPasswordConfirmation] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [confirmDeactivateId, setConfirmDeactivateId] = useState<string | number | null>(null)
 
   useEffect(() => {
     let ignore = false
@@ -122,17 +129,50 @@ export default function UsersPage() {
     }
   }
 
+  const showSuccess = (message: string) => {
+    setError('')
+    setSuccessMsg(message)
+    setTimeout(() => setSuccessMsg(''), 3000)
+  }
+
   const handleSave = async (id: string | number) => {
     setIsSaving(true)
     try {
-      await client.put(`/users/${id}/role`, { role: editRole })
+      // A backend a ChangeRoleRequestDto.UjRole mezőt várja.
+      await client.put(`/users/${id}/role`, { ujRole: editRole })
       setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, role: editRole } : u)))
       setEditingId(null)
-      setSuccessMsg('A szerepkör sikeresen frissítve.')
-      setTimeout(() => setSuccessMsg(''), 3000)
+      showSuccess('A szerepkör sikeresen frissítve.')
     } catch (err: unknown) {
-      const axErr = err as { response?: { data?: { message?: string } } }
-      alert(axErr.response?.data?.message || 'A szerepkör módosítása sikertelen.')
+      setError(errorMessage(err, 'A szerepkör módosítása sikertelen.'))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleDeactivate = async (id: string | number) => {
+    setIsSaving(true)
+    try {
+      await client.delete(`/users/${id}`)
+      setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, aktiv: false } : u)))
+      setConfirmDeactivateId(null)
+      showSuccess('A felhasználó inaktiválva lett. Az előzményei megmaradnak, de nem tud bejelentkezni.')
+    } catch (err: unknown) {
+      setConfirmDeactivateId(null)
+      setError(errorMessage(err, 'A felhasználó inaktiválása sikertelen.'))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleReactivate = async (id: string | number) => {
+    setIsSaving(true)
+    try {
+      await client.post(`/users/${id}/reactivate`)
+      setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, aktiv: true } : u)))
+      showSuccess('A felhasználó újra aktív.')
+    } catch (err: unknown) {
+      setError(errorMessage(err, 'A felhasználó újraaktiválása sikertelen.'))
     } finally {
       setIsSaving(false)
     }
@@ -188,12 +228,17 @@ export default function UsersPage() {
                   </td>
                 </tr>
               ) : (
-                users.map((user) => (
-                  <tr key={user.id}>
+                users.map((user) => {
+                  const isInactive = user.aktiv === false
+                  return (
+                  <tr key={user.id} style={isInactive ? { opacity: 0.6 } : undefined}>
                     <td style={{ color: 'var(--color-gray-500)', fontSize: 12 }}>#{user.id}</td>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--color-gray-900)' }}>
                         {user.nev || user.username}
+                        {isInactive && (
+                          <span className="badge badge-neutral" style={{ marginLeft: 8 }}>Inaktív</span>
+                        )}
                       </div>
                       {user.nev && user.nev !== user.username && (
                         <div style={{ fontSize: 12, color: 'var(--color-gray-500)' }}>
@@ -291,18 +336,56 @@ export default function UsersPage() {
                             Mégse
                           </button>
                         </div>
-                      ) : (
+                      ) : isInactive ? (
                         <button
                           type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => handleEditStart(user)}
+                          className="btn btn-secondary btn-sm"
+                          disabled={isSaving}
+                          onClick={() => handleReactivate(user.id)}
                         >
-                          Módosítás
+                          Újraaktiválás
                         </button>
+                      ) : confirmDeactivateId === user.id ? (
+                        <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                          <span style={{ fontSize: 12, color: 'var(--color-gray-600)' }}>Biztosan inaktiválod?</span>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            disabled={isSaving}
+                            onClick={() => handleDeactivate(user.id)}
+                          >
+                            Igen, inaktiválás
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setConfirmDeactivateId(null)}
+                          >
+                            Mégse
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => handleEditStart(user)}
+                          >
+                            Módosítás
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setConfirmDeactivateId(user.id)}
+                          >
+                            Inaktiválás
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>

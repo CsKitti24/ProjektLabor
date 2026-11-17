@@ -33,6 +33,10 @@ namespace ProjektLabor.DTOs.KeyMovements
         [Required(ErrorMessage = "A kulcs azonosítójának megadása kötelező.")]
         public int KulcsId { get; set; }
 
+        // Csak akkor kötelező, ha egy foglalás nélkül kiadott mesterkulcsnál a kiadás terme
+        // nem ismert (régi adat). Ilyenkor a portás adja meg, melyik teremből hozták vissza.
+        public int? TeremId { get; set; }
+
         [Required]
         [RegularExpression("^[0-9]{4,8}$", ErrorMessage = "A PIN-kód 4–8 számjegyből állhat.")]
         public string Pin { get; set; } = string.Empty;

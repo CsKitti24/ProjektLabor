@@ -21,7 +21,7 @@ public sealed class NoShowProcessor
             _db, _logger, cancellationToken);
         var cutoff = nowUtc.AddMinutes(-limitMinutes);
         var candidates = await _db.Foglalasok
-            .Where(booking => booking.Status == "Aktiv" && booking.StartTime <= cutoff)
+            .Where(booking => booking.Status == BookingRules.ActiveStatus && booking.StartTime <= cutoff)
             .ToListAsync(cancellationToken);
 
         if (candidates.Count == 0)
@@ -34,7 +34,7 @@ public sealed class NoShowProcessor
         var collectedBookingIds = (await _db.Kulcsmozgasok
                 .Where(movement =>
                     candidateIds.Contains(movement.FoglalasId) &&
-                    (movement.MozgasTipus == "Kiadás" || movement.MozgasTipus == "Kiadas") &&
+                    (movement.MozgasTipus == KeyMovementTypes.Issue || movement.MozgasTipus == KeyMovementTypes.LegacyIssue) &&
                     movement.Idopont <= nowUtc)
                 .Select(movement => movement.FoglalasId!.Value)
                 .Distinct()
@@ -63,7 +63,7 @@ public sealed class NoShowProcessor
                         newer.Idopont <= nowUtc &&
                         (newer.Idopont > movement.Idopont ||
                          (newer.Idopont == movement.Idopont && newer.Id > movement.Id))))
-                .Where(latest => latest.MozgasTipus == "Kiadás" || latest.MozgasTipus == "Kiadas")
+                .Where(latest => latest.MozgasTipus == KeyMovementTypes.Issue || latest.MozgasTipus == KeyMovementTypes.LegacyIssue)
                 .Select(latest => latest.KulcsId)
                 .ToListAsync(cancellationToken))
             .ToHashSet();

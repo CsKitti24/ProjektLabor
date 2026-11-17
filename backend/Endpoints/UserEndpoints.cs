@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs.Users;
 using ProjektLabor.Models;
+using ProjektLabor.Security;
 using ProjektLabor.Services;
 
 namespace ProjektLabor.Endpoints
@@ -55,6 +56,7 @@ namespace ProjektLabor.Endpoints
                         Nev = u.Nev,
                         Email = u.Email,
                         Role = u.Role,
+                        Aktiv = u.Aktiv,
                         SzuletesiDatum = u.SzuletesiDatum,
                         CreatedAt = u.CreatedAt,
                         UpdatedAt = u.UpdatedAt
@@ -89,6 +91,7 @@ namespace ProjektLabor.Endpoints
                         Nev = u.Nev,
                         Email = u.Email,
                         Role = u.Role,
+                        Aktiv = u.Aktiv,
                         SzuletesiDatum = u.SzuletesiDatum,
                         CreatedAt = u.CreatedAt,
                         UpdatedAt = u.UpdatedAt
@@ -180,6 +183,7 @@ namespace ProjektLabor.Endpoints
                     Nev = user.Nev,
                     Email = user.Email,
                     Role = user.Role,
+                    Aktiv = user.Aktiv,
                     SzuletesiDatum = user.SzuletesiDatum,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
@@ -269,6 +273,7 @@ namespace ProjektLabor.Endpoints
                     Nev = user.Nev,
                     Email = user.Email,
                     Role = user.Role,
+                    Aktiv = user.Aktiv,
                     SzuletesiDatum = user.SzuletesiDatum,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
@@ -287,6 +292,8 @@ namespace ProjektLabor.Endpoints
             .WithOpenApi();
 
             // U5 – DELETE /api/users/{id}
+            // Fizikai törlés helyett inaktiválás: a foglalások, kulcsmozgások és hibajegyek
+            // előzményei megmaradnak, az inaktív felhasználó pedig nem tud bejelentkezni.
             group.MapDelete("/{id:int}", async (
                 int id,
                 AppDbContext db,
@@ -299,27 +306,100 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú felhasználó nem található." });
                 }
 
-                // Check for active dependencies
-                bool hasActiveBookings = await db.Foglalasok.AnyAsync(f => f.FelhasznaloId == id && f.Status == "Aktiv");
+                if (!user.Aktiv)
+                {
+                    return Results.Conflict(new { message = "A felhasználó már inaktív." });
+                }
+
+                if (IsCaller(caller, id))
+                {
+                    return Results.BadRequest(new { message = "Saját magadat nem törölheted." });
+                }
+
+                if (await IsLastActiveAdministratorAsync(db, user))
+                {
+                    return Results.Conflict(new { message = "Az utolsó aktív adminisztrátor nem törölhető." });
+                }
+
+                bool hasActiveBookings = await db.Foglalasok.AnyAsync(f => f.FelhasznaloId == id && f.Status == BookingRules.ActiveStatus);
                 if (hasActiveBookings)
                 {
                     return Results.Conflict(new { message = "A felhasználónak aktív foglalásai vannak, ezért nem törölhető." });
                 }
 
-                db.Felhasznalok.Remove(user);
+                var holdsKey = await db.Kulcsmozgasok
+                    .Where(movement =>
+                        movement.AtvevoFelhasznaloId == id &&
+                        !db.Kulcsmozgasok.Any(newer =>
+                            newer.KulcsId == movement.KulcsId &&
+                            (newer.Idopont > movement.Idopont ||
+                             (newer.Idopont == movement.Idopont && newer.Id > movement.Id))))
+                    .AnyAsync(movement =>
+                        movement.MozgasTipus == KeyMovementTypes.Issue ||
+                        movement.MozgasTipus == KeyMovementTypes.LegacyIssue);
+                if (holdsKey)
+                {
+                    return Results.Conflict(new { message = "A felhasználónál jelenleg kulcs van, ezért nem törölhető." });
+                }
+
+                user.Aktiv = false;
+                user.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync();
 
                 await auditService.LogAsync(
                     caller,
-                    muveletTipus: "DELETE",
+                    muveletTipus: "DEACTIVATE",
                     entitasTipus: "Felhasznalo",
                     entitasId: id.ToString(),
-                    regiErtek: $"Username: {user.Username}, Role: {user.Role}");
+                    regiErtek: $"Username: {user.Username}, Role: {user.Role}, Aktiv: true",
+                    ujErtek: "Aktiv: false");
 
-                return Results.Ok(new { message = $"A(z) {id} azonosítójú felhasználó sikeresen törölve lett." });
+                return Results.Ok(new { message = $"A(z) {id} azonosítójú felhasználó inaktiválva lett." });
             })
             .WithName("DeleteUser")
-            .WithSummary("Felhasználó törlése")
+            .WithSummary("Felhasználó törlése (inaktiválás)")
+            .Produces(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .WithOpenApi();
+
+            // U5b – POST /api/users/{id}/reactivate
+            group.MapPost("/{id:int}/reactivate", async (
+                int id,
+                AppDbContext db,
+                AuditService auditService,
+                ClaimsPrincipal caller) =>
+            {
+                var user = await db.Felhasznalok.FindAsync(id);
+                if (user is null)
+                {
+                    return Results.NotFound(new { message = $"A(z) {id} azonosítójú felhasználó nem található." });
+                }
+
+                if (user.Aktiv)
+                {
+                    return Results.Conflict(new { message = "A felhasználó már aktív." });
+                }
+
+                user.Aktiv = true;
+                user.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+
+                await auditService.LogAsync(
+                    caller,
+                    muveletTipus: "REACTIVATE",
+                    entitasTipus: "Felhasznalo",
+                    entitasId: id.ToString(),
+                    regiErtek: "Aktiv: false",
+                    ujErtek: "Aktiv: true");
+
+                return Results.Ok(new { message = $"A(z) {id} azonosítójú felhasználó újra aktív." });
+            })
+            .WithName("ReactivateUser")
+            .WithSummary("Inaktivált felhasználó újraaktiválása")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
@@ -347,6 +427,19 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = $"Érvénytelen szerepkör: '{request.UjRole}'. Megengedett értékek: Oktato, Portas, Adminisztrator, UzemeltetesiIgazgato." });
                 }
 
+                if (user.Role == RoleNames.Adminisztrator && canonicalRole != RoleNames.Adminisztrator)
+                {
+                    if (IsCaller(caller, id))
+                    {
+                        return Results.BadRequest(new { message = "Saját adminisztrátori szerepkörödet nem vonhatod vissza." });
+                    }
+
+                    if (await IsLastActiveAdministratorAsync(db, user))
+                    {
+                        return Results.Conflict(new { message = "Az utolsó aktív adminisztrátor szerepköre nem módosítható." });
+                    }
+                }
+
                 var oldRole = user.Role;
                 user.Role = canonicalRole;
                 user.UpdatedAt = DateTime.UtcNow;
@@ -368,6 +461,7 @@ namespace ProjektLabor.Endpoints
                     Nev = user.Nev,
                     Email = user.Email,
                     Role = user.Role,
+                    Aktiv = user.Aktiv,
                     SzuletesiDatum = user.SzuletesiDatum,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
@@ -427,5 +521,19 @@ namespace ProjektLabor.Endpoints
         }
 
         public sealed record SetPinRequest(string Pin);
+
+        private static bool IsCaller(ClaimsPrincipal caller, int userId)
+        {
+            var subject = caller.FindFirst("sub")?.Value ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return int.TryParse(subject, out var callerId) && callerId == userId;
+        }
+
+        private static async Task<bool> IsLastActiveAdministratorAsync(AppDbContext db, Felhasznalo user) =>
+            user.Role == RoleNames.Adminisztrator &&
+            user.Aktiv &&
+            !await db.Felhasznalok.AnyAsync(other =>
+                other.Id != user.Id &&
+                other.Aktiv &&
+                other.Role == RoleNames.Adminisztrator);
     }
 }

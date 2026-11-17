@@ -337,10 +337,25 @@ public sealed class SqlServerIntegrationTests
             {
                 await db.GetService<IMigrator>().MigrateAsync(migrationBeforeUtc);
 
-                var user = CreateUser(RoleNames.Oktato);
-                var room = new Terem { Nev = $"UTC-{Guid.NewGuid():N}"[..20], Kapacitas = 10 };
-                db.AddRange(user, room);
-                await db.SaveChangesAsync();
+                // Nyers SQL, mert a migráció előtti séma még nem tartalmazza a később hozzáadott oszlopokat.
+                var suffix = Guid.NewGuid().ToString("N");
+                var userId = await InsertLegacyRowAsync(
+                    db,
+                    """
+                    INSERT INTO [Felhasznalok] ([Username], [Email], [JelszoHash], [Nev], [Role], [CreatedAt], [UpdatedAt])
+                    OUTPUT INSERTED.[Id]
+                    VALUES (@username, @email, N'integration-test-hash', N'Oktato', N'Oktato', SYSUTCDATETIME(), SYSUTCDATETIME());
+                    """,
+                    ("@username", suffix[..12]),
+                    ("@email", $"{suffix}@test.hu"));
+                var roomId = await InsertLegacyRowAsync(
+                    db,
+                    """
+                    INSERT INTO [Termek] ([Nev], [Kapacitas], [Aktivalva])
+                    OUTPUT INSERTED.[Id]
+                    VALUES (@name, 10, 1);
+                    """,
+                    ("@name", $"UTC-{suffix}"[..20]));
 
                 // A régi adatok budapesti helyi időben, megjelölés nélkül kerültek az adatbázisba.
                 const string insertBooking = """
@@ -350,12 +365,12 @@ public sealed class SqlServerIntegrationTests
                     """;
                 winterBookingId = await InsertLegacyRowAsync(
                     db, insertBooking,
-                    ("@userId", user.Id), ("@roomId", room.Id),
+                    ("@userId", userId), ("@roomId", roomId),
                     ("@start", new DateTime(2026, 11, 2, 10, 15, 0)),
                     ("@end", new DateTime(2026, 11, 2, 11, 0, 0)));
                 summerBookingId = await InsertLegacyRowAsync(
                     db, insertBooking,
-                    ("@userId", user.Id), ("@roomId", room.Id),
+                    ("@userId", userId), ("@roomId", roomId),
                     ("@start", new DateTime(2026, 7, 1, 8, 0, 0)),
                     ("@end", new DateTime(2026, 7, 1, 8, 45, 0)));
                 maintenanceId = await InsertLegacyRowAsync(
@@ -365,7 +380,7 @@ public sealed class SqlServerIntegrationTests
                     OUTPUT INSERTED.[Id]
                     VALUES (@userId, @roomId, @start, @end, SYSUTCDATETIME());
                     """,
-                    ("@userId", user.Id), ("@roomId", room.Id),
+                    ("@userId", userId), ("@roomId", roomId),
                     ("@start", new DateTime(2026, 11, 2, 12, 0, 0)),
                     ("@end", new DateTime(2026, 11, 2, 13, 0, 0)));
 
