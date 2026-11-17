@@ -19,6 +19,8 @@ public static class ReliabilityEndpoints
         var reliability = endpoints.MapGroup("/api/reliability")
             .RequireAuthorization();
 
+        reliability.MapGet("/users", GetAllScoresAsync)
+            .WithName("GetReliabilityScores");
         reliability.MapGet("/users/{userId:int}", GetScoreAsync)
             .WithName("GetReliabilityScore");
         reliability.MapGet("/users/{userId:int}/events", GetEventsAsync)
@@ -53,6 +55,62 @@ public static class ReliabilityEndpoints
         var score = await CalculateScoreAsync(userId, academicYear, db, cancellationToken);
 
         return Results.Ok(CreateScoreResponse(instructor.Id, instructor.Nev, academicYear, score));
+    }
+
+    /// <summary>
+    /// Az összes aktív oktató aktuális tanévi pontszáma, a legmagasabb (legrosszabb) elöl.
+    /// Csak adminisztrátor és üzemeltetési igazgató érheti el.
+    /// </summary>
+    private static async Task<IResult> GetAllScoresAsync(
+        ClaimsPrincipal principal,
+        [FromServices] AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        if (await GetReadAccessAsync(principal, db, cancellationToken) is null)
+        {
+            return Results.Forbid();
+        }
+
+        var academicYear = GetAcademicYear(DateTime.UtcNow);
+        var instructors = await db.Felhasznalok
+            .AsNoTracking()
+            .Where(user => user.Role == RoleNames.Oktato && user.Aktiv)
+            .Select(user => new { user.Id, user.Nev, user.Username })
+            .ToListAsync(cancellationToken);
+        var events = await db.MegbizhatosagiEsemenyek
+            .AsNoTracking()
+            .Where(item => item.Tanev == academicYear && item.Felhasznalo.Role == RoleNames.Oktato)
+            .OrderBy(item => item.EsemenyIdopontja)
+            .ThenBy(item => item.Id)
+            .Select(item => new { item.FelhasznaloId, item.Pont })
+            .ToListAsync(cancellationToken);
+
+        // Ugyanaz a számítás, mint az egyéni pontszámnál: időrendben összegezve, 0 és 100 közé szorítva.
+        var scores = events
+            .GroupBy(item => item.FelhasznaloId)
+            .ToDictionary(
+                group => group.Key,
+                group => (
+                    Score: group.Aggregate(0, (score, item) => Math.Clamp(score + item.Pont, 0, MaximumScore)),
+                    Count: group.Count()));
+
+        var items = instructors
+            .Select(instructor =>
+            {
+                scores.TryGetValue(instructor.Id, out var result);
+                return new ReliabilityListItemResponse(
+                    instructor.Id,
+                    instructor.Nev,
+                    instructor.Username,
+                    result.Score,
+                    result.Count,
+                    GetConsequence(result.Score));
+            })
+            .OrderByDescending(item => item.Pontszam)
+            .ThenBy(item => item.Nev)
+            .ToList();
+
+        return Results.Ok(new ReliabilityListResponse(academicYear, items));
     }
 
     private static async Task<IResult> GetEventsAsync(
@@ -287,6 +345,16 @@ public static class ReliabilityEndpoints
     };
 
     private sealed record InstructorResponse(int Id, string Nev);
+
+    public sealed record ReliabilityListItemResponse(
+        int UserId,
+        string Nev,
+        string Username,
+        int Pontszam,
+        int EsemenyekSzama,
+        string Kovetkezmeny);
+
+    public sealed record ReliabilityListResponse(string Tanev, List<ReliabilityListItemResponse> Oktatok);
 
     public sealed record ReliabilityScoreResponse(
         int UserId,

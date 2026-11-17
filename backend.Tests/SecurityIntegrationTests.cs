@@ -219,6 +219,7 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
             (Path: "/api/audit", AllowedRoles: new[] { RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
             (Path: "/api/reports/daily?datum=2027-01-01", AllowedRoles: new[] { RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
             (Path: "/api/keys/10/master-access", AllowedRoles: new[] { RoleNames.Adminisztrator }),
+            (Path: "/api/reliability/users", AllowedRoles: new[] { RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
             (Path: "/api/reliability/users/1", AllowedRoles: new[] { RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato }),
             (Path: "/api/reliability/users/1/events", AllowedRoles: new[] { RoleNames.Adminisztrator, RoleNames.UzemeltetesiIgazgato })
         };

@@ -341,6 +341,48 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
         Assert.Equal(HttpStatusCode.Unauthorized, (await demoted.GetAsync("/api/users")).StatusCode);
     }
 
+    // ---------- Megbízhatóság ----------
+
+    [Fact]
+    public async Task ReliabilityList_ShowsActiveInstructorsWorstFirst_ForAdminOnly()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var (instructorClient, _) = await CreateUserClientAsync(RoleNames.Oktato);
+        var worstId = await SeedInstructorWithPinAsync();
+        var cleanId = await SeedInstructorWithPinAsync();
+        var inactiveId = await SeedInstructorWithPinAsync(active: false);
+        var now = DateTime.UtcNow;
+        var startYear = now.Month >= 9 ? now.Year : now.Year - 1;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            // 40 × 3 = 120 pont, ami 100-nál megáll.
+            for (var i = 0; i < 40; i++)
+            {
+                db.MegbizhatosagiEsemenyek.Add(new MegbizhatosagiEsemeny
+                {
+                    FelhasznaloId = worstId,
+                    EsemenyTipus = "LeNemAdott",
+                    Pont = 3,
+                    Tanev = $"{startYear}/{startYear + 1}",
+                    EsemenyIdopontja = now.AddDays(-i)
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await instructorClient.GetAsync("/api/reliability/users")).StatusCode);
+
+        var list = await admin.GetFromJsonAsync<ProjektLabor.Endpoints.ReliabilityEndpoints.ReliabilityListResponse>(
+            "/api/reliability/users");
+        Assert.NotNull(list);
+        Assert.Equal(worstId, list.Oktatok[0].UserId);
+        Assert.Equal(100, list.Oktatok[0].Pontszam);
+        Assert.Equal(40, list.Oktatok[0].EsemenyekSzama);
+        Assert.Equal(0, Assert.Single(list.Oktatok, item => item.UserId == cleanId).Pontszam);
+        Assert.DoesNotContain(list.Oktatok, item => item.UserId == inactiveId);
+    }
+
     // ---------- Segédfüggvények ----------
 
     private async Task<(HttpClient Client, int UserId)> CreateUserClientAsync(string role, bool active = true)

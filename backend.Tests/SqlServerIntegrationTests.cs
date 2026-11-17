@@ -903,6 +903,15 @@ public sealed class SqlServerIntegrationTests
                 .CountAsync(movement => movement.MozgasTipus == KeyMovementTypes.Issue);
             Assert.Equal(2, heldKeys);
 
+            // Minden mintakiadáshoz tartozik egy lezárt foglalás (LinkSampleKeyIssuesToBookings).
+            var bookings = await db.Foglalasok.Where(booking => booking.FelhasznaloId == radli.Id).ToListAsync();
+            Assert.Equal(34, bookings.Count);
+            Assert.All(bookings, booking => Assert.Equal(BookingRules.DoneStatus, booking.Status));
+            Assert.False(await db.Kulcsmozgasok.AnyAsync(movement =>
+                movement.AtvevoFelhasznaloId == radli.Id && movement.FoglalasId == null));
+            Assert.False(await db.MegbizhatosagiEsemenyek.AnyAsync(item =>
+                item.FelhasznaloId == radli.Id && item.FoglalasId == null));
+
             // A Down() kiveszi a mintaadatokat, a fiókokat pedig inaktiválja (az audit napló hivatkozik rájuk).
             await db.GetService<IMigrator>().MigrateAsync("20261117193607_AddUserSoftDeletePinLockAndMovementRoom");
             db.ChangeTracker.Clear();

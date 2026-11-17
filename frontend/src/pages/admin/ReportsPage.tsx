@@ -44,6 +44,27 @@ interface ReliabilityReport {
   }>
 }
 
+interface InstructorReliability {
+  userId: number
+  nev: string
+  username: string
+  pontszam: number
+  esemenyekSzama: number
+  kovetkezmeny: string
+}
+
+interface InstructorReliabilityList {
+  tanev: string
+  oktatok: InstructorReliability[]
+}
+
+// A pontszám büntetőpont: minél magasabb, annál több rögzített hiba.
+function scoreBadgeClass(score: number): string {
+  if (score >= 30) return 'badge badge-danger'
+  if (score >= 10) return 'badge badge-warning'
+  return 'badge badge-success'
+}
+
 type TabType = 'weekly' | 'utilization' | 'reliability'
 
 export default function ReportsPage() {
@@ -55,6 +76,7 @@ export default function ReportsPage() {
   const [weeklyData, setWeeklyData] = useState<WeeklyReport | null>(null)
   const [utilizationData, setUtilizationData] = useState<RoomUtilization | null>(null)
   const [reliabilityData, setReliabilityData] = useState<ReliabilityReport | null>(null)
+  const [instructorScores, setInstructorScores] = useState<InstructorReliabilityList | null>(null)
 
   useEffect(() => {
     let ignore = false
@@ -105,21 +127,26 @@ export default function ReportsPage() {
           if (!ignore) setIsLoading(false)
         })
     } else if (activeTab === 'reliability') {
-      client
-        .get<ReliabilityReport>('/reports/reliability')
-        .then((res) => {
+      Promise.all([
+        client.get<ReliabilityReport>('/reports/reliability'),
+        client.get<InstructorReliabilityList>('/reliability/users'),
+      ])
+        .then(([summary, instructors]) => {
           if (!ignore) {
-            if (!Number.isFinite(res.data.atlagosPontszam) ||
-                !Number.isFinite(res.data.esemenyekSzama) ||
-                !Number.isFinite(res.data.erintettOktatokSzama)) {
+            if (!Number.isFinite(summary.data.atlagosPontszam) ||
+                !Number.isFinite(summary.data.esemenyekSzama) ||
+                !Number.isFinite(summary.data.erintettOktatokSzama) ||
+                !Array.isArray(instructors.data.oktatok)) {
               throw new Error('A megbízhatósági riport válasza hiányos.')
             }
-            setReliabilityData(res.data)
+            setReliabilityData(summary.data)
+            setInstructorScores(instructors.data)
           }
         })
         .catch(() => {
           if (!ignore) {
             setReliabilityData(null)
+            setInstructorScores(null)
             setError('A megbízhatósági riport betöltése nem sikerült.')
           }
         })
@@ -371,6 +398,46 @@ export default function ReportsPage() {
                   </div>
                 </div>
               </div>
+
+              <div className="table-container" style={{ marginTop: 20 }}>
+                <table className="data-table" aria-label="Oktatók megbízhatósága">
+                  <thead>
+                    <tr>
+                      <th>Oktató</th>
+                      <th style={{ textAlign: 'right' }}>Pontszám</th>
+                      <th style={{ textAlign: 'right' }}>Események</th>
+                      <th>Következmény</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!instructorScores || instructorScores.oktatok.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 24 }}>
+                          Nincs aktív oktató a rendszerben.
+                        </td>
+                      </tr>
+                    ) : (
+                      instructorScores.oktatok.map((item) => (
+                        <tr key={item.userId}>
+                          <td>
+                            <div style={{ fontWeight: 600, color: 'var(--color-gray-900)' }}>{item.nev}</div>
+                            <div style={{ fontSize: 12, color: 'var(--color-gray-500)' }}>{item.username}</div>
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{item.pontszam} / 100</td>
+                          <td style={{ textAlign: 'right' }}>{item.esemenyekSzama}</td>
+                          <td>
+                            <span className={scoreBadgeClass(item.pontszam)}>{item.kovetkezmeny}</span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--color-gray-500)', marginTop: 8 }}>
+                A pontszám büntetőpont: minél magasabb, annál több rögzített hiba
+                {instructorScores ? ` (${instructorScores.tanev}. tanév)` : ''}.
+              </p>
             </div>
           )}
         </>
