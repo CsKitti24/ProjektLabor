@@ -21,6 +21,7 @@ interface UserOption {
   id: number
   nev: string
   username: string
+  aktiv?: boolean
 }
 
 interface MasterAccess {
@@ -149,7 +150,9 @@ export default function KeysPage() {
       }),
     ])
     setMasterAccess(accessResponse.data)
-    setInstructors(Array.isArray(userResponse.data) ? userResponse.data : (userResponse.data.items ?? []))
+    const instructorList = Array.isArray(userResponse.data) ? userResponse.data : (userResponse.data.items ?? [])
+    // Inaktivált oktató nem kaphat mesterkulcs-jogosultságot.
+    setInstructors(instructorList.filter((instructor) => instructor.aktiv !== false))
     setSelectedInstructorId('')
   }
 

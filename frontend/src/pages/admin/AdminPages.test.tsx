@@ -61,7 +61,7 @@ describe('admin administration pages', () => {
     fireEvent.change(password, { target: { value: 'short' } })
     fireEvent.change(screen.getByLabelText('Teszt User új jelszó megerősítése'), { target: { value: 'short' } })
     fireEvent.click(screen.getByRole('button', { name: 'Jelszó mentése' }))
-    expect(await screen.findByText('A jelszónak legalább 8 karakterből kell állnia.')).toBeTruthy()
+    expect(await screen.findByText('A jelszónak legalább 12 karakterből kell állnia.')).toBeTruthy()
 
     fireEvent.change(password, { target: { value: 'BiztonsagosJelszo1!' } })
     fireEvent.change(screen.getByLabelText('Teszt User új jelszó megerősítése'), { target: { value: 'BiztonsagosJelszo1!' } })

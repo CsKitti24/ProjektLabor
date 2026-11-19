@@ -226,6 +226,25 @@ namespace ProjektLabor.Endpoints
 
                 if (request.Aktivalva.HasValue && request.Aktivalva.Value != room.Aktivalva)
                 {
+                    // Deaktiválásra ugyanaz a szabály vonatkozik, mint a törlésnél: jövőbeli aktív
+                    // foglalás mellett a terem nem deaktiválható.
+                    if (!request.Aktivalva.Value)
+                    {
+                        var now = DateTime.UtcNow;
+                        var futureBookings = await db.Foglalasok.CountAsync(booking =>
+                            booking.TeremId == id &&
+                            booking.Status == BookingRules.ActiveStatus &&
+                            booking.EndTime > now);
+                        if (futureBookings > 0)
+                        {
+                            return Results.Conflict(new
+                            {
+                                message = $"A teremnek {futureBookings} jövőbeli aktív foglalása van. Deaktiválás előtt ezeket le kell mondani (a terem törlésével ez egy lépésben is megtehető).",
+                                jovobeliFoglalasok = futureBookings
+                            });
+                        }
+                    }
+
                     changes.Add($"Aktivalva: {room.Aktivalva} -> {request.Aktivalva.Value}");
                     room.Aktivalva = request.Aktivalva.Value;
                 }

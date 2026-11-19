@@ -231,6 +231,13 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {targetUserId} azonosítójú aktív felhasználó nem található." });
                 }
 
+                // Kulcsot csak oktató vehet át, ezért foglalás is csak oktató nevére szólhat
+                // (különben a foglalás biztosan no-show lenne).
+                if (targetUser.Role != ProjektLabor.Security.RoleNames.Oktato)
+                {
+                    return Results.BadRequest(new { message = "Foglalás csak oktató nevére rögzíthető; adminként add meg az oktatót (felhasznaloId)." });
+                }
+
                 return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
                 {
                 await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"

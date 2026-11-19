@@ -476,12 +476,13 @@ namespace backend.Tests
                 $"/api/keys/{keyId}/rooms");
             Assert.Equal(secondRoomId, Assert.Single(remaining!).Id);
 
+            // Terem nélküli mesterkulcs nem adható ki semmire, ezért az összes terem nem vehető el.
             var revokeAll = await adminClient.PutAsJsonAsync(
                 $"/api/keys/{keyId}/rooms",
                 new UpdateKeyRoomsRequestDto());
-            Assert.Equal(HttpStatusCode.OK, revokeAll.StatusCode);
-            Assert.Empty(await adminClient.GetFromJsonAsync<List<KeyRoomDto>>(
-                $"/api/keys/{keyId}/rooms") ?? []);
+            Assert.Equal(HttpStatusCode.BadRequest, revokeAll.StatusCode);
+            Assert.Equal(secondRoomId, Assert.Single(await adminClient.GetFromJsonAsync<List<KeyRoomDto>>(
+                $"/api/keys/{keyId}/rooms") ?? []).Id);
         }
 
         [Fact]

@@ -87,8 +87,8 @@ export default function UsersPage() {
   }
 
   const handleSavePassword = async (id: string | number) => {
-    if (editPassword.length < 8) {
-      setError('A jelszónak legalább 8 karakterből kell állnia.')
+    if (editPassword.length < 12) {
+      setError('A jelszónak legalább 12 karakterből kell állnia.')
       return
     }
     if (editPassword !== editPasswordConfirmation) {
@@ -281,8 +281,8 @@ export default function UsersPage() {
                             aria-label={`${user.nev || user.username} új jelszó`}
                             className="form-input"
                             type="password"
-                            minLength={8}
-                            placeholder="Új jelszó (min. 8 karakter)"
+                            minLength={12}
+                            placeholder="Új jelszó (min. 12 karakter)"
                             autoComplete="new-password"
                             value={editPassword}
                             onChange={(e) => setEditPassword(e.target.value)}
@@ -291,7 +291,7 @@ export default function UsersPage() {
                             aria-label={`${user.nev || user.username} új jelszó megerősítése`}
                             className="form-input"
                             type="password"
-                            minLength={8}
+                            minLength={12}
                             placeholder="Jelszó ismétlése"
                             autoComplete="new-password"
                             value={editPasswordConfirmation}

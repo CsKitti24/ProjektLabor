@@ -127,10 +127,16 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = "Minden kötelező mezőt ki kell tölteni." });
                 }
 
-                if (request.Jelszo.Length < 8)
+                var passwordError = PasswordPolicy.Validate(request.Jelszo);
+                if (passwordError is not null)
                 {
-                    return Results.BadRequest(new { message = "A jelszónak legalább 8 karakterből kell állnia." });
+                    return Results.BadRequest(new { message = passwordError });
                 }
+
+                // Az ellenőrzés ugyanazzal a (levágott, kisbetűs) értékkel fut, amelyet elmentünk,
+                // így a szóközzel kezdődő név sem okozhat egyediségi hibát (500).
+                var username = request.Username.Trim();
+                var email = request.Email.Trim().ToLowerInvariant();
 
                 var canonicalRole = AllowedRoles.FirstOrDefault(r => r.Equals(request.Role, StringComparison.OrdinalIgnoreCase));
                 if (canonicalRole == null)
@@ -139,23 +145,23 @@ namespace ProjektLabor.Endpoints
                 }
 
                 // Check username uniqueness
-                bool usernameTaken = await db.Felhasznalok.AnyAsync(u => u.Username == request.Username);
+                bool usernameTaken = await db.Felhasznalok.AnyAsync(u => u.Username == username);
                 if (usernameTaken)
                 {
-                    return Results.Conflict(new { message = $"A megadott felhasználónév ('{request.Username}') már foglalt." });
+                    return Results.Conflict(new { message = $"A megadott felhasználónév ('{username}') már foglalt." });
                 }
 
                 // Check email uniqueness
-                bool emailTaken = await db.Felhasznalok.AnyAsync(u => u.Email == request.Email);
+                bool emailTaken = await db.Felhasznalok.AnyAsync(u => u.Email == email);
                 if (emailTaken)
                 {
-                    return Results.Conflict(new { message = $"A megadott email cím ('{request.Email}') már használatban van." });
+                    return Results.Conflict(new { message = $"A megadott email cím ('{email}') már használatban van." });
                 }
 
                 var user = new Felhasznalo
                 {
-                    Username = request.Username.Trim(),
-                    Email = request.Email.Trim().ToLowerInvariant(),
+                    Username = username,
+                    Email = email,
                     Nev = request.Nev.Trim(),
                     Role = canonicalRole,
                     JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.Jelszo, workFactor: 12),
@@ -235,9 +241,10 @@ namespace ProjektLabor.Endpoints
 
                 if (!string.IsNullOrWhiteSpace(request.UjJelszo))
                 {
-                    if (request.UjJelszo.Length < 8)
+                    var newPasswordError = PasswordPolicy.Validate(request.UjJelszo);
+                    if (newPasswordError is not null)
                     {
-                        return Results.BadRequest(new { message = "A jelszónak legalább 8 karakterből kell állnia." });
+                        return Results.BadRequest(new { message = newPasswordError });
                     }
                     user.JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.UjJelszo, workFactor: 12);
                     changes.Add("Jelszo modosult");
@@ -316,17 +323,7 @@ namespace ProjektLabor.Endpoints
                     return Results.Conflict(new { message = "A felhasználónak aktív foglalásai vannak, ezért nem törölhető." });
                 }
 
-                var holdsKey = await db.Kulcsmozgasok
-                    .Where(movement =>
-                        movement.AtvevoFelhasznaloId == id &&
-                        !db.Kulcsmozgasok.Any(newer =>
-                            newer.KulcsId == movement.KulcsId &&
-                            (newer.Idopont > movement.Idopont ||
-                             (newer.Idopont == movement.Idopont && newer.Id > movement.Id))))
-                    .AnyAsync(movement =>
-                        movement.MozgasTipus == KeyMovementTypes.Issue ||
-                        movement.MozgasTipus == KeyMovementTypes.LegacyIssue);
-                if (holdsKey)
+                if (await HoldsKeyAsync(db, id))
                 {
                     return Results.Conflict(new { message = "A felhasználónál jelenleg kulcs van, ezért nem törölhető." });
                 }
@@ -429,6 +426,29 @@ namespace ProjektLabor.Endpoints
                     }
                 }
 
+                var removedGrants = new List<MesterkulcsJogosultsag>();
+                if (user.Role == RoleNames.Oktato && canonicalRole != RoleNames.Oktato)
+                {
+                    // Oktatói foglalás és kulcs csak oktatóhoz tartozhat: előbb ezeket kell rendezni.
+                    var now = DateTime.UtcNow;
+                    if (await db.Foglalasok.AnyAsync(booking =>
+                            booking.FelhasznaloId == id &&
+                            booking.Status == BookingRules.ActiveStatus &&
+                            booking.EndTime > now))
+                    {
+                        return Results.Conflict(new { message = "Az oktatónak aktív foglalásai vannak; a szerepkör ezek lemondása után módosítható." });
+                    }
+
+                    if (await HoldsKeyAsync(db, id))
+                    {
+                        return Results.Conflict(new { message = "Az oktatónál jelenleg kulcs van; a szerepkör a visszavétel után módosítható." });
+                    }
+
+                    // A mesterkulcs-jogosultság csak oktatónak szól, ezért megszűnik.
+                    removedGrants = await db.MesterkulcsJogosultsagok.Where(access => access.FelhasznaloId == id).ToListAsync();
+                    db.MesterkulcsJogosultsagok.RemoveRange(removedGrants);
+                }
+
                 var oldRole = user.Role;
                 user.Role = canonicalRole;
                 user.UpdatedAt = DateTime.UtcNow;
@@ -441,7 +461,10 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Felhasznalo",
                     entitasId: id.ToString(),
                     regiErtek: oldRole,
-                    ujErtek: canonicalRole);
+                    ujErtek: canonicalRole,
+                    indoklas: removedGrants.Count > 0
+                        ? $"{removedGrants.Count} mesterkulcs-jogosultság megszűnt (KulcsId: {string.Join(",", removedGrants.Select(access => access.KulcsId))})."
+                        : null);
 
                 return Results.Ok(new UserDto
                 {
@@ -485,6 +508,9 @@ namespace ProjektLabor.Endpoints
                 }
 
                 user.PinHash = BCrypt.Net.BCrypt.HashPassword(request.Pin);
+                // Új PIN beállításakor a korábbi hibás próbálkozások és a zárolás megszűnik.
+                user.PinHibasProbalkozasok = 0;
+                user.PinZarolvaEddig = null;
                 user.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync();
                 await auditService.LogAsync(
@@ -509,6 +535,19 @@ namespace ProjektLabor.Endpoints
         }
 
         public sealed record SetPinRequest(string Pin);
+
+        // A felhasználónál van-e most kulcs (valamelyik kulcs legutolsó mozgása neki szóló kiadás).
+        private static Task<bool> HoldsKeyAsync(AppDbContext db, int userId) =>
+            db.Kulcsmozgasok
+                .Where(movement =>
+                    movement.AtvevoFelhasznaloId == userId &&
+                    !db.Kulcsmozgasok.Any(newer =>
+                        newer.KulcsId == movement.KulcsId &&
+                        (newer.Idopont > movement.Idopont ||
+                         (newer.Idopont == movement.Idopont && newer.Id > movement.Id))))
+                .AnyAsync(movement =>
+                    movement.MozgasTipus == KeyMovementTypes.Issue ||
+                    movement.MozgasTipus == KeyMovementTypes.LegacyIssue);
 
         private static bool IsCaller(ClaimsPrincipal caller, int userId)
         {

@@ -143,15 +143,17 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {request.TeremId} azonosítójú terem nem található." });
                 }
 
-                bool numberExists = await db.Kulcsok.AnyAsync(k => k.Szam == request.Szam);
+                // Ugyanazzal a (levágott) értékkel ellenőrzünk, amelyet elmentünk.
+                var keyNumber = request.Szam.Trim();
+                bool numberExists = await db.Kulcsok.AnyAsync(k => k.Szam == keyNumber);
                 if (numberExists)
                 {
-                    return Results.Conflict(new { message = $"A megadott kulcsszám ('{request.Szam}') már létezik." });
+                    return Results.Conflict(new { message = $"A megadott kulcsszám ('{keyNumber}') már létezik." });
                 }
 
                 var key = new Kulcs
                 {
-                    Szam = request.Szam.Trim(),
+                    Szam = keyNumber,
                     Tipus = request.Tipus,
                     TeremId = request.TeremId,
                     Aktivalva = request.Aktivalva,
@@ -380,11 +382,8 @@ namespace ProjektLabor.Endpoints
                     .ThenByDescending(km => km.Id)
                     .FirstOrDefaultAsync();
 
-                string allapot = !key.Aktivalva
-                    ? "Deaktivalt"
-                    : (lastMovement != null && KeyMovementTypes.IsIssue(lastMovement.MozgasTipus))
-                        ? "Kiadva"
-                        : "Szabad";
+                // Ugyanaz a szabály, mint a kulcslistában: kint lévő kulcs mindig "Kiadva".
+                var allapot = GetState(key, lastMovement);
 
                 var status = new KeyStatusDto
                 {
@@ -507,6 +506,12 @@ namespace ProjektLabor.Endpoints
                     request.TeremIds.Any(roomId => roomId <= 0))
                 {
                     return Results.BadRequest(new { message = "A teremazonosítók nem ismétlődhetnek és pozitívnak kell lenniük." });
+                }
+
+                // Terem nélküli mesterkulcs semmire nem adható ki; legalább egy terem kell.
+                if (request.TeremIds.Count == 0)
+                {
+                    return Results.BadRequest(new { message = "A mesterkulcshoz legalább egy termet hozzá kell rendelni." });
                 }
 
                 var key = await db.Kulcsok
