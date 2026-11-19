@@ -83,13 +83,13 @@ public static class MasterAccessEndpoints
 
         var instructor = await db.Felhasznalok
             .AsNoTracking()
-            .Where(account => account.Id == request.UserId && account.Role == RoleNames.Oktato)
+            .Where(account => account.Id == request.UserId && account.Role == RoleNames.Oktato && account.Aktiv)
             .Select(account => new InstructorResponse(account.Id, account.Nev))
             .SingleOrDefaultAsync(cancellationToken);
 
         if (instructor is null)
         {
-            return Results.NotFound(new { message = "A megadott oktató nem található." });
+            return Results.NotFound(new { message = "A megadott aktív oktató nem található." });
         }
 
         if (await db.MesterkulcsJogosultsagok.AnyAsync(

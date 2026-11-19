@@ -311,7 +311,8 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
             var bookingRequest = new
             {
                 teremId = 1,
-                felhasznaloId = 2,
+                // Az 5-ös felhasználó egy második oktató: foglalás csak oktató nevére szólhat.
+                felhasznaloId = 5,
                 startTime = new DateTime(2027, 1, 3, 8, 0, 0, DateTimeKind.Unspecified).AddDays(userId),
                 endTime = new DateTime(2027, 1, 3, 8, 45, 0, DateTimeKind.Unspecified).AddDays(userId)
             };
@@ -331,7 +332,7 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
             {
                 var booking = await response.Content.ReadFromJsonAsync<BookingTestResponse>();
                 Assert.NotNull(booking);
-                Assert.Equal(2, booking.FelhasznaloId);
+                Assert.Equal(5, booking.FelhasznaloId);
             }
         }
 

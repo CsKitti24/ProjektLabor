@@ -693,6 +693,176 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    // ---------- Kitti: üzleti szabályok (2. kör) ----------
+
+    [Fact]
+    public async Task RoomUpdate_CannotDeactivateRoomWithFutureBookings()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var instructorId = await SeedInstructorWithPinAsync();
+        var roomId = await SeedRoomAsync();
+        await SeedBookingAsync(instructorId, roomId, DateTime.UtcNow.AddDays(2), BookingRules.ActiveStatus);
+
+        var response = await admin.PutAsJsonAsync($"/api/rooms/{roomId}", new { aktivalva = false });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SettingNewPin_ClearsPinLockout()
+    {
+        var (porter, _) = await CreateUserClientAsync(RoleNames.Portas);
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var instructorId = await SeedInstructorWithPinAsync();
+        var keyId = await SeedKeyAsync(await SeedRoomAsync(), "Osztalykulcs");
+        var request = new IssueKeyRequestDto { KulcsId = keyId, AtvevoFelhasznaloId = instructorId, Pin = "9999", TeremAllapot = "Rendben" };
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            await porter.PostAsJsonAsync("/api/key-movements/issue", request);
+        }
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await admin.PutAsJsonAsync($"/api/users/{instructorId}/pin", new { pin = "5678" })).StatusCode);
+
+        request.Pin = "5678";
+        Assert.Equal(HttpStatusCode.Created, (await porter.PostAsJsonAsync("/api/key-movements/issue", request)).StatusCode);
+    }
+
+    [Fact]
+    public async Task LeadingSpaces_InUsernameOrKeyNumber_GiveConflictInsteadOfServerError()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var roomId = await SeedRoomAsync();
+        var first = await admin.PostAsJsonAsync("/api/users", new
+        {
+            username = "szokoz.teszt", email = "szokoz@test.hu", jelszo = "Hosszujelszo1!", nev = "Szóköz", role = RoleNames.Oktato
+        });
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var duplicateUser = await admin.PostAsJsonAsync("/api/users", new
+        {
+            username = " szokoz.teszt", email = " Szokoz@test.hu", jelszo = "Hosszujelszo1!", nev = "Szóköz", role = RoleNames.Oktato
+        });
+        Assert.Equal(HttpStatusCode.Conflict, duplicateUser.StatusCode);
+
+        Assert.Equal(HttpStatusCode.Created,
+            (await admin.PostAsJsonAsync("/api/keys", new { szam = "SZ-1", tipus = "Osztalykulcs", teremId = roomId })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await admin.PostAsJsonAsync("/api/keys", new { szam = " SZ-1", tipus = "Osztalykulcs", teremId = roomId })).StatusCode);
+    }
+
+    [Fact]
+    public async Task UserPasswords_FollowTheTwelveCharacterPolicy()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+
+        var response = await admin.PostAsJsonAsync("/api/users", new
+        {
+            username = "rovid.jelszo", email = "rovid@test.hu", jelszo = "Rovid1234!", nev = "Rövid", role = RoleNames.Oktato
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task KeyStatus_ShowsIssuedForAKeyDeactivatedWhileIssued()
+    {
+        var (porter, porterId) = await CreateUserClientAsync(RoleNames.Portas);
+        var instructorId = await SeedInstructorWithPinAsync();
+        var keyId = await SeedKeyAsync(await SeedRoomAsync(), "Osztalykulcs");
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Kulcsmozgasok.Add(new Kulcsmozgas
+            {
+                KulcsId = keyId, AtvevoFelhasznaloId = instructorId, OperátorId = porterId,
+                MozgasTipus = KeyMovementTypes.Issue, Idopont = DateTime.UtcNow.AddHours(-1)
+            });
+            (await db.Kulcsok.SingleAsync(key => key.Id == keyId)).Aktivalva = false;
+            await db.SaveChangesAsync();
+        }
+
+        var status = await porter.GetFromJsonAsync<ProjektLabor.DTOs.Keys.KeyStatusDto>($"/api/keys/{keyId}/status");
+
+        Assert.Equal("Kiadva", status!.Allapot);
+        Assert.NotNull(status.AktualisBirtokosNev);
+    }
+
+    [Fact]
+    public async Task AdminBooking_MustTargetAnInstructor()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var (_, porterId) = await CreateUserClientAsync(RoleNames.Portas);
+        var roomId = await SeedRoomAsync();
+        var start = TestTime.LocalToday.AddDays(4).AddHours(10).AddMinutes(15);
+
+        var response = await admin.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
+        {
+            TeremId = roomId, FelhasznaloId = porterId, StartTime = start, EndTime = start.AddMinutes(45)
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RoleChange_FromInstructor_RequiresNoActiveBookings_AndRemovesMasterKeyGrants()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var busyInstructorId = await SeedInstructorWithPinAsync();
+        var freeInstructorId = await SeedInstructorWithPinAsync();
+        var roomId = await SeedRoomAsync();
+        var keyId = await SeedKeyAsync(roomId, "Mesterkulcs");
+        await SeedBookingAsync(busyInstructorId, roomId, DateTime.UtcNow.AddDays(2), BookingRules.ActiveStatus);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.MesterkulcsJogosultsagok.Add(new MesterkulcsJogosultsag { KulcsId = keyId, FelhasznaloId = freeInstructorId });
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PutAsJsonAsync(
+            $"/api/users/{busyInstructorId}/role", new ChangeRoleRequestDto { UjRole = RoleNames.Portas })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync(
+            $"/api/users/{freeInstructorId}/role", new ChangeRoleRequestDto { UjRole = RoleNames.Portas })).StatusCode);
+
+        using var verify = _factory.Services.CreateScope();
+        var verifyDb = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.False(await verifyDb.MesterkulcsJogosultsagok.AnyAsync(access => access.FelhasznaloId == freeInstructorId));
+    }
+
+    [Fact]
+    public async Task MasterAccess_CannotBeGrantedToInactiveInstructor()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var inactiveInstructorId = await SeedInstructorWithPinAsync(active: false);
+        var keyId = await SeedKeyAsync(await SeedRoomAsync(), "Mesterkulcs");
+
+        var response = await admin.PostAsJsonAsync($"/api/keys/{keyId}/master-access", new { userId = inactiveInstructorId });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Maintenance_RejectsDeactivatedRoomAndOverlappingWindows()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var roomId = await SeedRoomAsync();
+        var inactiveRoomId = await SeedRoomAsync();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.Termek.SingleAsync(room => room.Id == inactiveRoomId)).Aktivalva = false;
+            await db.SaveChangesAsync();
+        }
+        var start = TestTime.LocalToday.AddDays(10).AddHours(8);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync("/api/maintenance",
+            new { teremId = inactiveRoomId, startTime = start, endTime = start.AddHours(2), leiras = "Festés" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await admin.PostAsJsonAsync("/api/maintenance",
+            new { teremId = roomId, startTime = start, endTime = start.AddHours(2), leiras = "Festés" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync("/api/maintenance",
+            new { teremId = roomId, startTime = start.AddHours(1), endTime = start.AddHours(3), leiras = "Átfedő" })).StatusCode);
+    }
+
     // ---------- Segédfüggvények ----------
 
     private async Task<(HttpClient Client, int UserId)> CreateUserClientAsync(string role, bool active = true)

@@ -124,9 +124,17 @@ public static class MaintenanceEndpoints
             EndTime = AppTime.ToUtc(request.EndTime)
         };
 
-        if (!await db.Termek.AnyAsync(room => room.Id == request.TeremId, cancellationToken))
+        var targetRoom = await db.Termek
+            .AsNoTracking()
+            .SingleOrDefaultAsync(room => room.Id == request.TeremId, cancellationToken);
+        if (targetRoom is null)
         {
             return Results.NotFound(new { message = "A megadott terem nem található." });
+        }
+
+        if (!targetRoom.Aktivalva)
+        {
+            return Results.BadRequest(new { message = "Deaktivált teremre nem lehet karbantartást rögzíteni." });
         }
 
         return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
@@ -135,6 +143,11 @@ public static class MaintenanceEndpoints
             ? null
             : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
         await SqlServerLocking.AcquireAsync(db, $"room-booking:{request.TeremId}", cancellationToken);
+
+        if (await HasOverlappingMaintenanceAsync(db, request, null, cancellationToken))
+        {
+            return OverlappingMaintenance();
+        }
 
         var conflicts = await GetBookingConflictsAsync(db, request, cancellationToken);
         if (conflicts.Count > 0)
@@ -197,9 +210,17 @@ public static class MaintenanceEndpoints
             return Results.NotFound();
         }
 
-        if (!await db.Termek.AnyAsync(room => room.Id == request.TeremId, cancellationToken))
+        var targetRoom = await db.Termek
+            .AsNoTracking()
+            .SingleOrDefaultAsync(room => room.Id == request.TeremId, cancellationToken);
+        if (targetRoom is null)
         {
             return Results.NotFound(new { message = "A megadott terem nem található." });
+        }
+
+        if (!targetRoom.Aktivalva)
+        {
+            return Results.BadRequest(new { message = "Deaktivált teremre nem lehet karbantartást rögzíteni." });
         }
 
         return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
@@ -210,6 +231,11 @@ public static class MaintenanceEndpoints
         foreach (var roomId in new[] { item.TeremId, request.TeremId }.Distinct().Order())
         {
             await SqlServerLocking.AcquireAsync(db, $"room-booking:{roomId}", cancellationToken);
+        }
+
+        if (await HasOverlappingMaintenanceAsync(db, request, id, cancellationToken))
+        {
+            return OverlappingMaintenance();
         }
 
         var conflicts = await GetBookingConflictsAsync(db, request, cancellationToken);
@@ -307,6 +333,23 @@ public static class MaintenanceEndpoints
 
         return null;
     }
+
+    // Ugyanarra a teremre egymást átfedő karbantartási idősávok nem rögzíthetők.
+    private static Task<bool> HasOverlappingMaintenanceAsync(
+        AppDbContext db,
+        MaintenanceRequest request,
+        int? ownId,
+        CancellationToken cancellationToken) =>
+        db.KarbantartasiIdosavok.AnyAsync(
+            item =>
+                item.TeremId == request.TeremId &&
+                item.Id != ownId &&
+                request.StartTime < item.EndTime &&
+                request.EndTime > item.StartTime,
+            cancellationToken);
+
+    private static IResult OverlappingMaintenance() =>
+        Results.Conflict(new { message = "A megadott idősáv átfed egy már rögzített karbantartással ugyanebben a teremben." });
 
     private static Task<List<BookingConflictResponse>> GetBookingConflictsAsync(
         AppDbContext db,

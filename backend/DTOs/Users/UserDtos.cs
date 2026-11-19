@@ -34,7 +34,7 @@ namespace ProjektLabor.DTOs.Users
         public string Email { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "A jelszó megadása kötelező.")]
-        [MinLength(8, ErrorMessage = "A jelszónak legalább 8 karakter hosszúnak kell lennie.")]
+        [MinLength(12, ErrorMessage = "A jelszónak legalább 12 karakter hosszúnak kell lennie.")]
         public string Jelszo { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "A név megadása kötelező.")]
@@ -55,7 +55,7 @@ namespace ProjektLabor.DTOs.Users
         [MaxLength(100, ErrorMessage = "Az email cím legfeljebb 100 karakter lehet.")]
         public string? Email { get; set; }
 
-        [MinLength(8, ErrorMessage = "A jelszónak legalább 8 karakter hosszúnak kell lennie.")]
+        [MinLength(12, ErrorMessage = "A jelszónak legalább 12 karakter hosszúnak kell lennie.")]
         public string? UjJelszo { get; set; }
 
     }
