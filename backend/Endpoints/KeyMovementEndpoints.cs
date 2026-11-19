@@ -686,9 +686,10 @@ namespace ProjektLabor.Endpoints
                 var overdueList = new List<OverdueKeyDto>();
                 foreach (var last in latestIssues)
                 {
+                    // Ugyanaz a határidő, mint a napi zárásnál (büntetőpont, esti értesítés):
+                    // a kiadás napjának zárási időpontja. A foglalás vége csak tájékoztató adat.
                     var deadline = KeyReturnDeadlineCalculator.GetDeadlineUtc(
                         last.Idopont,
-                        last.FoglalasVege,
                         closingTime,
                         timeZone);
                     if (now > deadline)

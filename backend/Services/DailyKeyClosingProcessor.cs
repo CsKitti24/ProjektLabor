@@ -120,7 +120,6 @@ public sealed class DailyKeyClosingProcessor
             var issuedAtUtc = AsUtc(movement.Idopont);
             var deadlineUtc = KeyReturnDeadlineCalculator.GetDeadlineUtc(
                 issuedAtUtc,
-                null,
                 closingTime,
                 timeZone);
             if (nowUtc < deadlineUtc)

@@ -9,6 +9,9 @@ public static class ReportEndpoints
 {
     private const int MaximumRangeDays = 366;
     private const string InstructorRole = "Oktato";
+    // A napi zárás a határidőig vissza nem hozott kulcsokra "LeNemAdott" eseményt rögzít;
+    // a "Késedelmesen leadott" típust régebbi (kézi) adatok miatt továbbra is beszámítjuk.
+    private const string UnreturnedKeyEvent = "LeNemAdott";
     private const string LateReturnEvent = "Késedelmesen leadott";
     private const string IssueMovement = "Kiadás";
     private const string LegacyIssueMovement = "Kiadas";
@@ -316,7 +319,8 @@ public static class ReportEndpoints
         var movements = await db.Kulcsmozgasok
             .AsNoTracking()
             .Where(movement => movement.Idopont >= start && movement.Idopont < end)
-            .Select(movement => new { movement.Kulcs.TeremId, movement.MozgasTipus })
+            // Mesterkulcsnál az a terem számít, amelyre a kulcsot kiadták.
+            .Select(movement => new { TeremId = movement.TeremId ?? movement.Kulcs.TeremId, movement.MozgasTipus })
             .ToListAsync(cancellationToken);
         var bookings = await db.Foglalasok
             .AsNoTracking()
@@ -328,7 +332,7 @@ public static class ReportEndpoints
             .CountAsync(
                 item => item.EsemenyIdopontja >= start &&
                         item.EsemenyIdopontja < end &&
-                        item.EsemenyTipus == LateReturnEvent,
+                        (item.EsemenyTipus == UnreturnedKeyEvent || item.EsemenyTipus == LateReturnEvent),
                 cancellationToken);
         var rooms = await db.Termek
             .AsNoTracking()
@@ -344,7 +348,11 @@ public static class ReportEndpoints
             rooms.Select(room => new RoomTrafficItem(
                 room.Id,
                 room.Nev,
-                bookings.Count(booking => booking.TeremId == room.Id),
+                // A termenkénti foglalásszámba a lemondott és a no-show foglalás nem számít bele.
+                bookings.Count(booking =>
+                    booking.TeremId == room.Id &&
+                    booking.Status != BookingRules.CancelledStatus &&
+                    booking.Status != BookingRules.NoShowStatus),
                 movements.Count(movement =>
                     movement.TeremId == room.Id && IsIssue(movement.MozgasTipus)))).ToList());
     }

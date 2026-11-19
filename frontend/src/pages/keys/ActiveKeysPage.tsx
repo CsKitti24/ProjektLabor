@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Key, AlertCircle, RefreshCw, Clock } from 'lucide-react'
 import client from '../../api/client'
+import { formatDelay } from '../../utils/dateTime'
 
 interface KeyItem {
   id: number | string
@@ -121,7 +122,7 @@ export default function ActiveKeysPage() {
                     <td>#{key.kulcsSzam}</td>
                     <td>{key.teremNev}</td>
                     <td>{key.birtokosNev || key.birtokosEmail || 'Ismeretlen átvevő'}</td>
-                    <td>{Math.max(1, Math.round(key.késésPercekben))} perc</td>
+                    <td>{formatDelay(key.késésPercekben)}</td>
                   </tr>
                 ))}
               </tbody>

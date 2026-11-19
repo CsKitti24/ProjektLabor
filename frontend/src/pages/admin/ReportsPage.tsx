@@ -384,7 +384,7 @@ export default function ReportsPage() {
                     <div className="stat-card-value">
                       {reliabilityData?.atlagosPontszam?.toFixed(1) ?? '—'} / 100
                     </div>
-                    <div className="stat-card-label">Oktatói átlagos megbízhatóság</div>
+                    <div className="stat-card-label">Oktatói átlagos büntetőpont (a magasabb a rosszabb)</div>
                   </div>
                 </div>
 

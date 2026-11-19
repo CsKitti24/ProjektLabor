@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bell, CalendarClock, Check, RefreshCw } from 'lucide-react'
 import client from '../api/client'
+import Pagination, { DEFAULT_PAGE_SIZE } from '../components/Pagination'
 
 interface Notification {
   id: number
@@ -52,6 +53,8 @@ function getNotificationState(state: string): string {
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[] | null>(null)
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [readingId, setReadingId] = useState<number | null>(null)
@@ -62,17 +65,22 @@ export default function NotificationsPage() {
     setError('')
     setNotifications(null)
     try {
-      const response = await client.get<Notification[]>('/notifications/my')
+      const response = await client.get<Notification[]>('/notifications/my', {
+        params: { page, pageSize: DEFAULT_PAGE_SIZE },
+      })
       if (!Array.isArray(response.data)) {
         throw new Error('Az értesítések válasza érvénytelen.')
       }
       setNotifications(response.data)
+      // Az összes értesítés számát a backend az X-Total-Count fejlécben adja.
+      const headerTotal = Number(response.headers?.['x-total-count'])
+      setTotalCount(Number.isFinite(headerTotal) && headerTotal > 0 ? headerTotal : response.data.length)
     } catch {
       setError('Az értesítések betöltése nem sikerült. Próbáld újra.')
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [page])
 
   const markAsRead = async (id: number) => {
     setReadingId(id)
@@ -179,6 +187,7 @@ export default function NotificationsPage() {
               </article>
             )
           })}
+          <Pagination page={page} pageSize={DEFAULT_PAGE_SIZE} totalCount={totalCount} onPageChange={setPage} />
         </div>
       ) : (
         <div className="alert alert-error" role="alert">Az értesítések nem érhetők el.</div>

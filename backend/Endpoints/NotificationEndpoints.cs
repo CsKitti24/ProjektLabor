@@ -1,7 +1,9 @@
 using System.Globalization;
+using System.Linq.Expressions;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
+using ProjektLabor.Models;
 using ProjektLabor.Security;
 
 namespace ProjektLabor.Endpoints;
@@ -9,6 +11,33 @@ namespace ProjektLabor.Endpoints;
 public static class NotificationEndpoints
 {
     private const string PendingState = "KuldesAlatt";
+    private const int DefaultPageSize = 50;
+    private const int MaximumPageSize = 100;
+
+    // Közös leképezés. A helyiség mesterkulcsnál az a terem, amelyre a kulcsot ténylegesen kiadták
+    // (Kulcsmozgas.TeremId), nem a kulcs saját terme.
+    private static Expression<Func<Ertesites, NotificationResponse>> ToResponse(AppDbContext db) =>
+        notification => new NotificationResponse(
+            notification.Id,
+            notification.FoglalasId,
+            notification.ErtesitesTipus,
+            notification.IdoPont,
+            notification.Allapot,
+            notification.CreatedAt,
+            notification.Foglalas == null ? null : notification.Foglalas.StartTime,
+            notification.Foglalas == null ? null : notification.Foglalas.EndTime,
+            notification.Olvasva,
+            notification.Kulcsmozgas == null ? null : notification.Kulcsmozgas.Kulcs.Szam,
+            notification.Kulcsmozgas == null
+                ? null
+                : db.Termek
+                    .Where(room => room.Id == (notification.Kulcsmozgas.TeremId ??
+                        (notification.Kulcsmozgas.Foglalas != null
+                            ? notification.Kulcsmozgas.Foglalas.TeremId
+                            : notification.Kulcsmozgas.Kulcs.TeremId)))
+                    .Select(room => room.Nev)
+                    .FirstOrDefault(),
+            notification.Hatarido);
 
     public static IEndpointRouteBuilder MapNotificationEndpoints(this IEndpointRouteBuilder endpoints)
     {
@@ -33,8 +62,15 @@ public static class NotificationEndpoints
     private static async Task<IResult> GetMyNotificationsAsync(
         ClaimsPrincipal principal,
         AppDbContext db,
+        HttpContext httpContext,
+        int? page,
+        int? pageSize,
         CancellationToken cancellationToken)
     {
+        // Lapozás: a válasz továbbra is lista, az összes elem számát az X-Total-Count fejléc adja.
+        var normalizedPage = Math.Max(1, page.GetValueOrDefault(1));
+        var normalizedPageSize = pageSize is > 0 ? Math.Min(pageSize.Value, MaximumPageSize) : DefaultPageSize;
+
         var sub = principal.FindFirstValue("sub") ??
                   principal.FindFirstValue(ClaimTypes.NameIdentifier);
         if (!int.TryParse(sub, NumberStyles.None, CultureInfo.InvariantCulture, out var userId) ||
@@ -53,33 +89,23 @@ public static class NotificationEndpoints
             return Results.Forbid();
         }
 
-        var items = await db.Ertesitesek
+        var query = db.Ertesitesek
             .AsNoTracking()
             .Where(notification =>
                 notification.CimzettFelhasznaloId == userId ||
                 (notification.CimzettFelhasznaloId == null &&
                  notification.Foglalas != null &&
-                 notification.Foglalas.FelhasznaloId == userId))
+                 notification.Foglalas.FelhasznaloId == userId));
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
             .OrderByDescending(notification => notification.IdoPont)
             .ThenByDescending(notification => notification.Id)
-            .Select(notification => new NotificationResponse(
-                notification.Id,
-                notification.FoglalasId,
-                notification.ErtesitesTipus,
-                notification.IdoPont,
-                notification.Allapot,
-                notification.CreatedAt,
-                notification.Foglalas == null ? null : notification.Foglalas.StartTime,
-                notification.Foglalas == null ? null : notification.Foglalas.EndTime,
-                notification.Olvasva,
-                notification.Kulcsmozgas == null ? null : notification.Kulcsmozgas.Kulcs.Szam,
-                notification.Kulcsmozgas == null
-                    ? null
-                    : notification.Kulcsmozgas.Foglalas != null
-                        ? notification.Kulcsmozgas.Foglalas.Terem.Nev
-                        : notification.Kulcsmozgas.Kulcs.Terem.Nev,
-                notification.Hatarido))
+            .Skip((normalizedPage - 1) * normalizedPageSize)
+            .Take(normalizedPageSize)
+            .Select(ToResponse(db))
             .ToListAsync(cancellationToken);
+
+        httpContext.Response.Headers["X-Total-Count"] = totalCount.ToString(CultureInfo.InvariantCulture);
 
         return Results.Ok(items);
     }
@@ -136,26 +162,11 @@ public static class NotificationEndpoints
     {
         var items = await db.Ertesitesek
             .AsNoTracking()
-            .Where(notification => notification.Allapot == PendingState)
+            // Függő: még el nem olvasott, vagy (külső csatornánál) küldés alatt álló értesítés.
+            .Where(notification => !notification.Olvasva || notification.Allapot == PendingState)
             .OrderBy(notification => notification.CreatedAt)
             .ThenBy(notification => notification.Id)
-            .Select(notification => new NotificationResponse(
-                notification.Id,
-                notification.FoglalasId,
-                notification.ErtesitesTipus,
-                notification.IdoPont,
-                notification.Allapot,
-                notification.CreatedAt,
-                notification.Foglalas == null ? null : notification.Foglalas.StartTime,
-                notification.Foglalas == null ? null : notification.Foglalas.EndTime,
-                notification.Olvasva,
-                notification.Kulcsmozgas == null ? null : notification.Kulcsmozgas.Kulcs.Szam,
-                notification.Kulcsmozgas == null
-                    ? null
-                    : notification.Kulcsmozgas.Foglalas != null
-                        ? notification.Kulcsmozgas.Foglalas.Terem.Nev
-                        : notification.Kulcsmozgas.Kulcs.Terem.Nev,
-                notification.Hatarido))
+            .Select(ToResponse(db))
             .ToListAsync(cancellationToken);
 
         return Results.Ok(items);

@@ -80,7 +80,10 @@ public sealed class NoShowProcessor
                 continue;
             }
 
-            if (roomsWithIssuedKey.Contains(booking.TeremId))
+            // Ha a terem kulcsa éppen kint van (pl. az előző foglalás oktatójánál), a foglalás idején
+            // még várunk. A foglalás vége után viszont – ha a foglaló a kulcsot nem vette fel – már
+            // no-show, különben a foglalás örökre "Aktív" maradna.
+            if (roomsWithIssuedKey.Contains(booking.TeremId) && booking.EndTime > nowUtc)
             {
                 _logger.LogInformation(
                     "Booking {BookingId} for room {RoomId} has an active key movement, skipping NoShow marking.",
