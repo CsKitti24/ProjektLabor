@@ -253,6 +253,26 @@ public class BackgroundAutomationTests
     }
 
     [Fact]
+    public async Task NoShow_WaitsWhileRoomKeyIsOut_ButMarksNoShowAfterBookingEnds()
+    {
+        await using var db = CreateDb();
+        var startTime = new DateTime(2026, 4, 4, 10, 0, 0, DateTimeKind.Utc);
+        var (booking, operatorUser) = await SeedBookingAsync(db, "Aktiv", startTime);
+        var key = await AddKeyAsync(db, booking.TeremId, "NS-OTHER");
+        var otherInstructor = CreateUser("Oktato");
+        db.Felhasznalok.Add(otherInstructor);
+        await db.SaveChangesAsync();
+        // A terem kulcsa egy másik oktatónál van, és nem hozta vissza.
+        await AddMovementAsync(db, key.Id, null, operatorUser.Id, "Kiadás", startTime.AddHours(-2), otherInstructor.Id);
+        var processor = new NoShowProcessor(db, NullLogger<NoShowProcessor>.Instance);
+
+        Assert.Equal(0, await processor.ProcessAsync(startTime.AddMinutes(20), default));
+        Assert.Equal("Aktiv", booking.Status);
+        Assert.Equal(1, await processor.ProcessAsync(booking.EndTime.AddMinutes(1), default));
+        Assert.Equal("NoShow", booking.Status);
+    }
+
+    [Fact]
     public async Task BookingExpiryNotification_IsCreatedOnceForActiveBooking()
     {
         await using var db = CreateDb();

@@ -13,6 +13,8 @@ public static class SystemAdministrationEndpoints
     private const int DefaultPageSize = 50;
     private const int MaximumPageSize = 100;
     private const string ClosingTimeKey = "napi_kulcsleadasi_zarasi_idopont";
+    // A legrövidebb foglalás 45 perces; ennél hosszabb türelmi idő után már nincs értelme no-show-t jelölni.
+    private const int MaximumNoShowLimitMinutes = 45;
     private const string NoShowLimitKey = "no_show_idokorlat_perc";
 
     public static IEndpointRouteBuilder MapSystemAdministrationEndpoints(
@@ -252,22 +254,31 @@ public static class SystemAdministrationEndpoints
 
     private static string? ValidateParameterValue(string key, string value)
     {
-        if (key == ClosingTimeKey &&
-            !TimeOnly.TryParseExact(
-                value,
-                "HH:mm",
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.None,
-                out _))
+        if (key == ClosingTimeKey)
         {
-            return "A napi zárási időpont HH:mm formátumú legyen (például 22:00).";
+            if (!TimeOnly.TryParseExact(
+                    value,
+                    "HH:mm",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var closingTime))
+            {
+                return "A napi zárási időpont HH:mm formátumú legyen (például 22:00).";
+            }
+
+            // A foglalások legkésőbb 20:00-ig tartanak; korábbi zárás az esti foglalások kulcsát
+            // azonnal büntetné.
+            if (closingTime < new TimeOnly(20, 0))
+            {
+                return "A napi zárási időpont nem lehet korábbi 20:00-nál (a foglalások 20:00-ig tartanak).";
+            }
         }
 
         if (key == NoShowLimitKey &&
             (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) ||
-             minutes <= 0))
+             minutes is < 1 or > MaximumNoShowLimitMinutes))
         {
-            return "A no-show időkorlát pozitív egész szám legyen percben.";
+            return $"A no-show időkorlát 1 és {MaximumNoShowLimitMinutes} perc közötti egész szám legyen.";
         }
 
         return null;

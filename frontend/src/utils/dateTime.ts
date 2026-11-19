@@ -19,3 +19,14 @@ export function localDateTimeToIso(date: string, time: string): string {
 export function localInputToIso(value: string): string {
   return new Date(value).toISOString()
 }
+
+// Napokig tartó késésnél is olvasható formátum, pl. "4 nap 12 óra" vagy "35 perc".
+export function formatDelay(minutes: number): string {
+  const total = Math.max(1, Math.round(minutes))
+  const days = Math.floor(total / 1440)
+  const hours = Math.floor((total % 1440) / 60)
+  const mins = total % 60
+  if (days > 0) return hours > 0 ? `${days} nap ${hours} óra` : `${days} nap`
+  if (hours > 0) return mins > 0 ? `${hours} óra ${mins} perc` : `${hours} óra`
+  return `${mins} perc`
+}

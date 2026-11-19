@@ -2,17 +2,16 @@ namespace ProjektLabor.Services;
 
 internal static class KeyReturnDeadlineCalculator
 {
+    /// <summary>
+    /// A kulcs visszahozatali határideje: a kiadás (helyi) napjának zárási időpontja, vagy ha a kiadás
+    /// a zárás után történt, a következő napé. Ugyanezt használja a napi zárás (büntetőpont, esti
+    /// értesítés) és a lejárt kulcsok listája, így a kettő mindig egyezik.
+    /// </summary>
     public static DateTime GetDeadlineUtc(
         DateTime issuedAtUtc,
-        DateTime? bookingEndUtc,
         TimeOnly closingTime,
         TimeZoneInfo timeZone)
     {
-        if (bookingEndUtc.HasValue)
-        {
-            return DateTime.SpecifyKind(bookingEndUtc.Value, DateTimeKind.Utc);
-        }
-
         var localIssuedAt = TimeZoneInfo.ConvertTimeFromUtc(
             DateTime.SpecifyKind(issuedAtUtc, DateTimeKind.Utc),
             timeZone);

@@ -561,6 +561,138 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
         Assert.False(await db.Foglalasok.AnyAsync(booking => booking.TeremId == roomId));
     }
 
+    // ---------- Riportok, értesítések, paraméterek ----------
+
+    [Fact]
+    public async Task DailyReport_CountsUnreturnedKeyPenalties_IssuedRoomAndOnlyRealBookings()
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        var (_, porterId) = await CreateUserClientAsync(RoleNames.Portas);
+        var instructorId = await SeedInstructorWithPinAsync();
+        var homeRoomId = await SeedRoomAsync();
+        var otherRoomId = await SeedRoomAsync();
+        var keyId = await SeedKeyAsync(homeRoomId, "Mesterkulcs");
+        var day = new DateTime(2026, 10, 5, 0, 0, 0, DateTimeKind.Utc);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Kulcsmozgasok.Add(new Kulcsmozgas
+            {
+                KulcsId = keyId, TeremId = otherRoomId, AtvevoFelhasznaloId = instructorId,
+                OperátorId = porterId, MozgasTipus = KeyMovementTypes.Issue, Idopont = day.AddHours(8)
+            });
+            db.MegbizhatosagiEsemenyek.Add(new MegbizhatosagiEsemeny
+            {
+                FelhasznaloId = instructorId, KulcsId = keyId, EsemenyTipus = "LeNemAdott", Pont = 3,
+                Automatikus = true, Tanev = "2026/2027", EsemenyIdopontja = day.AddHours(20)
+            });
+            db.Foglalasok.AddRange(
+                new Foglalas { FelhasznaloId = instructorId, TeremId = otherRoomId, Status = BookingRules.ActiveStatus,
+                    StartTime = day.AddHours(9), EndTime = day.AddHours(10) },
+                new Foglalas { FelhasznaloId = instructorId, TeremId = otherRoomId, Status = BookingRules.CancelledStatus,
+                    StartTime = day.AddHours(11), EndTime = day.AddHours(12) });
+            await db.SaveChangesAsync();
+        }
+
+        var report = await admin.GetFromJsonAsync<ProjektLabor.Endpoints.ReportEndpoints.DailyReportResponse>(
+            "/api/reports/daily?datum=2026-10-05");
+
+        Assert.NotNull(report);
+        Assert.Equal(1, report.OsszesKesedelmesFoglalas);
+        var other = Assert.Single(report.TermenkintiForgalom, room => room.TeremId == otherRoomId);
+        Assert.Equal(1, other.Foglalasok);
+        Assert.Equal(1, other.Kulcskiadasok);
+        Assert.Equal(0, Assert.Single(report.TermenkintiForgalom, room => room.TeremId == homeRoomId).Kulcskiadasok);
+    }
+
+    [Fact]
+    public async Task OverdueKeys_UseDailyClosingDeadline_NotBookingEnd()
+    {
+        var (porter, porterId) = await CreateUserClientAsync(RoleNames.Portas);
+        var instructorId = await SeedInstructorWithPinAsync();
+        var roomId = await SeedRoomAsync();
+        var keyId = await SeedKeyAsync(roomId, "Osztalykulcs");
+        // A foglalás már véget ért, de a napi zárás (22:00) még hátravan / a következő napra esik.
+        var bookingId = await SeedBookingAsync(instructorId, roomId, DateTime.UtcNow.AddMinutes(-50), BookingRules.ActiveStatus);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Kulcsmozgasok.Add(new Kulcsmozgas
+            {
+                KulcsId = keyId, FoglalasId = bookingId, TeremId = roomId, AtvevoFelhasznaloId = instructorId,
+                OperátorId = porterId, MozgasTipus = KeyMovementTypes.Issue, Idopont = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var overdue = await porter.GetFromJsonAsync<List<OverdueKeyDto>>("/api/key-movements/overdue");
+
+        Assert.DoesNotContain(overdue!, item => item.KulcsId == keyId);
+    }
+
+    [Fact]
+    public async Task PorterNotifications_ShowIssuedRoomForMasterKey_AreCountedAndListedAsPending()
+    {
+        var (porter, porterId) = await CreateUserClientAsync(RoleNames.Portas);
+        var instructorId = await SeedInstructorWithPinAsync();
+        var homeRoomId = await SeedRoomAsync();
+        var otherRoomId = await SeedRoomAsync();
+        var keyId = await SeedKeyAsync(homeRoomId, "Mesterkulcs");
+        string otherRoomName;
+        int notificationId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            otherRoomName = (await db.Termek.SingleAsync(room => room.Id == otherRoomId)).Nev;
+            var movement = new Kulcsmozgas
+            {
+                KulcsId = keyId, TeremId = otherRoomId, AtvevoFelhasznaloId = instructorId,
+                OperátorId = porterId, MozgasTipus = KeyMovementTypes.Issue, Idopont = DateTime.UtcNow.AddDays(-1)
+            };
+            db.Kulcsmozgasok.Add(movement);
+            await db.SaveChangesAsync();
+            var notification = new Ertesites
+            {
+                CimzettFelhasznaloId = porterId, KulcsmozgasId = movement.Id, ErtesitesTipus = "EveningKeyReturn",
+                IdoPont = DateTime.UtcNow, Allapot = "Kesz", CreatedAt = DateTime.UtcNow
+            };
+            db.Ertesitesek.Add(notification);
+            await db.SaveChangesAsync();
+            notificationId = notification.Id;
+        }
+
+        var response = await porter.GetAsync("/api/notifications/my?page=1&pageSize=10");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("1", Assert.Single(response.Headers.GetValues("X-Total-Count")));
+        var mine = await response.Content.ReadFromJsonAsync<List<ProjektLabor.Endpoints.NotificationEndpoints.NotificationResponse>>();
+        Assert.Equal(otherRoomName, Assert.Single(mine!).TeremNev);
+
+        var pending = await porter.GetFromJsonAsync<List<ProjektLabor.Endpoints.NotificationEndpoints.NotificationResponse>>(
+            "/api/notifications/pending");
+        Assert.Contains(pending!, item => item.Id == notificationId);
+    }
+
+    [Theory]
+    [InlineData("napi_kulcsleadasi_zarasi_idopont", "19:00")]
+    [InlineData("no_show_idokorlat_perc", "60")]
+    public async Task Parameters_RejectUnreasonableValues(string key, string value)
+    {
+        var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            if (!await db.Rendszerparameterek.AnyAsync(item => item.Kulcs == key))
+            {
+                db.Rendszerparameterek.Add(new Rendszerparameter { Kulcs = key, Ertek = key.StartsWith("napi") ? "22:00" : "15" });
+                await db.SaveChangesAsync();
+            }
+        }
+
+        var response = await admin.PutAsJsonAsync($"/api/parameters/{key}", new { ertek = value });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     // ---------- Segédfüggvények ----------
 
     private async Task<(HttpClient Client, int UserId)> CreateUserClientAsync(string role, bool active = true)
