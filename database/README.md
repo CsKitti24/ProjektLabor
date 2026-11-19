@@ -14,6 +14,12 @@ migrációs lánca. A jelenlegi, időrendi sorrend:
 9. `20261109120001_AddKeyPinsAndMovementCondition`
 10. `20261110164046_AddRecipientAwareKeyReturnNotifications`
 11. `20261110181630_BackfillMasterKeyRooms`
+12. `20261117190736_ConvertBookingAndMaintenanceTimesToUtc`
+13. `20261117193607_AddUserSoftDeletePinLockAndMovementRoom`
+14. `20261117202129_SeedRoleUsersAndReliabilitySample`
+15. `20261117202900_RemoveUserBirthDate`
+16. `20261117203019_GiveSampleInstructorsDistinctPins`
+17. `20261117204241_LinkSampleKeyIssuesToBookings`
 
 Az 8. és 9. migráció a `Termek.Felszereltseg`,
 `Foglalasok.SpecialisIgenyek`, `Felhasznalok.PinHash`,
@@ -25,6 +31,18 @@ hivatkozásokat, valamint nullable határidőt ad az értesítéshez; az új
 nem törli vagy alakítja át a meglévő értesítési rekordokat.
 A 11. migráció az eddigi mesterkulcsok elsődleges termét beállítja a
 `KulcsTerem` kapcsolótáblában; meglévő hozzárendelést nem töröl.
+
+A 12. migráció a foglalások és karbantartási idősávok korábban helyi (budapesti)
+időben tárolt kezdő/záró időpontját UTC-re alakítja; ezután minden időpont UTC.
+A 13. migráció felveszi a `Felhasznalok.Aktiv` (alapból igaz),
+`PinHibasProbalkozasok` és `PinZarolvaEddig`, valamint a `Kulcsmozgasok.TeremId`
+(a kiadás terme) oszlopot, és a meglévő mozgásoknál kitölti a termet.
+A 14. migráció szerepkörönként egy közös kezdő fiókot (`admin`, `oktato`,
+`portas`, `igazgato`) és egy mintaoktatót vesz fel előzményekkel, a korábbi
+`demo-*` fiókokat inaktiválja. A 15. migráció törli a nem használt
+`Felhasznalok.SzuletesiDatum` oszlopot. A 16. migráció eltérő PIN-t ad a két
+mintaoktatónak (csak ha még a mintaértéken áll), a 17. a mintaoktató kulcskiadásait
+lezárt foglalásokhoz köti. Mindegyik migráció visszavonható.
 
 Az `InitialCreate` hozza létre többek között a felhasználók, termek, kulcsok,
 foglalások, kulcsmozgások, értesítések, hibajegyek, karbantartási idősávok,
