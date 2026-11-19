@@ -56,6 +56,8 @@ function getNavItems(role: UserRole): NavItem[] {
         { to: '/users', label: 'Felhasználók', icon: <Users size={17} strokeWidth={1.5} /> },
         { to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> },
         { to: '/keys', label: 'Kulcsok', icon: <Key size={17} strokeWidth={1.5} /> },
+        { to: '/active-keys', label: 'Aktív kulcsok', icon: <Key size={17} strokeWidth={1.5} /> },
+        { to: '/key-movements', label: 'Kulcsmozgások', icon: <List size={17} strokeWidth={1.5} /> },
         { to: '/bookings', label: 'Foglalások', icon: <CalendarDays size={17} strokeWidth={1.5} /> },
         { to: '/maintenance', label: 'Karbantartás', icon: <Wrench size={17} strokeWidth={1.5} /> },
         { to: '/tickets', label: 'Hibajegyek', icon: <FileText size={17} strokeWidth={1.5} /> },

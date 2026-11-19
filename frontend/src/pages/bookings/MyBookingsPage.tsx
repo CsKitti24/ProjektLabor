@@ -68,6 +68,8 @@ export default function MyBookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
+  // A betöltés pillanata: ehhez képest döntjük el, mely foglalás kezdődött már el.
+  const [loadedAt, setLoadedAt] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -75,6 +77,7 @@ export default function MyBookingsPage() {
       .get<Booking[]>('/bookings/my', { signal: controller.signal })
       .then((r) => {
         setBookings(r.data)
+        setLoadedAt(Date.now())
         setIsLoading(false)
       })
       .catch((err: unknown) => {
@@ -90,9 +93,12 @@ export default function MyBookingsPage() {
     if (!window.confirm('Biztosan vissza szeretnéd vonni ezt a foglalást?')) return
     try {
       await client.delete(`/bookings/${id}`)
-      setBookings((prev) => prev.filter((b) => b.id !== id))
-    } catch {
-      alert('A foglalás visszavonása sikertelen.')
+      // A lemondott foglalás nem tűnik el: "Megszüntetve" állapotban marad a listában, ahogy újratöltés után is.
+      setBookings((prev) => prev.map((b) => (b.id === id ? { ...b, status: 'Megszuntetve' } : b)))
+      setError('')
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { message?: string } } }
+      setError(axErr.response?.data?.message || 'A foglalás visszavonása sikertelen.')
     }
   }
 
@@ -149,7 +155,9 @@ export default function MyBookingsPage() {
                   const roomName = b.teremNev ?? b.roomName ?? b.room?.name ?? '—'
                   const dateStr = formatDate(b.startTime || b.date)
                   const timeRangeStr = formatTimeRange(b.startTime, b.endTime)
-                  const isCancelable = b.status === 'Aktiv' || b.status === 'Active' || !b.status
+                  // Megkezdett foglalást oktató nem mondhat le (a backend is elutasítja), ezért a gomb sem jelenik meg.
+                  const hasStarted = b.startTime ? new Date(b.startTime).getTime() <= loadedAt : false
+                  const isCancelable = (b.status === 'Aktiv' || b.status === 'Active' || !b.status) && !hasStarted
 
                   return (
                     <tr key={b.id}>

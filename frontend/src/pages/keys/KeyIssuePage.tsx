@@ -254,7 +254,11 @@ export default function KeyIssuePage() {
                 ))}
               </select>
             ) : (
-              <p className="form-hint">Ehhez a kulcshoz nincs beállított átvevői jogosultság.</p>
+              <p className="form-hint">
+                {keyId
+                  ? 'Ehhez a kulcshoz nincs beállított átvevői jogosultság.'
+                  : 'Előbb válassz kiadható kulcsot.'}
+              </p>
             )}
           </div>
 

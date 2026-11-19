@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ProjektLabor.Data;
 using ProjektLabor.Security;
+using ProjektLabor.Services;
 
 namespace backend.Tests;
 
@@ -107,6 +108,63 @@ public class SecurityHardeningTests : IClassFixture<WebApplicationFactory<Progra
 
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/auth/logout", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Cors_AllowsCookiesForConfiguredOrigin()
+    {
+        using var client = _factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/health");
+        request.Headers.Add("Origin", "http://localhost:3000");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal("true", Assert.Single(response.Headers.GetValues("Access-Control-Allow-Credentials")));
+    }
+
+    [Fact]
+    public async Task UnhandledException_ReturnsJsonMessage_InsteadOfEmptyServerError()
+    {
+        // Egy szándékosan hibázó szolgáltatással váltunk ki váratlan kivételt egy végpontban.
+        using var failingFactory = _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+                services.AddSingleton<TimeProvider>(new ThrowingTimeProvider())));
+        using (var scope = failingFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Felhasznalok.Add(new ProjektLabor.Models.Felhasznalo
+            {
+                Username = "hiba.teszt", Email = "hiba.teszt@test.hu", Nev = "Hiba Teszt",
+                Role = RoleNames.Oktato, JelszoHash = "x"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var client = failingFactory.CreateClient();
+        using (var scope = failingFactory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
+            var user = await db.Felhasznalok.SingleAsync(item => item.Username == "hiba.teszt");
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", auth.GenerateJwtToken(user));
+        }
+
+        var start = TestTime.LocalToday.AddDays(3).AddHours(10).AddMinutes(15);
+        var response = await client.PostAsJsonAsync("/api/bookings", new
+        {
+            teremId = 1, startTime = start, endTime = start.AddMinutes(45)
+        });
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Váratlan szerverhiba", body);
+        Assert.DoesNotContain("ThrowingTimeProvider", body);
+    }
+
+    private sealed class ThrowingTimeProvider : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => throw new InvalidOperationException("Szándékos tesztkivétel.");
     }
 
     [Theory]

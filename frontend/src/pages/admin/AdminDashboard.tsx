@@ -70,25 +70,32 @@ export default function AdminDashboard() {
     setStats(null)
 
     try {
+      // A "mai nap" a böngésző helyi naptári napja (nem az UTC szerinti nap).
       const now = new Date()
-      const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-      const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000)
-      const [roomsRes, keysRes, bookingsRes, ticketsData] = await Promise.all([
-        client.get<Array<unknown>>('/rooms'),
-        client.get<Array<{ jelenlegiAllapot?: string }>>('/keys'),
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      // Mai foglalásnak csak az aktív és a lezajlott (Kész) számít; a lemondott és a no-show nem.
+      const countTodayBookings = (status: string) =>
         client.get<BookingListResponse>('/bookings', {
           params: {
             page: 1,
             pageSize: 1,
+            status,
             tol: startOfDay.toISOString(),
             ig: endOfDay.toISOString(),
           },
-        }),
+        })
+      const [roomsRes, keysRes, activeBookingsRes, doneBookingsRes, ticketsData] = await Promise.all([
+        client.get<Array<{ aktivalva?: boolean }>>('/rooms'),
+        client.get<Array<{ jelenlegiAllapot?: string }>>('/keys'),
+        countTodayBookings('Aktiv'),
+        countTodayBookings('Kesz'),
         fetchAllTickets(),
       ])
 
       if (!Array.isArray(roomsRes.data) || !Array.isArray(keysRes.data) ||
-          !Number.isInteger(bookingsRes.data.totalCount)) {
+          !Number.isInteger(activeBookingsRes.data.totalCount) ||
+          !Number.isInteger(doneBookingsRes.data.totalCount)) {
         throw new Error('Az áttekintő adatok formátuma érvénytelen.')
       }
 
@@ -98,9 +105,9 @@ export default function AdminDashboard() {
       ).length
 
       setStats({
-        rooms: roomsRes.data.length,
+        rooms: roomsRes.data.filter((room) => room.aktivalva !== false).length,
         activeKeys,
-        todayBookings: bookingsRes.data.totalCount,
+        todayBookings: activeBookingsRes.data.totalCount + doneBookingsRes.data.totalCount,
         openTickets,
       })
     } catch {
