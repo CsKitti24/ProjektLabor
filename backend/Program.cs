@@ -193,9 +193,12 @@ builder.Services.AddCors(options =>
     {
         if (allowedOrigins.Length > 0)
         {
+            // A bejelentkezés HttpOnly sütiben utazik, ezért a felsorolt originöknek a sütit is
+            // engedni kell (AllowAnyOrigin mellett ez nem lenne megengedett, itt csak listás origin van).
             policy.WithOrigins(allowedOrigins)
                 .AllowAnyHeader()
-                .AllowAnyMethod();
+                .AllowAnyMethod()
+                .AllowCredentials();
         }
     });
 });
@@ -234,6 +237,22 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+
+// Közös hibakezelő: váratlan hiba esetén egységes, magyar nyelvű JSON választ adunk (üres 500 helyett),
+// a részletek csak a szervernaplóba kerülnek.
+app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
+{
+    var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("UnhandledException");
+    logger.LogError(exception, "Unhandled exception for {Method} {Path}.", context.Request.Method, context.Request.Path);
+
+    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    await context.Response.WriteAsJsonAsync(new
+    {
+        message = "Váratlan szerverhiba történt. Kérjük, próbáld újra, és ha a hiba ismétlődik, jelezd az üzemeltetésnek.",
+        traceId = context.TraceIdentifier
+    });
+}));
 
 app.UseForwardedHeaders();
 app.UseCors("AllowFrontend");

@@ -283,6 +283,7 @@ export default function NewBookingPage() {
               id="booking-date"
               type="date"
               className="form-input"
+              min={localDateInputValue()}
               value={date}
               onChange={(e) => setDate(e.target.value)}
               required
