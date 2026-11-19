@@ -1,7 +1,7 @@
 # Egyetemi Kulcs- és Teremnyilvántartó Rendszer (ProjektLabor) – Részletes Projektterv és Rendszerterv
 
-**Dokumentum verzió:** 2.0  
-**Utolsó állapotfelvétel:** 2026. november 4.  
+**Dokumentum verzió:** 2.1  
+**Utolsó állapotfelvétel:** 2026. november 19.  
 **Cél:** A papíralapú kulcskiadás, teremfoglalás, hibajegy-kezelés és kapcsolódó adminisztráció kiváltása egy modern, automatizált, biztonságos, szerepkör-alapú webalkalmazással.
 
 ---
@@ -43,7 +43,7 @@ mindmap
       Indoklással védett admin korrekció
     Biztonság és Audit
       BCrypt jelszóvédelem
-      JWT Bearer állapotmentes auth
+      JWT HttpOnly sütiben, adatbázis-ellenőrzéssel
       Szerepkör-alapú jogosultságok (RBAC)
       Megváltoztathatatlan eseménynapló
     Felhasználói felület
@@ -77,8 +77,8 @@ flowchart TB
     subgraph Kliens["Frontend Réteg (Single Page Application)"]
         UI["React 19 + TypeScript + Vite"]
         Router["React Router 7 (Szerepkör-védett utak)"]
-        State["AuthContext + LocalStorage JWT"]
-        HTTP["Axios kliens (Bearer Interceptor)"]
+        State["AuthContext (munkamenet: /api/auth/me)"]
+        HTTP["Axios kliens (HttpOnly süti, azonos origin)"]
         UI --> Router --> State --> HTTP
     end
 
@@ -100,10 +100,11 @@ flowchart TB
             S_Auth["AuthService (BCrypt)"]
             S_Rules["BookingRules (Idősáv & Átfedés)"]
             S_Audit["AuditService (Tranzakciós napló)"]
-            S_Lock["SqlServerLocking (UPDLOCK)"]
+            S_Lock["SqlServerLocking (sp_getapplock)"]
             BG_NoShow["NoShowBackgroundService"]
             BG_Closing["DailyKeyClosingBackgroundService"]
             BG_Notif["BookingExpiryNotificationBackgroundService"]
+            BG_Done["BookingCompletionBackgroundService"]
         end
 
         GW --> AuthM --> RBAC --> Endpoints
@@ -124,12 +125,16 @@ flowchart TB
 - **React 19 és TypeScript:** Szigorú típusosság a DTO objektumokkal.
 - **Vite építőrendszer:** Gyors HMR (Hot Module Replacement) és optimalizált production bundle.
 - **Natív CSS és Lucide ikonok:** A saját `index.css` stílusrendszer és a Lucide ikonkönyvtár biztosít letisztult, akadálymentesített, modern egyetemi kezelőfelületet.
-- **Navigáció és védelem:** `ProtectedRoute` komponens ellenőrzi az aktuális token érvényességét és a szerepkör egyezését. Illetéktelen elérés esetén a felhasználó azonnal visszairányításra kerül.
+- **Navigáció és védelem:** `ProtectedRoute` komponens ellenőrzi a bejelentkezést és a szerepkör egyezését. Illetéktelen elérés esetén a felhasználó azonnal visszairányításra kerül.
+- **Munkamenet:** a token HttpOnly sütiben utazik, a kliens nem tárolja (`localStorage`-ban sem); indításkor a `/api/auth/me` állítja helyre a bejelentkezett felhasználót.
+- **Éles kiszolgálás:** a frontend éles buildjét nginx szolgálja ki, és az `/api` kéréseket a backendre továbbítja (azonos origin, CORS nélkül).
 
 ### 3.2. Backend API megvalósítás
 - **.NET 8 Minimal API:** Magas teljesítmény, alacsony memóriahasználat, logikailag szeparált `MapGroup` végpont-osztályok.
-- **Állapotmentes JWT:** HMAC-SHA256 aláírással ellátott tokenek 32+ bájtos egyedi kulccsal.
+- **JWT HttpOnly sütiben:** HMAC-SHA256 aláírással ellátott tokenek 32+ bájtos egyedi kulccsal. Minden kérésnél az adatbázis alapján is ellenőrizzük, hogy a felhasználó létezik, aktív, és a szerepköre egyezik – így az inaktiválás és a szerepkörváltás azonnal hat.
 - **Szerepkör-házirendek (Policies):** Deklaratív `.RequireAuthorization("PolicyName")` védelem. Ha nincs token: `401 Unauthorized`; ha a szerepkör nem megfelelő: `403 Forbidden`.
+- **Védelmi rétegek:** bejelentkezési kéréskorlát (IP-nként percenként 10), PIN-zárolás 5 hibás próbálkozás után, a DTO-k ellenőrző attribútumai minden végponton (hibás bemenetre `400`), egységes magyar nyelvű hibaválasz váratlan hibánál, szűkített CORS, időkorlátos health-check.
+- **Időkezelés:** az adatbázisban és az API-ban minden időpont UTC; a nyitvatartási és idősáv-szabályokat a backend az intézmény helyi ideje (`Europe/Budapest`) szerint ellenőrzi.
 
 ---
 
@@ -319,9 +324,11 @@ erDiagram
    - `AuditLog.AutomationKey` és `Ertesites.AutomationKey` szűrt egyedi indexszel van ellátva (`WHERE AutomationKey IS NOT NULL`), így a háttérszolgáltatások még hálózati újrapróbálkozás esetén sem hozhatnak létre duplikált eseményeket vagy értesítéseket.
    - `MegbizhatosagiEsemeny.KiadasiKulcsmozgasId` egyedi indexe garantálja, hogy egyazon kulcskiadáshoz ne képződhessen kétszer automatikus büntetőpont.
 3. **Konkurenciakezelés és Zárolás:**
-   - Kulcskiadáskor a rendszer a `SqlServerLocking` szervizen keresztül explicit `WITH (UPDLOCK, HOLDLOCK)` szintű zárolást alkalmaz a célkulcsra, kizárva a párhuzamos kiadások versenyhelyzetét (race condition).
+   - Kulcskiadáskor és -visszavételkor, valamint foglalás és karbantartás rögzítésekor a rendszer a `SqlServerLocking` szervizen keresztül SQL Server-alkalmazászárat (`sp_getapplock`, kulcsonként, illetve termenként) és Serializable tranzakciót használ, kizárva a párhuzamos kérések versenyhelyzetét (race condition).
 4. **Alapértelmezett beültetett adatok (Seed data):**
-   - Rendszerparaméterek: `napi_kulcsleadasi_zarasi_idopont = "22:00"`, `no_show_idokorlat_perc = "15"`.
+   - Rendszerparaméterek: `napi_kulcsleadasi_zarasi_idopont = "22:00"` (nem lehet korábbi 20:00-nál), `no_show_idokorlat_perc = "15"` (1–45 perc).
+   - Szerepkörönként egy közös kezdő fiók (`admin`, `oktato`, `portas`, `igazgato`) és egy mintaoktató előzményekkel (kulcskiadások, foglalások, büntetőpontok); a korábbi demófiókok inaktiválva.
+5. **Előzmények megőrzése:** felhasználó, terem és kulcs nem törlődik, csak inaktiválódik; az auditnapló és a megbízhatósági események csak bővíthetők.
 
 ---
 
@@ -331,45 +338,53 @@ erDiagram
 - **Idősávok:** Egyetemi napokon 08:00 és 20:00 között engedélyezett a foglalás, 45 perces órarendi egységekben.
 - **Átfedésmentesség:** Az aktív státuszú (`Aktiv`) foglalások nem fedhetik egymást ugyanabban a teremben. A foglalás érvénytelenítését az `AppDbContext.SaveChanges` és `SaveChangesAsync` metódus szintjén beépített belső validátor kényszeríti ki.
 - **Karbantartási prioritás:** Karbantartási idősávval fedésben lévő időpontra nem hozható létre és nem módosítható foglalás.
-- **Státuszok:** `Aktiv`, `NoShow` (nem vették fel a kulcsot időben), `Megszuntetve` (lemondott), `Kesz` (sikeresen lezárult). A `NoShow` és `Megszuntetve` státuszú tételek nem blokkolnak új foglalást.
+- **Státuszok:** `Aktiv`, `NoShow` (nem vették fel a kulcsot időben), `Megszuntetve` (lemondott), `Kesz` (lezajlott, a kulcsot felvették – automatikusan áll be). A `NoShow` és `Megszuntetve` státuszú tételek nem blokkolnak új foglalást.
+- **További szabályok:** múltbeli időpontra és deaktivált teremre nem lehet foglalni; foglalás csak oktató nevére szólhat; csak aktív foglalás mondható le; megkezdett foglalást oktató nem mondhat le, és megkezdett foglalás időpontja nem módosítható.
+- **Terem deaktiválása:** jövőbeli aktív foglalás mellett csak a foglalások kifejezett lemondásával lehetséges. Karbantartás deaktivált teremre nem rögzíthető, és egymást átfedő karbantartások sem.
 
 ### 5.2. Fizikai kulcskezelés és mozgások
 - **Kiadás feltételei:**
   - Csak `Portas` jogosultsággal rendelkező operátor végezheti.
-  - Hagyományos teremkulcs csak érvényes, aktív foglalással rendelkező felhasználónak adható ki.
-  - Mesterkulcs csak az adatbázisban nyilvántartott, explicit felhatalmazással bíró felhasználónak adható ki.
-  - Nem adható ki olyan kulcs, amely már kiadott állapotban van (nincs lezárva visszavétellel).
+  - Kulcsot csak aktív oktató vehet át, az átvevő PIN-kódjának megadásával (5 egymás utáni hibás PIN után 15 perces zárolás).
+  - Foglaláshoz a kulcs legkorábban a kezdés előtt 2 órával, legkésőbb a foglalás végéig adható ki. Foglalás nélküli kiadásnál a rendszer a kiadást az átvevő erre a teremre szóló, éppen esedékes aktív foglalásához köti, ha van ilyen.
+  - Mesterkulcs csak az adatbázisban nyilvántartott, explicit felhatalmazással bíró oktatónak, és csak a kulcshoz rendelt termekre adható ki.
+  - Nem adható ki olyan kulcs, amely már kiadott állapotban van (nincs lezárva visszavétellel). Kint lévő kulcs nem deaktiválható, és típusa vagy terme sem módosítható.
 - **Visszavétel:**
-  - A visszavétel időpontja rögzítésre kerül. Ha az időpont meghaladja a foglalás végét (vagy a 22:00-s zárást), a rendszer késedelmesként rögzíti a mozgást.
+  - A visszavétel időpontja és a terem állapota rögzítésre kerül; sérülés leírásakor automatikus hibajegy készül arra a teremre, amelyre a kulcsot kiadták.
+  - **Határidő:** a kiadás napjának zárási időpontja (alapból 22:00). Ha a kulcs addig nem került vissza, a napi zárás „Le nem adott” eseményt rögzít (lásd 5.3).
 
 ### 5.3. Megbízhatósági pontrendszer (Oktatói SLA)
 A rendszer célja nem a büntetés, hanem a kulcsfegyelem fenntartása transzparens szabályok mentén:
 - **Pontszámítási skála:** 0-tól 100 pontig terjedő megbízhatósági pontszám (ahol a magasabb pontszám rosszabb megbízhatóságot jelez). A pontszám minden tanév szeptember 1-jén nullázódik az aktuális értékeléshez, de az audit-előzmények örökre megmaradnak.
 - **Események pontértékei:**
   - *Időben leadott kulcs:* 0 pont (megfelelő használat).
-  - *Késedelmesen leadott kulcs:* +1 hibapont.
-  - *Le nem adott kulcs (napi záráskor kint maradt):* +3 hibapont.
-  - *Elhagyott kulcs:* +3 hibapont + azonnali adminisztratív eljárás.
+  - *Le nem adott kulcs (a napi zárásig nem került vissza):* +3 hibapont – automatikusan rögzül.
   - *Manuális korrekció:* Adminisztrátor által adott pozitív vagy negatív pontszám (pl. igazolt technikai hiba esetén), kötelező írásos indoklással ellátva.
+  - *Tervezett, nem megvalósított:* külön „késedelmesen leadott” (+1) és „elhagyott kulcs” (+3) eseménytípus.
+- **Megjelenítés:** az oktató a saját pontszámát a profilján látja; az Adminisztrátor és az Üzemeltetési Igazgató a Riportok oldalon oktatónkénti listát lát (a legrosszabb elöl).
 - **Fegyelmi következmény-szintek:**
   - **0 – 9 pont:** Normál státusz, korlátozás nélkül.
   - **10 – 19 pont:** Rendszerszintű írásbeli figyelmeztetés az oktató felületén.
   - **20 – 29 pont:** Kötelező tanszéki/üzemeltetési elbeszélgetés kezdeményezése.
-  - **30+ pont:** Hivatalos biztonsági oktatás előírása, a foglalási jogosultság ideiglenes felfüggesztésének lehetősége.
+  - **30+ pont:** Hivatalos biztonsági oktatás előírása, a foglalási jogosultság ideiglenes felfüggesztésének lehetősége (a felfüggesztés jelenleg adminisztratív döntés, automatikusan nem történik meg).
 
 ### 5.4. Automatikus háttérfolyamatok (Background Services)
 1. **No-Show feldolgozó (`NoShowBackgroundService`):**
    - Ciklikusan vizsgálja a folyamatban lévő foglalásokat.
-   - Ha egy foglalás kezdete óta eltelt a paraméterezett türelmi idő (alapértelmezetten 15 perc), és a hozzá tartozó kulcsot nem vették át, a státuszt automatikusan `NoShow`-ra állítja, felszabadítva a termet.
+   - Ha egy foglalás kezdete óta eltelt a paraméterezett türelmi idő (alapértelmezetten 15 perc), és a foglaló a kulcsot nem vette át, a státuszt automatikusan `NoShow`-ra állítja, felszabadítva a termet.
+   - Kulcsfelvételnek számít a foglaláshoz kötött kiadás, illetve ha a foglaló a terem kulcsát a foglalás idősávjában (legfeljebb 2 órával korábban) felvette. Amíg a terem kulcsa másnál van, a foglalás idején vár; a foglalás vége után ilyenkor is `NoShow`-t állít be.
 2. **Napi kulcszárás feldolgozó (`DailyKeyClosingBackgroundService`):**
-   - Minden este a zárási időpontban (alapértelmezetten 22:00) ellenőrzi a még le nem adott kulcsokat.
+   - Percenként fut, és a zárási időpont (alapértelmezetten 22:00) után ellenőrzi a még le nem adott kulcsokat; leállás után a kimaradt napokat is pótolja. Csak az utolsó 7 nap kiadásait és a még kint lévő kulcsokat tölti be, kötegelt lekérdezésekkel.
    - Automatikusan létrehozza a "Le nem adott" megbízhatósági eseményeket és auditbejegyzést.
    - A határidőkor még kint lévő kulcs minden `Portas` felhasználónak egy, az adatbázisban rögzített `EveningKeyReturn` értesítést generál. Az értesítés tartalmazza a kulcsot, a helyiséget és a kulcsmozgásból számított visszavételi határidőt; a határidő és a zárási időzóna a meglévő rendszerparamétert, illetve `Automation:TimeZoneId` beállítást használja.
    - A `KulcsmozgasId`-hez és címzetthez képzett egyedi `AutomationKey` megakadályozza az újrapróbálkozáskor keletkező duplikációt. Visszavétel után az adott kiadáshoz már nem jön létre értesítés.
-   - Az `/api/notifications/my` a portások és oktatók saját értesítéseit adja vissza; a `PATCH /api/notifications/{id}/read` a címzett számára teszi olvasottá az értesítést. Az alkalmazás `/notifications` felülete a kulcsot, helyiséget, határidőt és olvasottsági állapotot jeleníti meg.
+   - Az `/api/notifications/my` a portások és oktatók saját értesítéseit adja vissza lapozva; a `PATCH /api/notifications/{id}/read` a címzett számára teszi olvasottá az értesítést. Az alkalmazás `/notifications` felülete a kulcsot, helyiséget (mesterkulcsnál a kiadás termét), határidőt és olvasottsági állapotot jeleníti meg.
+   - A lejárt kulcsok listája (`/api/key-movements/overdue`) ugyanezt a határidőt használja.
 3. **Lejárat előtti értesítő (`BookingExpiryNotificationBackgroundService`):**
    - A foglalás vége előtt 10 perccel adatbázisba mentett, oktatói felületen olvasható értesítést generál.
    - E-mail-, SMS- és push-küldés nincs bekötve; a külső csatorna opcionális fejlesztési mérföldkő.
+4. **Foglalás-lezáró (`BookingCompletionBackgroundService`):**
+   - A véget ért aktív foglalást, amelyhez a kulcsot felvették, automatikusan `Kesz` állapotba teszi, és ezt naplózza.
 
 ---
 
@@ -398,14 +413,18 @@ flowchart TD
 ```
 
 ### 6.1. Tesztcsomagok leírása
-- **Egységtesztek (`BookingRulesTests`, `BookingValidationTests`):** Az órarendi rács, átfedések és karbantartási ütközések matematikai és logikai vizsgálata adatbázis nélkül.
+- **Terjedelem (2026-11-19):** backend 169 teszt (ebből 4 valódi SQL Serveren futó integrációs teszt), frontend 28 teszt; mind a GitHub Actions CI-ben fut.
+- **Egységtesztek (`BookingRulesTests`, `BookingValidationTests`, `AppTimeTests`):** Az órarendi rács, átfedések, karbantartási ütközések és az időzóna-kezelés (téli/nyári idő) vizsgálata adatbázis nélkül.
+- **Üzleti szabály- és automatizálási tesztek (`BusinessRuleEndpointTests`, `BackgroundAutomationTests`):** foglalás, kulcskiadás, PIN-zárolás, inaktiválás, hibajegy-státuszok, riportok, no-show, foglaláslezárás és napi kulcszárás.
+- **Biztonsági megerősítés tesztjei (`SecurityHardeningTests`):** bejelentkezési kéréskorlát, anonim auditkorlát, CORS, HttpOnly süti, egységes hibaválasz.
 - **RBAC és Biztonsági tesztek (`SecurityIntegrationTests`, `AuthEndpointTests`, `UserEndpointTests`):**
   - Mind a 4 szerepkör explicit tesztelése: jogosulatlan végponthívások `401 Unauthorized` és `403 Forbidden` válaszainak ellenőrzése.
   - Token nélküli kérések szigorú visszautasításának ellenőrzése.
   - Jelszóhashelés ellenőrzése: plain text jelszó soha nem szivároghat ki a válaszokban.
 - **Valós SQL Server integrációs tesztek (`SqlServerIntegrationTests`):**
   - A CI folyamatban dedikált SQL Server szolgáltatás-konténer fut.
-  - Eldobható, izolált adatbázison ellenőrzi az EF Core migrációk lefutását, a séma integritását és a seedelést.
+  - Eldobható, izolált adatbázison ellenőrzi az EF Core migrációk lefutását és visszavonását, a séma integritását és a seedelést (a kezdő fiókok bejelentkezését és a mintaoktató adatait is).
+  - Kapcsolat nélkül (`SQLSERVER_TEST_CONNECTION` hiányában) ezek a tesztek kihagyásra kerülnek.
 - **Frontend UI-tesztek (`Vitest`, React Testing Library):** A felhasználói felületek célzott komponens- és interakciós tesztjei a lint és a production build mellett a CI-ben is lefutnak.
 
 ---
@@ -418,9 +437,9 @@ flowchart TD
 | **M2: Hitelesítés & RBAC** | BCrypt, JWT Bearer, 4 szerepkör, policy-k, bootstrap | **100% Kész** (Teljes jogosultsági fa lefedve) |
 | **M3: Üzleti Logika & Automatizmusok** | Ütközésvizsgálat, No-Show, esti zárás, pontszámítás | **100% Kész** (Háttérszolgáltatásokkal implementálva) |
 | **M4: Tesztelés & CI/CD** | xUnit tesztek, GitHub Actions workflow, Docker Compose | **100% Kész** (Minden teszt automatikusan fut) |
-| **M5: Webes Felhasználói Felület (Frontend)** | React SPA, szerepkörös irányítópultok, foglalás és kulcs UI | A fő felületek elkészültek; a teljes üzleti folyamatok böngészős ellenőrzése külön validációt igényel |
+| **M5: Webes Felhasználói Felület (Frontend)** | React SPA, szerepkörös irányítópultok, foglalás és kulcs UI | **Kész** – minden oldal betölt mindhárom fő szerepkörrel (böngészős végigkattintással ellenőrizve); az űrlapok böngészős kitöltését automata frontendtesztek fedik |
 | **M6: Külső Értesítési Csatornák (Opcionális)** | E-mail vagy SMS integráció | *Tervezett (P1)* – A foglalásvége- és esti kulcsvisszavételi értesítések jelenleg az adatbázisban tárolt in-app üzenetek |
-| **M7: Éles Üzemeltetési Hardening** | Kereskedelmi SSL tanúsítvány, szigorúbb CORS, külső loggyűjtő | *Tervezett (P2)* – Üzembe helyezés előtti fázis |
+| **M7: Éles Üzemeltetési Hardening** | Kereskedelmi SSL tanúsítvány, szigorúbb CORS, külső loggyűjtő | **Részben kész** – szűkített CORS, HttpOnly süti, kéréskorlát, éles Docker-image-ek (nem root), csak helyben elérhető backend- és adatbázisport. *Tervezett:* SSL-tanúsítvány, külső loggyűjtő |
 
 ---
 
@@ -428,7 +447,7 @@ flowchart TD
 
 1. **Konkurens kulcskiadás kockázata:**
    - *Probléma:* Ha két portás egyszerre próbálja kiadni ugyanazt a kulcsot két különböző ablakban.
-   - *Megoldás:* Adatbázisszintű `UPDLOCK, HOLDLOCK` tranzakciós zárolás alkalmazása a kulcsrekordon a kiadási tranzakció idejére.
+   - *Megoldás:* Kulcsonkénti SQL Server-alkalmazászár (`sp_getapplock`) és Serializable tranzakció a kiadás és a visszavétel idejére.
 2. **Időzónák és nyári időszámítás:**
    - *Megoldás:* Az adatbázisban és az API kommunikációban kizárólag **UTC (ISO 8601)** időbélyegek közlekednek, a helyi időzónára való konverziót kizárólag a kliens felület végzi el.
 3. **Auditnapló megmásíthatatlansága:**

@@ -11,8 +11,8 @@ A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikál
 | Szerepkör | Fő felelősségi kör | Elérhető funkciók |
 | :--- | :--- | :--- |
 | **`Oktato`** | Foglalások és kulcshasználat | Teremkatalógus böngészése, új foglalás leadása, saját foglalások, megbízhatósági hibapont és rendszerbeli értesítések megtekintése, hibajegy bejelentése. |
-| **`Portas`** | Kulcsok fizikai kiadása és visszavétele | Aktív foglalásokhoz tartozó kulcsok kiadása/visszavétele, kulcsmozgások naplózása, esti kulcsvisszavételi értesítések olvasása, átvételi elismervény, azonnali hibajegy rögzítés. |
-| **`Adminisztrator`** | Rendszertörzsadatok és konfiguráció | Felhasználók kezelése és szerepkör-módosítás, termek és kulcsok CRUD, mesterkulcs-jogosultságok, karbantartási idősávok, rendszerparaméterek, megbízhatósági korrekció. |
+| **`Portas`** | Kulcsok fizikai kiadása és visszavétele | Kulcsok kiadása/visszavétele az átvevő PIN-jével (a kiadás magától az esedékes foglaláshoz kötődik), kint lévő és lejárt kulcsok, kulcsmozgások naplója, esti kulcsvisszavételi értesítések, hibajegy rögzítése. |
+| **`Adminisztrator`** | Rendszertörzsadatok és konfiguráció | Felhasználók kezelése (inaktiválás/újraaktiválás, szerepkör, PIN), termek és kulcsok kezelése, mesterkulcs-jogosultságok, karbantartási idősávok, hibajegy-státuszok, rendszerparaméterek, megbízhatósági korrekció, auditnapló. |
 | **`UzemeltetesiIgazgato`** | Ellenőrzés és riportálás | Teremkihasználtsági statisztikák, napi és heti riportok, kulcsforgalom elemzése, oktatói megbízhatósági audit, teljes rendszeresemény-napló. |
 
 ---
@@ -21,13 +21,13 @@ A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikál
 
 | Réteg | Technológia | Megjegyzés |
 | :--- | :--- | :--- |
-| **Frontend** | React 19, TypeScript, Vite, saját CSS, Lucide React | Szerepkörös SPA, JWT klienssel, hibakezeléssel és modális nézetekkel. |
+| **Frontend** | React 19, TypeScript, Vite, saját CSS, Lucide React | Szerepkörös SPA; élesben nginx szolgálja ki, és az `/api` kéréseket a backendre továbbítja. |
 | **Backend** | ASP.NET Core 8 Minimal API, C# | Erősen típusos, moduláris végpontok, BCrypt jelszó- és kulcsátvételi PIN-kezelés, beépített RBAC házirendek. |
 | **Adatbázis** | Microsoft SQL Server 2022 | Konténerizált relációs adatbázis tranzakció- és zárkezeléssel. |
 | **ORM / Migráció** | Entity Framework Core 8 | Code-first megközelítés, automatikus séma-migrációk indításkor. |
-| **Hitelesítés** | JSON Web Token (JWT Bearer) + BCrypt | Állapotmentes, biztonságos token-kezelés claims-alapú szerepkör-ellenőrzéssel. |
+| **Hitelesítés** | JSON Web Token HttpOnly sütiben + BCrypt | A token JavaScriptből nem olvasható; minden kérésnél adatbázis-ellenőrzés (aktív felhasználó, egyező szerepkör), bejelentkezési kéréskorlát, PIN-zárolás. |
 | **Dokumentáció** | Swagger / OpenAPI v1 | Fejlesztői módban interaktív tesztelő felület (`/swagger`). |
-| **Tesztelés & CI** | xUnit, WebApplicationFactory, GitHub Actions | Unit- és integrációs tesztek, linting, konténerkonfiguráció-ellenőrzés. |
+| **Tesztelés & CI** | xUnit, WebApplicationFactory, Vitest, GitHub Actions | 169 backend teszt (valódi SQL Serveren is) és 28 frontend teszt, linting, Docker-build ellenőrzés. |
 
 ---
 
@@ -36,9 +36,9 @@ A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikál
 ```mermaid
 flowchart LR
     Browser["Böngésző / Felhasználó"] --> Frontend["React + Vite Kliens<br/>:3000"]
-    Frontend -->|REST API / JSON + Bearer JWT| API["ASP.NET Core Web API<br/>:8000"]
+    Frontend -->|"/api – REST / JSON + HttpOnly JWT-süti (nginx proxy)"| API["ASP.NET Core Web API<br/>:8000 (csak helyben)"]
     API --> Auth["Hitelesítés & RBAC Policy-k"]
-    API --> Services["Háttérszolgáltatások<br/>(NoShow, KeyClosing, Notifications)"]
+    API --> Services["Háttérszolgáltatások<br/>(NoShow, foglaláslezárás, napi kulcszárás, értesítések)"]
     API --> EF["Entity Framework Core 8"]
     EF --> DB[("Microsoft SQL Server 2022<br/>:1433 (KeyAndRoomDb)")]
     DB --> Volume[("mssql-data perzisztens volume")]
@@ -59,6 +59,9 @@ erDiagram
         string PinHash
         string Nev
         string Role
+        boolean Aktiv
+        int PinHibasProbalkozasok
+        datetime PinZarolvaEddig
         datetime CreatedAt
         datetime UpdatedAt
     }
@@ -106,6 +109,7 @@ erDiagram
         int KulcsId FK
         int? FoglalasId FK
         int? AtvevoFelhasznaloId FK
+        int? TeremId "a kiadás terme"
         int OperatorId FK
         string MozgasTipus
         datetime Idopont
@@ -283,7 +287,7 @@ docker compose down
 
 Az adatbázis az induláskor `APPLY_MIGRATIONS=true` beállítással futó backend
 által alkalmazza a függő EF Core migrációkat. Meglévő helyi vagy megosztott
-adatbázis frissítése előtt készíts és ellenőrizz mentést; a részletes, tizenegy
+adatbázis frissítése előtt készíts és ellenőrizz mentést; a részletes, tizenhét
 migrációt felsoroló leírást lásd a [database/README.md](./database/README.md)
 fájlban. Éles vagy közös adatbázist ne frissíts automatikusan külön jóváhagyás
 nélkül.

@@ -1,34 +1,81 @@
 # API_DESIGN.md – Egyetemi Kulcs- és Teremnyilvántartó Rendszer
 
-> **Implementációs állapot (2026-11-10):** Ez a dokumentum a jelenlegi backendhez igazodik. A korábbi tervezeti megjegyzések nem írhatják felül a tényleges útvonalakat, jogosultságokat vagy státuszkódokat.
+> **Implementációs állapot (2026-11-19):** Ez a fejezet a backend jelenlegi működését írja le, és ez a mérvadó. A 2. fejezettől kezdődő részletes fejezetek a 2026-10-30-i tervből származnak; ahol eltérnek, az alábbi összefoglaló és a backend kódja az irányadó.
 
 ## Aktuális backend-összefoglaló
 
-Az API ASP.NET Core Minimal API, JWT-hitelesítéssel és szerepkör-alapú policykkel. A ténylegesen regisztrált végpontcsoportok: `/api/auth`, `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets`, `/api/maintenance`, `/api/keys/{id}/master-access`, `/api/reliability`, `/api/notifications`, `/api/admin`, `/api/reports` és `/api/health`.
+Az API ASP.NET Core 8 Minimal API, JWT-hitelesítéssel és szerepkör-alapú policykkel. Regisztrált végpontcsoportok: `/api/auth`, `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets`, `/api/maintenance`, `/api/keys/{id}/master-access`, `/api/reliability`, `/api/notifications`, `/api/parameters`, `/api/audit`, `/api/reports` és `/api/health`.
 
-### Üzleti integritás
+### Hitelesítés, biztonság, hibakezelés
 
-- A felhasználó-, foglalás-, kulcsmozgás- és hibajegylisták lapozási paraméterei opcionálisak; az alapérték `page=1`, `pageSize=20`, a maximális oldalméret 100.
-- Foglalási idő: egy naptári napon belül 08:00–20:00; kezdés és hossz 45 perces rácshoz igazodik.
-- A foglalás létrehozása és módosítása ugyanazt az idő-, aktív terem-, ütközés- és karbantartási validációt használja; a lemondott és `NoShow` státuszú foglalások nem blokkolnak.
-- A teremelérhetőség ugyanazt az aktívfoglalás-szabályt használja: a `Megszuntetve` és `NoShow` foglalások nem jelennek meg foglaltságként; a karbantartás továbbra is blokkol.
-- Az automatizált `NoShow`, foglalásvége előtti értesítés és napi kulcszárási folyamatok idempotens háttérfeldolgozókkal futnak.
-- Kulcskiadás és -visszavétel: `POST /api/key-movements/issue` és `POST /api/key-movements/return`, `Portas` jogosultsággal. Mindkét kérés 4–8 számjegyű átvevői PIN-t és rögzített teremállapotot igényel; a PIN bcrypt hashként tárolódik, és a backend állítja elő a mozgás időbélyegét.
-- A `PUT /api/users/{id}/pin` adminisztrátori végponttal állítható be az átvevő PIN-je. A PIN nem része a felhasználói válasz DTO-knak és nem kerül az auditnaplóba.
-- A kulcsmozgás a teremállapotot és opcionális sérülésleírást tárolja. Sérülés leírásakor a kulcsmozgással együtt automatikus, auditált `Sérülés` hibajegy készül.
-- A mesterkulcs jogosultságát a rendszer mind foglalásos, mind foglalás nélküli kiadásnál ellenőrzi. Foglalásos kiadásnál a foglalás termének szerepelnie kell a mesterkulcs terem-hozzárendelései között; ad-hoc kiadásnál a `teremId` kötelező. A portás csak az adott kulcsra jogosult oktatónak adhatja át. A mozgás és a hozzá tartozó auditbejegyzés egy tranzakcióban készül.
-- Az Adminisztrátor a `GET /api/keys/{id}/rooms` és `PUT /api/keys/{id}/rooms` végpontokon kezeli a mesterkulcs többtermes hozzárendeléseit. A `PUT` a teljes listát cseréli; üres `teremIds` lista minden hozzárendelést visszavon.
-- Az Oktató hibajegyet rögzíthet, és kizárólag a saját hibajegyeit listázhatja/tekintheti meg. A Portás, Adminisztrátor és Üzemeltetési Igazgató a teljes hibajegylistát látja; státuszt csak az Adminisztrátor módosíthat.
-- A `GET /api/key-movements/recipients?kulcsId={id}` kizárólag az adott kulcs átvételére jogosult oktatókat adja vissza a portás felületének.
-- A késedelmi lista (`GET /api/key-movements/overdue`) a napi zárási paramétert, az automatizálás időzónáját és foglalás esetén annak végét használja; a portás aktívkulcs-oldalán a késedelmes tételek egyenként látszanak.
-- A karbantartás foglalási ütközéskor `409 Conflict` választ és az összes érintett foglalás részleteit adja, foglalást nem töröl. Az adminisztrátor ezután a meglévő `PUT /api/bookings/{id}` végponttal törölheti (`status: "Megszuntetve"`) vagy áthelyezheti (`teremId`, `startTime`, `endTime`) a foglalást, majd újra rögzítheti a karbantartást.
-- Az EF Core `AddKeyPinsAndMovementCondition` migráció hozzáadja a felhasználói PIN hash és a kulcsmozgás teremállapot/sérülés mezőit.
-- A `Portas` szerepkör adhat ki és vehet vissza kulcsot; listázni a `Portas`, `Adminisztrator` és `UzemeltetesiIgazgato` szerepkörök tudnak.
-- Production környezetben a JWT issuer, audience és legalább 32 bájtos aláírókulcs konfigurálása kötelező; a forráskódbeli és minta kulcsokkal a backend nem indul el.
+- **Bejelentkezés:** a `POST /api/auth/login` a JWT-t `projektlabor_auth` nevű **HttpOnly** sütiben állítja be (`SameSite=Strict`, `Path=/api`, HTTPS-en `Secure`, 8 órás lejárat). A böngészős kliens a tokent nem tárolja; a munkamenetet a `GET /api/auth/me` állítja helyre, a `POST /api/auth/logout` törli a sütit. Az `Authorization: Bearer` fejléc továbbra is használható (Swagger, tesztek, más kliensek).
+- **Token-ellenőrzés:** minden kérésnél az adatbázis alapján is ellenőrizzük, hogy a felhasználó létezik, aktív, és a szerepköre egyezik a tokenben lévővel – az inaktiválás és a szerepkörváltás azonnal hat.
+- **Kéréskorlát:** kliens-IP-nként percenként legfeljebb 10 bejelentkezési kísérlet (`429 Too Many Requests`). A frontend nginx proxyja mögött a valódi IP-t csak privát hálózatból érkező `X-Forwarded-For` alapján fogadjuk el.
+- **CORS:** csak a `Cors:AllowedOrigins` (környezeti változóban `CORS_ALLOWED_ORIGINS`) listában szereplő originök, sütikkel együtt. A Docker Compose-os futtatásnál a frontend azonos originről, proxyn át éri el az API-t.
+- **Bemenet-ellenőrzés:** minden végponton lefutnak a DTO-k ellenőrző attribútumai (`[Required]`, `[MaxLength]`, `[EmailAddress]`, `[Range]`, `[RegularExpression]`); hiba esetén `400` `{ message, errors }` válasz, az adatbázisig nem jut el a kérés.
+- **Váratlan hiba:** egységes `500` JSON válasz magyar `message` mezővel és `traceId`-val; a részletek csak a szervernaplóba kerülnek.
+- **Audit:** minden módosító művelet, bejelentkezés, megtagadott hozzáférés (`ACCESS_UNAUTHENTICATED`, `ACCESS_FORBIDDEN`) és elutasított módosító kérés (`OPERATION_REJECTED`) naplózódik. A napló csak bővíthető. Anonim kérésekből IP-nként percenként legfeljebb 20 bejegyzés kerül be; a naplózás hibája nem rontja el a kliensnek adott választ.
+- **Health-check:** a `GET /api/health` adatbázis-ellenőrzése legfeljebb 3 másodpercig tart (`HealthCheck:DatabaseTimeoutSeconds`), utána `503`.
+
+### Időkezelés
+
+- Az adatbázisban és az API-ban minden időpont **UTC**; a válaszok `Z` jelöléssel érkeznek. A megjelölés nélküli bemeneti időpontot az intézmény helyi idejének (`Automation:TimeZoneId`, alapértelmezés: `Europe/Budapest`) tekintjük.
+- A nyitvatartási és idősáv-szabályokat (08:00–20:00, 45 perces rács, egy naptári nap) helyi idő szerint ellenőrizzük.
+
+### Felhasználók
+
+- `DELETE /api/users/{id}` **inaktivál** (nem töröl): az előzmények megmaradnak, az inaktív felhasználó nem tud belépni. `POST /api/users/{id}/reactivate` újraaktivál. Nem inaktiválható saját maga, az utolsó aktív adminisztrátor, aktív foglalással vagy kint lévő kulccsal rendelkező felhasználó.
+- Szerepkörváltás (`PUT /api/users/{id}/role`): saját admin szerepkör és az utolsó aktív admin nem fokozható le. Oktatóról más szerepkörre csak akkor, ha nincs aktív jövőbeli foglalása és nincs nála kulcs; ilyenkor a mesterkulcs-jogosultságai megszűnnek.
+- Jelszószabály (létrehozás és módosítás): legalább 12 karakter, legfeljebb 72 UTF-8 bájt. A felhasználónév és az e-mail-cím egyediségét a levágott (az e-mailnél kisbetűs) értéken ellenőrizzük.
+- `PUT /api/users/{id}/pin`: az átvevői PIN (4–8 számjegy) beállítása; ilyenkor a hibás próbálkozások száma és a PIN-zárolás nullázódik. A PIN bcrypt hashként tárolódik, és nem jelenik meg válaszokban vagy a naplóban.
+- A `UserDto` tartalmazza az `aktiv` mezőt; születési dátumot a rendszer nem tárol.
+
+### Termek, karbantartás
+
+- Terem deaktiválása (`DELETE /api/rooms/{id}` vagy `PUT` `aktivalva: false`): jövőbeli aktív foglalás mellett `409` `{ message, jovobeliFoglalasok }`. A `DELETE /api/rooms/{id}?foglalasokLemondasa=true` a foglalásokat lemondja (naplózva), majd deaktivál.
+- Karbantartás deaktivált teremre nem rögzíthető, és ugyanarra a teremre egymást átfedő karbantartások sem. Foglalási ütközéskor `409` az ütköző foglalások listájával; az adminisztrátor lemondja vagy áthelyezi őket (`PUT /api/bookings/{id}`), majd újra rögzíti a karbantartást.
+
+### Foglalások
+
+- Létrehozás: múltbeli időpontra nem, deaktivált teremre nem, és **csak oktató nevére** (adminként a `felhasznaloId`-val oktatót kell megadni). Ütközés más aktív foglalással vagy karbantartással: `409`. Párhuzamos kérések közül teremszintű SQL Server-alkalmazászár és Serializable tranzakció mellett csak egy sikerül.
+- Lemondás (`DELETE` vagy `PUT` `status: "Megszuntetve"`): csak aktív foglalás; megkezdett foglalást oktató nem mondhat le, adminisztrátor igen.
+- Módosítás: megkezdett foglalás időpontja és terme nem módosítható; csak aktív foglalás helyezhető át.
+- Státuszok: `Aktiv`, `Kesz` (lezajlott, kulcsfelvétellel – automatikus), `NoShow` (automatikus), `Megszuntetve`. A lemondott és a `NoShow` foglalás nem blokkol.
+
+### Kulcsok és kulcsmozgások
+
+- Kiadás (`POST /api/key-movements/issue`) és visszavétel (`POST /api/key-movements/return`): `Portas` jogosultság, átvevői PIN és teremállapot. Sérülés leírásakor automatikus `Sérülés` hibajegy készül – mesterkulcsnál arra a teremre, amelyre a kulcsot kiadták (`Kulcsmozgas.TeremId`).
+- **PIN-zárolás:** 5 egymás utáni hibás PIN után a PIN 15 percre zárolódik (`429`).
+- **Kiadás és foglalás:** foglaláshoz a kulcs legkorábban a kezdés előtt 2 órával, és legkésőbb a foglalás végéig adható ki. Ha a portás nem ad meg foglalást, a backend a kiadást az átvevő erre a teremre szóló, éppen esedékes aktív foglalásához köti; a válasz `foglalasId` mezője ezt jelzi.
+- Inaktivált felhasználó nem vehet át kulcsot, és nem kaphat mesterkulcs-jogosultságot.
+- Kint lévő kulcs nem deaktiválható, és típusa vagy terme nem módosítható (`409`); a kulcsszám ilyenkor is átírható. Kint lévő kulcs állapota mindig `Kiadva`.
+- Mesterkulcs termei (`PUT /api/keys/{id}/rooms`): a teljes listát cseréli, de legalább egy terem kell. Régi, foglalás nélküli mesterkulcs-kiadásnál, ahol a kiadás terme nem ismert, visszavételkor a `teremId` megadása kötelező (a kulcslistában `kiadottTeremIsmeretlen: true`).
+- **Határidő:** egy kulcsot a kiadás (helyi) napjának zárási időpontjáig (`napi_kulcsleadasi_zarasi_idopont`, alapból 22:00) kell visszahozni; zárás utáni kiadásnál a következő napéig. Ugyanezt a határidőt használja a lejárt kulcsok listája (`GET /api/key-movements/overdue`), az esti értesítés és a büntetőpont.
+
+### Automatizmusok (percenként futó háttérfeldolgozók)
+
+- **No-show:** ha a foglalás kezdete óta eltelt a türelmi idő (`no_show_idokorlat_perc`, 1–45 perc, alapból 15), és a foglaló nem vette fel a kulcsot, a foglalás `NoShow`. Kulcsfelvételnek számít a foglaláshoz kötött kiadás, illetve ha a foglaló a terem kulcsát az idősávban (legfeljebb 2 órával korábban) felvette. Amíg a terem kulcsa másnál van, a foglalás idején várunk; a foglalás vége után ilyenkor is `NoShow`.
+- **Foglalás lezárása:** a véget ért aktív foglalás kulcsfelvétel esetén `Kesz` állapotot kap.
+- **Napi kulcszárás:** a határidőig vissza nem hozott kulcsért `LeNemAdott` esemény (+3 büntetőpont) és minden aktív portásnak esti értesítés. Csak az utolsó 7 nap kiadásait és a még kint lévő kulcsokat dolgozza fel, kötegelt lekérdezésekkel.
+- **Foglalásvégi értesítés:** a foglalás vége előtt 10 perccel értesítés az oktatónak.
+- Minden automatikus művelet idempotens (`AutomationKey`), és naplózott.
+
+### Megbízhatóság, értesítések, riportok, paraméterek
+
+- Pontszám: a tanévi büntetőpontok időrendi összege 0 és 100 közé szorítva (a magasabb a rosszabb). `GET /api/reliability/users` – az összes aktív oktató pontszáma, a legrosszabb elöl (Adminisztrátor, Üzemeltetési Igazgató).
+- `GET /api/notifications/my`: lapozható (`page`, `pageSize`, alapból 50, legfeljebb 100); a válasz lista, az összes elem számát az `X-Total-Count` fejléc adja. A helyiség mesterkulcsnál a kiadás terme. `GET /api/notifications/pending`: az olvasatlan vagy küldés alatt álló értesítések.
+- Riportok: a napi/heti riport a `LeNemAdott` eseményeket késedelmes leadásként számolja; a termenkénti foglalásszámba a lemondott és a `NoShow` foglalás nem számít bele; mesterkulcsnál a kiadás terme számít.
+- Rendszerparaméterek: a zárási időpont `HH:mm` formátumú, és nem lehet korábbi 20:00-nál; a no-show időkorlát 1–45 perc.
+- Lapozás: `page=1`, `pageSize` legfeljebb 100; alapból 20 (foglalás, felhasználó, kulcsmozgás, hibajegy), illetve 50 (audit, saját értesítések). A válasz `totalCount` mezőt tartalmaz (az értesítéseknél az `X-Total-Count` fejlécet).
+- Hibajegyek: kategória csak a rögzített listából (`Technikai hiba`, `Bútorzat / Felszerelés`, `Zár / Kulcs probléma`, `Takarítási igény`, `Egyéb észrevétel`, `Sérülés`); státuszváltás: `Nyitva` → `Folyamatban` / `Megoldva` / `Zarva`; `Folyamatban` → `Nyitva` / `Megoldva` / `Zarva`; `Megoldva` → `Nyitva` / `Zarva`; a `Zarva` végleges (`409`).
+
+### Kezdő adatok
+
+A migrációk minden adatbázisba felveszik szerepkörönként a közös kezdő fiókokat (`admin`, `oktato`, `portas`, `igazgato`), valamint egy mintaoktatót előzményekkel (kulcskiadások, foglalások, büntetőpontok). A korábbi `demo-*` fiókokat inaktiválják. Production környezetben a JWT issuer, audience és legalább 32 bájtos aláírókulcs konfigurálása kötelező; minta- és forráskódbeli kulcsokkal a backend nem indul el.
 
 ### Aktuális státuszkódok
 
-Sikeres létrehozás `201 Created`, lekérdezés/módosítás `200 OK`, törlés vagy visszavonás `204 No Content` (ahol ezt az endpoint jelzi), hiányzó rekord `404 Not Found`, hibás kérés `400 Bad Request`, jogosultsági hiba `401/403`, üzleti ütközés vagy duplikáció `409 Conflict`. A konkrét DTO-kat az `backend/DTOs` könyvtár és a Swagger séma tartalmazza.
+Sikeres létrehozás `201 Created`, lekérdezés/módosítás `200 OK`, PIN-beállítás `204 No Content`, hiányzó rekord `404 Not Found`, hibás kérés `400 Bad Request`, jogosultsági hiba `401/403`, üzleti ütközés vagy duplikáció `409 Conflict`, túl sok kérés (bejelentkezés, PIN) `429 Too Many Requests`, adatbázis-elérhetetlenség a health-checknél `503`. A konkrét DTO-kat a `backend/DTOs` könyvtár és a Swagger séma tartalmazza.
 
 > **Korábbi tervezeti részletek:** A következő fejezetek 2026-10-30-i tervből származnak. Az útvonal-, státusz- és jogosultsági táblázataik tervezeti/historikus adatok, nem feltétlenül egyeznek a mai implementációval; az aktuális viselkedést a fenti összefoglaló és a backend kódja határozza meg.
 >
@@ -108,9 +155,9 @@ A `Felhasznalo.Role` mező a következő értékeket veheti fel:
 
 ---
 
-## 2. API-végpontlista (korábbi terv)
+## 2. API-végpontlista
 
-Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapot jelzései.
+A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést a fenti aktuális összefoglaló írja le.
 
 ### Autentikáció
 
@@ -128,8 +175,10 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 | U2 | GET | `/api/users/{id}` | Egy felhasználó adatainak lekérdezése | ✅ Kész |
 | U3 | POST | `/api/users` | Új felhasználó létrehozása | ✅ Kész |
 | U4 | PUT | `/api/users/{id}` | Felhasználó adatainak módosítása | ✅ Kész |
-| U5 | DELETE | `/api/users/{id}` | Felhasználó törlése | ✅ Kész |
+| U5 | DELETE | `/api/users/{id}` | Felhasználó inaktiválása (soft delete) | ✅ Kész |
 | U6 | PUT | `/api/users/{id}/role` | Felhasználó szerepkörének módosítása | ✅ Kész |
+| U7 | POST | `/api/users/{id}/reactivate` | Inaktivált felhasználó újraaktiválása | ✅ Kész |
+| U8 | PUT | `/api/users/{id}/pin` | Kulcsátvételi PIN beállítása (zárolás nullázásával) | ✅ Kész |
 
 ### Termek
 
@@ -139,7 +188,7 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 | R2 | GET | `/api/rooms/{id}` | Egy terem adatainak lekérdezése | ✅ Kész |
 | R3 | POST | `/api/rooms` | Új terem létrehozása | ✅ Kész |
 | R4 | PUT | `/api/rooms/{id}` | Terem adatainak módosítása | ✅ Kész |
-| R5 | DELETE | `/api/rooms/{id}` | Terem deaktiválása | ✅ Kész |
+| R5 | DELETE | `/api/rooms/{id}` | Terem deaktiválása (`?foglalasokLemondasa=true`: jövőbeli foglalások lemondásával) | ✅ Kész |
 | R6 | GET | `/api/rooms/{id}/availability` | Terem szabad időszakjainak lekérdezése | ✅ Kész |
 | R7 | GET | `/api/rooms/{id}/keys` | Teremhez tartozó kulcsok listázása | ✅ Kész |
 
@@ -204,20 +253,21 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| M1 | GET | `/api/maintenance` | Karbantartási idősávok listázása | 🔴 Hiányzik |
-| M2 | GET | `/api/maintenance/{id}` | Egy idősáv részletei | 🔴 Hiányzik |
-| M3 | POST | `/api/maintenance` | Új karbantartási idősáv rögzítése | 🔴 Hiányzik |
-| M4 | PUT | `/api/maintenance/{id}` | Karbantartási idősáv módosítása | 🔴 Hiányzik |
-| M5 | DELETE | `/api/maintenance/{id}` | Karbantartási idősáv törlése | 🔴 Hiányzik |
+| M1 | GET | `/api/maintenance` | Karbantartási idősávok listázása | ✅ Kész |
+| M2 | GET | `/api/maintenance/{id}` | Egy idősáv részletei | ✅ Kész |
+| M3 | POST | `/api/maintenance` | Új karbantartási idősáv rögzítése | ✅ Kész |
+| M4 | PUT | `/api/maintenance/{id}` | Karbantartási idősáv módosítása | ✅ Kész |
+| M5 | DELETE | `/api/maintenance/{id}` | Karbantartási idősáv törlése | ✅ Kész |
 
 ### Megbízhatósági pontszám
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| RE1 | GET | `/api/reliability/users/{userId}` | Oktató megbízhatósági összesítője | 🔴 Hiányzik |
-| RE2 | GET | `/api/reliability/users/{userId}/events` | Oktató pontozási eseményeinek listája | 🔴 Hiányzik |
-| RE3 | GET | `/api/reliability/my` | Saját megbízhatósági összesítő | 🔴 Hiányzik |
-| RE4 | POST | `/api/reliability/correction` | Adminisztrátori manuális korrekció | 🔴 Hiányzik |
+| RE1 | GET | `/api/reliability/users/{userId}` | Oktató megbízhatósági összesítője | ✅ Kész |
+| RE2 | GET | `/api/reliability/users/{userId}/events` | Oktató pontozási eseményeinek listája | ✅ Kész |
+| RE3 | GET | `/api/reliability/my` | Saját megbízhatósági összesítő | ✅ Kész |
+| RE4 | POST | `/api/reliability/correction` | Adminisztrátori manuális korrekció | ✅ Kész |
+| RE5 | GET | `/api/reliability/users` | Az összes aktív oktató pontszáma, a legrosszabb elöl | ✅ Kész |
 
 ### Audit log
 
@@ -248,9 +298,9 @@ Az alábbi státuszok a 2026-10-30-i tervezet részei, nem a mai futási állapo
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| N1 | GET | `/api/notifications/my` | Oktató és Portás saját értesítéseinek lekérdezése | ✅ Kész |
+| N1 | GET | `/api/notifications/my` | Oktató és Portás saját értesítései (lapozható, `X-Total-Count`) | ✅ Kész |
 | N3 | PATCH | `/api/notifications/{id}/read` | Saját értesítés olvasottként jelölése | ✅ Kész |
-| N2 | GET | `/api/notifications/pending` | Függőben lévő értesítések (Adminisztrátor / Portás) | ✅ Kész |
+| N2 | GET | `/api/notifications/pending` | Olvasatlan vagy küldés alatt álló értesítések (Adminisztrátor / Portás) | ✅ Kész |
 
 ### Egészségellenőrzés
 
@@ -1496,42 +1546,21 @@ Minden végpontnál egységes hibakezelés szükséges:
 
 ## 8. Meglévő és hiányzó funkciók összesítése
 
-Az alábbi rész korábbi állapotfelvételből maradt a dokumentumban; a benne lévő végpontlisták és státuszok nem aktuálisak. Az aktuális implementációt az oldal elején lévő összefoglaló és a backend kódja írja le.
+**Állapot (2026-11-19):** a 2. fejezet végpontlistájának minden végpontja megvalósult és tesztelt (backend: 169 teszt, ebből 4 valódi SQL Serveren futó integrációs teszt; frontend: 28 teszt; mind a GitHub Actions CI-ben fut).
 
-### ✅ Teljesen megvalósult
-
-| Végpont | Megjegyzés |
+| Terület | Állapot |
 |---|---|
-| GET `/api/health` | Teljes, tesztelt (ApiEndpointTests + SwaggerEndpointTests) |
-| GET `/api/rooms` | Teljes, tesztelt (auth nélkül) |
-| GET `/api/rooms/{id}` | Teljes, tesztelt (auth nélkül) |
-| GET `/api/audit`, GET `/api/audit/{id}` | Szerepkörhöz kötött auditnapló-lekérdezés és szűrés |
-| GET `/api/parameters`, GET `/api/parameters/{key}`, PUT `/api/parameters/{key}` | Szerepkörhöz kötött paraméterkezelés, validáció és auditálás |
+| Hitelesítés (JWT HttpOnly sütiben, BCrypt jelszó- és PIN-hash, kéréskorlát) | ✅ Kész |
+| RBAC (4 szerepkör, policyk, token-ellenőrzés az adatbázis alapján) | ✅ Kész |
+| Foglalás, karbantartás, ütközésvizsgálat, speciális igények | ✅ Kész |
+| Kulcskiadás/-visszavétel PIN-nel, mesterkulcsok, sérülésjegy | ✅ Kész |
+| Automatizmusok (no-show, foglalás lezárása, napi kulcszárás, foglalásvégi értesítés) | ✅ Kész |
+| Megbízhatósági pontrendszer, oktatónkénti lista, korrekció | ✅ Kész |
+| Auditnapló (részletek, szűrés), riportok, rendszerparaméterek | ✅ Kész |
+| Bemenet-ellenőrzés, egységes hibaválasz, health-check időkorláttal | ✅ Kész |
+| Éles Docker-image-ek (ASP.NET runtime, nginx frontend) | ✅ Kész |
 
-### 🟡 Részben megvalósult (módosítás szükséges)
-
-| Végpont | Hiányosság |
-|---|---|
-| GET `/api/rooms` | JWT autentikáció és jogosultságellenőrzés hiányzik |
-| GET `/api/rooms/{id}` | JWT autentikáció és jogosultságellenőrzés hiányzik |
-| `AppDbContext.ValidateBookings()` | DB szintű ütközésvizsgálat megvan, de API szinten nincs 409-es válasz és érthető üzenet |
-
-### 🔴 További hiányzó végpontok
-
-A többi hiányzó végpont: `/api/auth/*`, `/api/users/*`, `/api/keys/*`, `/api/key-movements/*`, `/api/bookings/*`, `/api/tickets/*`, `/api/maintenance/*`, `/api/reliability/*`, `/api/reports/*`.
-
-### Infrastrukturális hiányosságok
-
-| Elem | Státusz |
-|---|---|
-| JWT autentikáció (middleware, token generálás, validálás) | 🔴 Hiányzik |
-| RBAC policy-k regisztrációja (`AddAuthorization`) | 🔴 Hiányzik |
-| BCrypt jelszó-hash könyvtár | 🔴 Hiányzik (NuGet: `BCrypt.Net-Next`) |
-| Általános Audit log service (újrafelhasználható) | 🔴 Hiányzik |
-| No-show automatizmus (`BackgroundService`) | ✅ Kész |
-| Foglalásvége-értesítés (`BackgroundService`) | ✅ Kész |
-| Napi zárási +3 büntetőpont (`BackgroundService`) | ✅ Kész |
-| Service-réteg kialakítása (jelenleg minden a `Program.cs`-ben van) | 🔴 Hiányzik |
+**Nem megvalósított, opcionális mérföldkövek:** külső értesítési csatorna (e-mail/SMS, M6), kereskedelmi SSL-tanúsítvány és külső naplógyűjtő (M7).
 
 ---
 
@@ -1606,7 +1635,10 @@ Az alábbi megjegyzések a 2026-10-30-i terv és kód összevetését őrzik; az
 **Kód:** A `Kulcsmozgas.cs`-ben az `OperátorId` és `Operátor` navigációs property **ékezetes karaktert** tartalmaz (`á`). Ez a C# ajánlott névkonvencióktól eltér, és egyes eszközökkel (reflection, serializer) problémát okozhat.  
 **Ajánlás:** Migrációval átnevezni `OperatorId`-ra (ékezet nélkül).
 
-### 10.2. ⚠️ `Terem.Leiras` nullable eltérés
+### 10.2. ✅ `Terem.Leiras` nullable eltérés – megoldva
+
+**Állapot (2026-11-19):** a jelenlegi modell és adatbázis-séma szerint a `Leiras` oszlop nullable (`nvarchar(500)`), így az eltérés már nem áll fenn. Az alábbi leírás a korábbi állapotot őrzi.
+
 
 **Modell (`Terem.cs`):** `[MaxLength(500)]` – nullable (nincs `[Required]`)  
 **Migráció (`InitialCreate.cs`):** `nullable: false` – tehát `NOT NULL` a DB-ben  
@@ -1619,19 +1651,28 @@ Az alábbi megjegyzések a 2026-10-30-i terv és kód összevetését őrzik; az
 **Jelenlegi kód:** A `Program.cs` regisztrálja a JWT Bearer-hitelesítést és az RBAC-policyket, a middleware pedig a védett végpontok előtt ellenőrzi a tokent. A `JwtSettings` a szükséges issuer-, audience- és aláírókulcs-konfigurációt is validálja.
 **Állapot:** A 2026-10-30-i tervben leírt hiányosság már nem áll fenn; a részletes, endpointonkénti jogosultsági szabályokat a backend kódja és a fenti aktuális összefoglaló tartalmazza.
 
-### 10.4. ℹ️ `Felhasznalo.Role` enum típusának hiánya
+### 10.4. ✅ `Felhasznalo.Role` enum típusának hiánya – kezelve
+
+**Állapot (2026-11-19):** a `Role` továbbra is `string`, de a backend minden létrehozásnál és szerepkörváltásnál a megengedett listával (`RoleNames`) szemben ellenőriz, és a token-ellenőrzés is csak ismert szerepkört fogad el.
+
 
 **Projektterv:** Négy jól definiált szerepkört határoz meg.  
 **Kód:** A `Role` mező `string` típusú, semmilyen enum-megkötés nincs. Érvénytelen szerepkör is menthető lenne.  
 **Ajánlás:** Backend validációban ellenőrizni kell a megengedett listával szemben. Opcionálisan konstans osztály vagy `[AllowedValues]` attribútum bevezetése javasolt.
 
-### 10.5. ℹ️ `Foglalas` nem tartalmaz speciális igény mezőt
+### 10.5. ✅ `Foglalas` speciális igény mező – megoldva
+
+**Állapot (2026-11-19):** a `Foglalas.SpecialisIgenyek` mező (legfeljebb 500 karakter) létezik, a foglalási űrlapon megadható.
+
 
 **Projektterv:** „a foglaláshoz speciális igények (pl. labor, projektor) megadása"  
 **Kód:** A `Foglalas` modellben nincs `SpekialisIgenyek` vagy hasonló mező.  
 **Következmény:** Funkcionális hiányosság – ha demonstrálni kell, migrációt kell hozzáadni; ha nem prioritás, P2-re halasztható.
 
-### 10.6. ℹ️ No-show logika csak üzleti szabályként van leírva, automatizmus nincs
+### 10.6. ✅ No-show automatizmus – megoldva
+
+**Állapot (2026-11-19):** a `NoShowBackgroundService` percenként fut; a részletes szabályt az aktuális összefoglaló „Automatizmusok” része írja le.
+
 
 **Projektterv:** „Ha a foglalás kezdő időpontjától számított konfigurálható időn belül nem történik kulcsfelvétel, a foglalás `NoShow` státuszt kap."  
 **Kód:** A `Foglalas.Status` mező tartalmazza a `NoShow` értéket, de semmilyen háttérfolyamat vagy ütemező nem implementált.  
@@ -1639,7 +1680,7 @@ Az alábbi megjegyzések a 2026-10-30-i terv és kód összevetését őrzik; az
 
 ---
 
-*A dokumentum a kódbázis 2026-10-30-i állapotát tükrözi. Frissítendő minden implementációs lépés után.*
+*Az aktuális összefoglaló és a végpontlista a kódbázis 2026-11-19-i állapotát tükrözi; a 3–9. fejezet részletei a 2026-10-30-i tervből származnak.*
 # SQL Server tranzakciós garanciák
 
 A foglalás-átfedés ellenőrzése és a kulcs kiadásának állapotellenőrzése SQL
