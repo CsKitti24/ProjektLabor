@@ -24,7 +24,7 @@ namespace ProjektLabor.Models
         [Required, MaxLength(100)]
         public string Nev { get; set; } = string.Empty;
 
-        [Required]
+        [Required, MaxLength(50)]
         public string Role { get; set; } = string.Empty;
 
         // Törlés helyett inaktiválás: az előzmények (foglalások, kulcsmozgások) megmaradnak.
@@ -33,6 +33,9 @@ namespace ProjektLabor.Models
         // PIN-próbálgatás elleni védelem a kulcsátvételnél.
         public int PinHibasProbalkozasok { get; set; }
         public DateTime? PinZarolvaEddig { get; set; }
+
+        // Az utolsó jelszócsere ideje (UTC): az ennél korábban kiadott bejelentkezési tokenek érvénytelenek.
+        public DateTime? JelszoValtozas { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

@@ -34,6 +34,7 @@ namespace backend.Tests
                     }
 
                     // Add in-memory database for testing
+                    services.RemoveAppDbContextConfiguration();
                     services.AddDbContext<AppDbContext>(options =>
                     {
                         options.UseInMemoryDatabase(_dbName);
@@ -160,6 +161,8 @@ namespace backend.Tests
                     {
                         services.Remove(descriptor);
                     }
+
+                    services.RemoveAppDbContextConfiguration();
 
                     services.AddDbContext<AppDbContext>(options =>
                     {

@@ -4,15 +4,17 @@
 
 ## Aktuális backend-összefoglaló
 
-Az API ASP.NET Core 8 Minimal API, JWT-hitelesítéssel és szerepkör-alapú policykkel. Regisztrált végpontcsoportok: `/api/auth`, `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets`, `/api/maintenance`, `/api/keys/{id}/master-access`, `/api/reliability`, `/api/notifications`, `/api/parameters`, `/api/audit`, `/api/reports` és `/api/health`.
+Az API ASP.NET Core 10 Minimal API, JWT-hitelesítéssel és szerepkör-alapú policykkel. Regisztrált végpontcsoportok: `/api/auth`, `/api/users`, `/api/rooms`, `/api/keys`, `/api/key-movements`, `/api/bookings`, `/api/tickets`, `/api/maintenance`, `/api/keys/{id}/master-access`, `/api/reliability`, `/api/notifications`, `/api/parameters`, `/api/audit`, `/api/reports` és `/api/health`.
 
 ### Hitelesítés, biztonság, hibakezelés
 
 - **Bejelentkezés:** a `POST /api/auth/login` a JWT-t `projektlabor_auth` nevű **HttpOnly** sütiben állítja be (`SameSite=Strict`, `Path=/api`, HTTPS-en `Secure`, 8 órás lejárat). A böngészős kliens a tokent nem tárolja; a munkamenetet a `GET /api/auth/me` állítja helyre, a `POST /api/auth/logout` törli a sütit. Az `Authorization: Bearer` fejléc továbbra is használható (Swagger, tesztek, más kliensek).
-- **Token-ellenőrzés:** minden kérésnél az adatbázis alapján is ellenőrizzük, hogy a felhasználó létezik, aktív, és a szerepköre egyezik a tokenben lévővel – az inaktiválás és a szerepkörváltás azonnal hat.
+- **Token-ellenőrzés:** minden kérésnél az adatbázis alapján is ellenőrizzük, hogy a felhasználó létezik, aktív, és a szerepköre egyezik a tokenben lévővel – az inaktiválás és a szerepkörváltás azonnal hat. A jelszócsere (saját vagy adminisztrátori) a korábban kiadott tokeneket is azonnal érvényteleníti.
 - **Kéréskorlát:** kliens-IP-nként percenként legfeljebb 10 bejelentkezési kísérlet (`429 Too Many Requests`). A frontend nginx proxyja mögött a valódi IP-t csak privát hálózatból érkező `X-Forwarded-For` alapján fogadjuk el.
 - **CORS:** csak a `Cors:AllowedOrigins` (környezeti változóban `CORS_ALLOWED_ORIGINS`) listában szereplő originök, sütikkel együtt. A Docker Compose-os futtatásnál a frontend azonos originről, proxyn át éri el az API-t.
 - **Bemenet-ellenőrzés:** minden végponton lefutnak a DTO-k ellenőrző attribútumai (`[Required]`, `[MaxLength]`, `[EmailAddress]`, `[Range]`, `[RegularExpression]`); hiba esetén `400` `{ message, errors }` válasz, az adatbázisig nem jut el a kérés.
+- **Párhuzamos kérések:** holtpont vagy zár-időtúllépés esetén a tranzakciós műveletek legfeljebb háromszor automatikusan újrapróbálkoznak; ha így sem sikerül, `503` (`Retry-After: 2`) magyar üzenettel. Egyedi index ütközése (pl. két egyidejű kérés ugyanazzal a felhasználónévvel, kulcsszámmal vagy teremnévvel) `409 Conflict`.
+- **Auditnapló művelettípusai:** egységesen nagybetűs angol kódok (pl. `KEY_ISSUE`, `ROLE_CHANGE`, `SYSTEM_PARAMETER_UPDATE`, `RELIABILITY_CORRECTION`, `AUTOMATIC_PENALTY`, `AUTOMATION_DATA_ISSUE`); a korábbi magyar szöveges bejegyzéseket a `HardenSchemaAndAuditNames` migráció átnevezi.
 - **Váratlan hiba:** egységes `500` JSON válasz magyar `message` mezővel és `traceId`-val; a részletek csak a szervernaplóba kerülnek.
 - **Audit:** minden módosító művelet, bejelentkezés, megtagadott hozzáférés (`ACCESS_UNAUTHENTICATED`, `ACCESS_FORBIDDEN`) és elutasított módosító kérés (`OPERATION_REJECTED`) naplózódik. A napló csak bővíthető. Anonim kérésekből IP-nként percenként legfeljebb 20 bejegyzés kerül be; a naplózás hibája nem rontja el a kliensnek adott választ.
 - **Health-check:** a `GET /api/health` adatbázis-ellenőrzése legfeljebb 3 másodpercig tart (`HealthCheck:DatabaseTimeoutSeconds`), utána `503`.
@@ -167,6 +169,7 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 | A2 | POST | `/api/auth/logout` | Kijelentkezés | ✅ Kész |
 | A3 | GET | `/api/auth/me` | Bejelentkezett felhasználó adatai | ✅ Kész |
 | A4 | POST | `/api/auth/change-password` | Saját jelszó cseréje | ✅ Kész |
+| A5 | PUT | `/api/auth/pin` | Saját kulcsátvételi PIN beállítása (oktató) | ✅ Kész |
 
 ### Felhasználókezelés
 
@@ -326,23 +329,24 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 ```json
 {
   "username": "string (kötelező, max 50 karakter)",
-  "jelszo":   "string (kötelező, min 6 karakter)"
+  "jelszo":   "string (kötelező, max 200 karakter; a jelszószabályt a beállításkor ellenőrizzük)"
 }
 ```
 
 **Response DTO (`LoginResponseDto`) – 200 OK:**
 ```json
 {
-  "token":     "string (JWT Bearer token)",
   "expiresAt": "datetime (ISO 8601, UTC)",
   "felhasznalo": {
-    "id":    "int",
-    "nev":   "string",
-    "email": "string",
-    "role":  "string"
+    "id":     "int",
+    "nev":    "string",
+    "email":  "string",
+    "role":   "string",
+    "hasPin": "bool"
   }
 }
 ```
+A JWT **csak** a `projektlabor_auth` HttpOnly sütiben érkezik, a JSON-válaszban nem (így JavaScriptből nem olvasható ki). Nem létező felhasználónévnél is lefut egy azonos költségű jelszó-ellenőrzés, hogy a válaszidő ne árulja el a felhasználónév létezését. A nyilvános mintajelszóval (lásd README) csak `SampleAccounts:Enabled=true` mellett lehet belépni.
 
 **Kapcsolódó entitások:** `Felhasznalok`
 
@@ -422,6 +426,26 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 
 **HTTP státuszkódok:** `200 OK`, `400 Bad Request` (hibás jelenlegi jelszó vagy gyenge új jelszó), `401 Unauthorized`, `429 Too Many Requests`
 
+Sikeres csere után a felhasználó **minden korábban kiadott tokenje érvénytelen** (a token `pwv` jelszóverzió-claimje már nem egyezik); az aktuális munkamenet a válaszban kapott új sütivel folytatódik. Ugyanez történik, ha az adminisztrátor állít be új jelszót (`PUT /api/users/{id}`).
+
+---
+
+### A5 – PUT `/api/auth/pin`
+
+**Funkció:** Az oktató saját kulcsátvételi PIN-kódjának beállítása (a portán a kulcs átvételekor kell megadni). A nyitva hagyott munkamenet visszaélése ellen a jelenlegi jelszót is kéri. Új PIN-nél a hibás próbálkozások száma és a PIN-zárolás nullázódik. Kéréskorlát: mint a bejelentkezésnél. Auditnapló: `PIN_CHANGE`, hibás jelszónál `PIN_CHANGE_FAILED`.
+
+**Jogosultság:** `Oktato`
+
+**Request DTO (`SetOwnPinRequestDto`):**
+```json
+{
+  "jelenlegiJelszo": "string",
+  "pin":             "string (4–8 számjegy)"
+}
+```
+
+**HTTP státuszkódok:** `200 OK`, `400 Bad Request` (hibás jelszó vagy PIN-formátum), `401 Unauthorized`, `403 Forbidden`, `429 Too Many Requests`
+
 ---
 
 ### U1 – GET `/api/users`
@@ -438,7 +462,7 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 ```json
 {
   "items": [
-    { "id": "int", "nev": "string", "username": "string", "email": "string", "role": "string", "createdAt": "datetime" }
+    { "id": "int", "nev": "string", "username": "string", "email": "string", "role": "string", "aktiv": "bool", "hasPin": "bool", "createdAt": "datetime" }
   ],
   "totalCount": "int", "page": "int", "pageSize": "int"
 }
@@ -459,7 +483,7 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 **Request DTO (`CreateUserRequestDto`):**
 ```json
 {
-  "username":       "string (kötelező, max 50, egyedi)",
+  "username":       "string (kötelező, 3–50 karakter, csak A–Z, a–z, 0–9, pont, kötőjel, aláhúzás; egyedi)",
   "email":          "string (kötelező, max 100, egyedi, email formátum)",
   "jelszo":         "string (kötelező, min 8 karakter)",
   "nev":            "string (kötelező, max 100)",
@@ -1228,6 +1252,7 @@ Nem saját vagy nem létező értesítés esetén `404 Not Found`.
 | POST /api/auth/logout | ✅ | ✅ | ✅ | ✅ |
 | GET /api/auth/me | ✅ | ✅ | ✅ | ✅ |
 | POST /api/auth/change-password | ✅ | ✅ | ✅ | ✅ |
+| PUT /api/auth/pin | ✅ | ❌ | ❌ | ❌ |
 | **Felhasználók** | | | | |
 | GET /api/users | ❌ | ❌ | ✅ | ❌ |
 | GET /api/users/{id} | ❌ | ❌ | ✅ | ❌ |
@@ -1329,6 +1354,7 @@ public class LoginRequestDto
 // DTOs/Auth/LoginResponseDto.cs
 public class LoginResponseDto
 {
+    [JsonIgnore] // csak a HttpOnly sütiben utazik
     public string Token { get; set; } = string.Empty;
     public DateTime ExpiresAt { get; set; }
     public CurrentUserDto Felhasznalo { get; set; } = null!;

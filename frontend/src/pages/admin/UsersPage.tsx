@@ -10,6 +10,7 @@ interface UserItem {
   role: string
   email?: string
   aktiv?: boolean
+  hasPin?: boolean
 }
 
 function errorMessage(err: unknown, fallback: string): string {
@@ -121,6 +122,7 @@ export default function UsersPage() {
     setIsSaving(true)
     try {
       await client.put(`/users/${id}/pin`, { pin: editPin })
+      setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, hasPin: true } : u)))
       setEditPin('')
       setError('')
       setSuccessMsg('A kulcsátvételi PIN sikeresen beállítva.')
@@ -299,10 +301,21 @@ export default function UsersPage() {
                           />
                         </div>
                       ) : (
-                        <span className="badge badge-primary">
-                          <Shield size={11} strokeWidth={1.5} style={{ marginRight: 2 }} />
-                          {getRoleLabel(user.role)}
-                        </span>
+                        <>
+                          <span className="badge badge-primary">
+                            <Shield size={11} strokeWidth={1.5} style={{ marginRight: 2 }} />
+                            {getRoleLabel(user.role)}
+                          </span>
+                          {user.role === 'Oktato' && user.hasPin === false && (
+                            <span
+                              className="badge badge-warning"
+                              style={{ marginLeft: 6 }}
+                              title="Kulcsot csak beállított PIN-kóddal vehet át."
+                            >
+                              Nincs PIN
+                            </span>
+                          )}
+                        </>
                       )}
                     </td>
                     <td style={{ textAlign: 'right' }}>

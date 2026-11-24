@@ -56,6 +56,19 @@ namespace ProjektLabor.Data
             modelBuilder.Entity<Kulcs>()
                 .HasIndex(key => key.Szam).IsUnique();
 
+            // A teremnév egyedi (az inaktív termeket is beleértve), hogy a listákban ne legyen két azonos nevű terem.
+            modelBuilder.Entity<Terem>()
+                .HasIndex(room => room.Nev).IsUnique();
+
+            // Gyakori lekérdezések indexei: egy kulcs legutolsó mozgása, egy terem ütköző foglalásai,
+            // valamint az auditnapló időrendi listázása.
+            modelBuilder.Entity<Kulcsmozgas>()
+                .HasIndex(movement => new { movement.KulcsId, movement.Idopont, movement.Id });
+            modelBuilder.Entity<Foglalas>()
+                .HasIndex(booking => new { booking.TeremId, booking.StartTime, booking.EndTime });
+            modelBuilder.Entity<AuditLog>()
+                .HasIndex(entry => entry.LetrehozasIdeje);
+
             modelBuilder.Entity<MesterkulcsJogosultsag>()
                 .HasIndex(access => new { access.KulcsId, access.FelhasznaloId })
                 .IsUnique();

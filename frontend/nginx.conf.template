@@ -1,3 +1,10 @@
+# Ha a frontend elé HTTPS-t lezáró proxy kerül, az általa küldött X-Forwarded-Proto értéket adjuk tovább
+# a backendnek (így a bejelentkezési süti Secure lesz); közvetlen eléréskor a saját sémánkat.
+map $http_x_forwarded_proto $forwarded_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
 server {
     listen 3000;
     server_name _;
@@ -18,7 +25,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
         add_header Content-Security-Policy $csp always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-Frame-Options "DENY" always;

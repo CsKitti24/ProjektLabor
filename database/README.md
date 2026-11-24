@@ -20,6 +20,7 @@ migrációs lánca. A jelenlegi, időrendi sorrend:
 15. `20261117202900_RemoveUserBirthDate`
 16. `20261117203019_GiveSampleInstructorsDistinctPins`
 17. `20261117204241_LinkSampleKeyIssuesToBookings`
+18. `20261124134617_HardenSchemaAndAuditNames`
 
 Az 8. és 9. migráció a `Termek.Felszereltseg`,
 `Foglalasok.SpecialisIgenyek`, `Felhasznalok.PinHash`,
@@ -42,7 +43,24 @@ A 14. migráció szerepkörönként egy közös kezdő fiókot (`admin`, `oktato
 `demo-*` fiókokat inaktiválja. A 15. migráció törli a nem használt
 `Felhasznalok.SzuletesiDatum` oszlopot. A 16. migráció eltérő PIN-t ad a két
 mintaoktatónak (csak ha még a mintaértéken áll), a 17. a mintaoktató kulcskiadásait
-lezárt foglalásokhoz köti. Mindegyik migráció visszavonható.
+lezárt foglalásokhoz köti. A 18. migráció felveszi a `Felhasznalok.JelszoValtozas`
+oszlopot (jelszócsere után a régi bejelentkezési tokenek érvénytelenek), egyedivé
+teszi a teremnevet (a meglévő azonos nevű termek közül a nem minta- és legkorábbi
+tartja meg a nevét, a többi neve mögé `(#azonosító)` kerül), indexeket ad a kulcsok
+mozgásaihoz, a foglalások ütközésvizsgálatához és az auditnaplóhoz, az állapot-,
+szerepkör- és típusoszlopokat `nvarchar(50)`-re szűkíti, és az auditnapló magyar
+szöveges művelettípusait egységes kódokra cseréli. Mindegyik migráció visszavonható.
+
+A mintaadatok (mintafiókok, `B-101`/`B-102` mintaterem, `MINTA-*` kulcsok és
+előzményeik) csak fejlesztéshez és bemutatóhoz valók: ha a `SampleAccounts:Enabled`
+nincs bekapcsolva, a backend induláskor letiltja a még eredeti jelszavú mintafiókokat,
+és törli a bemutató adatkészletet, ha a mintakulcsokat senki nem használta valódi
+kiadásra.
+
+Docker Compose alatt az alkalmazás a `db-init` lépés által létrehozott
+`projektlabor_app` felhasználóval csatlakozik (`db_owner` a `KeyAndRoomDb`
+adatbázisban, szerverszintű jogosultság nélkül); az `sa` fiókot csak az SQL Server
+és a `db-init` használja.
 
 Az `InitialCreate` hozza létre többek között a felhasználók, termek, kulcsok,
 foglalások, kulcsmozgások, értesítések, hibajegyek, karbantartási idősávok,

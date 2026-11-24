@@ -49,6 +49,8 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
                     services.Remove(descriptor);
                 }
 
+                services.RemoveAppDbContextConfiguration();
+
                 services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(dbName));
             });
         });

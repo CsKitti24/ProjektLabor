@@ -23,7 +23,7 @@ namespace ProjektLabor.Models
         [Required]
         public string Leiras { get; set; } = string.Empty;
 
-        [Required]
+        [Required, MaxLength(50)]
         public string Statusz { get; set; } = string.Empty; // Nyitva, Folyamatban, Megoldva, Zarva
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

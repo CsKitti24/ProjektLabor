@@ -74,8 +74,7 @@ namespace ProjektLabor.Endpoints
             .RequireAuthorization("Authenticated")
             .Produces<List<RoomDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status500InternalServerError)
-            .WithOpenApi();
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
 
             // R2 – GET /api/rooms/{id}
             group.MapGet("/{id:int}", async (int id, AppDbContext db, ILogger<Program> logger) =>
@@ -119,8 +118,7 @@ namespace ProjektLabor.Endpoints
             .Produces<RoomDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status500InternalServerError)
-            .WithOpenApi();
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
 
             // R3 – POST /api/rooms
             group.MapPost("/", async (
@@ -137,6 +135,12 @@ namespace ProjektLabor.Endpoints
                 if (request.Kapacitas < 1)
                 {
                     return Results.BadRequest(new { message = "A terem kapacitásának legalább 1-nek kell lennie." });
+                }
+
+                var normalizedName = request.Nev.Trim();
+                if (await RoomNameTakenAsync(db, normalizedName, exceptRoomId: null))
+                {
+                    return Results.Conflict(new { message = $"Már létezik '{normalizedName}' nevű terem (esetleg inaktívként)." });
                 }
 
                 var room = new Terem
@@ -176,8 +180,7 @@ namespace ProjektLabor.Endpoints
             .Produces<RoomDto>(StatusCodes.Status201Created)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // R4 – PUT /api/rooms/{id}
             group.MapPut("/{id:int}", async (
@@ -202,6 +205,11 @@ namespace ProjektLabor.Endpoints
 
                 if (!string.IsNullOrWhiteSpace(request.Nev) && request.Nev.Trim() != room.Nev)
                 {
+                    if (await RoomNameTakenAsync(db, request.Nev.Trim(), exceptRoomId: room.Id))
+                    {
+                        return Results.Conflict(new { message = $"Már létezik '{request.Nev.Trim()}' nevű terem (esetleg inaktívként)." });
+                    }
+
                     changes.Add($"Nev: '{room.Nev}' -> '{request.Nev.Trim()}'");
                     room.Nev = request.Nev.Trim();
                 }
@@ -280,8 +288,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // R5 – DELETE /api/rooms/{id} (Deaktiválás)
             group.MapDelete("/{id:int}", async (
@@ -353,8 +360,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // R6 – GET /api/rooms/{id}/availability
             group.MapGet("/{id:int}/availability", async (
@@ -475,8 +481,7 @@ namespace ProjektLabor.Endpoints
             .RequireAuthorization("Authenticated")
             .Produces<RoomAvailabilityDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             // R7 – GET /api/rooms/{id}/keys
             group.MapGet("/{id:int}/keys", async (int id, AppDbContext db) =>
@@ -526,10 +531,18 @@ namespace ProjektLabor.Endpoints
             .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<RoomKeyDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             return group;
+        }
+
+        // A teremnév egyedi (kis- és nagybetűtől függetlenül), az inaktív termeket is beleértve.
+        private static Task<bool> RoomNameTakenAsync(AppDbContext db, string name, int? exceptRoomId)
+        {
+            var lowered = name.ToLower();
+            return db.Termek.AnyAsync(room =>
+                room.Nev.ToLower() == lowered &&
+                (exceptRoomId == null || room.Id != exceptRoomId));
         }
     }
 }

@@ -22,12 +22,12 @@ A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikál
 | Réteg | Technológia | Megjegyzés |
 | :--- | :--- | :--- |
 | **Frontend** | React 19, TypeScript, Vite, saját CSS, Lucide React | Szerepkörös SPA; élesben nginx szolgálja ki, és az `/api` kéréseket a backendre továbbítja. |
-| **Backend** | ASP.NET Core 8 Minimal API, C# | Erősen típusos, moduláris végpontok, BCrypt jelszó- és kulcsátvételi PIN-kezelés, beépített RBAC házirendek. |
+| **Backend** | ASP.NET Core 10 Minimal API, C# | Erősen típusos, moduláris végpontok, BCrypt jelszó- és kulcsátvételi PIN-kezelés, beépített RBAC házirendek. |
 | **Adatbázis** | Microsoft SQL Server 2022 | Konténerizált relációs adatbázis tranzakció- és zárkezeléssel. |
 | **ORM / Migráció** | Entity Framework Core 8 | Code-first megközelítés, automatikus séma-migrációk indításkor. |
 | **Hitelesítés** | JSON Web Token HttpOnly sütiben + BCrypt | A token JavaScriptből nem olvasható; minden kérésnél adatbázis-ellenőrzés (aktív felhasználó, egyező szerepkör), bejelentkezési kéréskorlát, PIN-zárolás. |
 | **Dokumentáció** | Swagger / OpenAPI v1 | Fejlesztői módban interaktív tesztelő felület (`/swagger`). |
-| **Tesztelés & CI** | xUnit, WebApplicationFactory, Vitest, GitHub Actions | 172 backend teszt (valódi SQL Serveren is) és 30 frontend teszt, linting, Docker-build ellenőrzés. |
+| **Tesztelés & CI** | xUnit, WebApplicationFactory, Vitest, GitHub Actions | 185 backend teszt (valódi SQL Serveren is) és 31 frontend teszt, linting, Docker-build ellenőrzés. |
 
 ---
 
@@ -241,7 +241,9 @@ cp .env.example .env
 *(Windows PowerShell esetén: `Copy-Item .env.example .env`)*
 
 A `.env` fájlban add meg a kulcsokat:
-- `MSSQL_SA_PASSWORD`: Erős adatbázis rendszergazda jelszó.
+- `MSSQL_SA_PASSWORD`: Erős adatbázis rendszergazda jelszó. Csak az SQL Server és az egyszeri `db-init` lépés használja.
+- `MSSQL_APP_PASSWORD`: Az alkalmazás saját adatbázis-felhasználójának (`projektlabor_app`) jelszava (legalább 12 karakter, idézőjel nélkül). A `db-init` szolgáltatás induláskor létrehozza ezt a felhasználót, amely csak a `KeyAndRoomDb` adatbázishoz fér hozzá; a backend ezzel csatlakozik, nem az `sa` fiókkal. **Meglévő telepítésnél is fel kell venni a `.env`-be**, különben a `docker compose` nem indul.
+- `AUTH_COOKIE_SECURE`: `true`, ha az alkalmazás HTTPS-t lezáró proxy mögött fut (lásd lent). Alapértelmezés: `false`.
 - `JWT_SIGNING_KEY`: Legalább 32 bájtos véletlenszerű kulcs (pl. `openssl rand -base64 48`).
 - `BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD`: Az induló adminisztrátori fiók adatai (legalább 12 karakteres jelszó; a `REPLACE_WITH_` mintaértékeket a rendszer elutasítja). Akkor jön létre, ha nincs aktív adminisztrátor.
 - `SAMPLE_ACCOUNTS_ENABLED`: `true` esetén a lenti mintafiókok aktívak maradnak (csak bemutatóhoz/fejlesztéshez). Alapértelmezés: `false`.
@@ -249,7 +251,7 @@ A `.env` fájlban add meg a kulcsokat:
 
 ### Közös kezdő felhasználók
 
-A migrációk minden adatbázisba felveszik az alábbi fiókokat (`SeedRoleUsersAndReliabilitySample`). Mivel a jelszavuk itt nyilvános, **a backend induláskor letiltja azokat, amelyek jelszava még az eredeti**, kivéve ha `SAMPLE_ACCOUNTS_ENABLED=true` (Docker) vagy `SampleAccounts:Enabled=true` (a `Development` környezet `appsettings.Development.json`-ja ezt bekapcsolja). Ha emiatt nem marad aktív adminisztrátor, a `BOOTSTRAP_ADMIN_*` adataiból jön létre egy (az azonos nevű, letiltott mintafiók átvételével).
+A migrációk minden adatbázisba felveszik az alábbi fiókokat és egy bemutató adatkészletet (`SeedRoleUsersAndReliabilitySample`: `B-101`/`B-102` mintaterem, `MINTA-B101`/`MINTA-B102` kulcs, Rádli Richárd 34 késve visszahozott kulcsa). Ha a mintafiókok nincsenek engedélyezve, a backend induláskor a bemutató adatkészletet is törli, feltéve hogy a mintakulcsokat azóta senki nem használta valódi kiadásra. Mivel a jelszavuk itt nyilvános, **a backend induláskor letiltja azokat, amelyek jelszava még az eredeti**, kivéve ha `SAMPLE_ACCOUNTS_ENABLED=true` (Docker) vagy `SampleAccounts:Enabled=true` (a `Development` környezet `appsettings.Development.json`-ja ezt bekapcsolja). Ha emiatt nem marad aktív adminisztrátor, a `BOOTSTRAP_ADMIN_*` adataiból jön létre egy (az azonos nevű, letiltott mintafiók átvételével).
 
 | Felhasználónév | Jelszó | Szerepkör |
 | :--- | :--- | :--- |
@@ -259,7 +261,16 @@ A migrációk minden adatbázisba felveszik az alábbi fiókokat (`SeedRoleUsers
 | `igazgato` | `Igazgatojelszo1!` | Üzemeltetési igazgató |
 
 Az `oktato` fiók kulcsátvételi PIN-je `4729`.
-Bemutatóhoz a `.env`-ben állítsd be: `SAMPLE_ACCOUNTS_ENABLED=true`. Éles üzemben hagyd `false`-on. A saját jelszavát minden felhasználó a **Profil → Jelszó módosítása** űrlapon cserélheti le; a megváltoztatott jelszavú mintafiókokat a rendszer már nem tiltja le.
+Bemutatóhoz a `.env`-ben állítsd be: `SAMPLE_ACCOUNTS_ENABLED=true`. Éles üzemben hagyd `false`-on. A saját jelszavát minden felhasználó a **Profil → Jelszó módosítása** űrlapon cserélheti le (ilyenkor a más eszközökön nyitva hagyott bejelentkezései megszűnnek); a megváltoztatott jelszavú mintafiókokat a rendszer már nem tiltja le. Az oktatók a kulcsátvételi PIN-kódjukat is maguk állíthatják be a **Profil → Kulcsátvételi PIN-kód** űrlapon; az adminisztrátor a felhasználólistában látja, kinek nincs még PIN-je.
+
+### HTTPS éles üzemben
+
+A konténerek magukban csak HTTP-t szolgálnak ki (a 3000-es porton). Éles üzemben az alkalmazás elé egy
+HTTPS-t lezáró reverse proxyt kell tenni (pl. az intézmény meglévő nginx/IIS/Caddy szervere, érvényes
+tanúsítvánnyal), amely a kéréseket a `http://<szerver>:3000` címre továbbítja, és beállítja az
+`X-Forwarded-Proto: https` fejlécet. Ezután a `.env`-ben állítsd be: `AUTH_COOKIE_SECURE=true` — a
+bejelentkezési süti ekkor csak titkosított kapcsolaton utazik. A 3000-es portot ilyenkor ne nyisd meg a
+hálózat felé, csak a proxy érje el.
 
 ### 2. Alkalmazás indítása konténerben
 ```bash
@@ -288,7 +299,7 @@ docker compose down
 
 Az adatbázis az induláskor `APPLY_MIGRATIONS=true` beállítással futó backend
 által alkalmazza a függő EF Core migrációkat. Meglévő helyi vagy megosztott
-adatbázis frissítése előtt készíts és ellenőrizz mentést; a részletes, tizenhét
+adatbázis frissítése előtt készíts és ellenőrizz mentést; a részletes, tizennyolc
 migrációt felsoroló leírást lásd a [database/README.md](./database/README.md)
 fájlban. Éles vagy közös adatbázist ne frissíts automatikusan külön jóváhagyás
 nélkül.
@@ -297,7 +308,8 @@ nélkül.
 
 ## Helyi fejlesztés és tesztelés
 
-### Backend fejlesztés és tesztek (.NET 8)
+### Backend fejlesztés és tesztek (.NET 10)
+A backend .NET 10 (LTS, támogatás 2028 novemberéig) alatt fut; helyi fejlesztéshez a .NET 10 SDK szükséges.
 ```bash
 # Fordítás
 dotnet build ProjektLabor.sln
@@ -312,7 +324,7 @@ Server-példányon futtathatók. A teszt ideiglenes `ProjektLaborIntegration_*`
 adatbázisokat hoz létre és töröl. Ha a `SQLSERVER_TEST_CONNECTION` környezeti
 változó nincs beállítva, ezek a tesztek kihagyásra kerülnek (nem buknak el).
 
-### Frontend fejlesztés (Node.js 20+)
+### Frontend fejlesztés (Node.js 22+)
 ```bash
 cd frontend
 npm ci

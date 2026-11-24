@@ -30,6 +30,8 @@ public class SecurityHardeningTests : IClassFixture<WebApplicationFactory<Progra
                     services.Remove(descriptor);
                 }
 
+                services.RemoveAppDbContextConfiguration();
+
                 services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(dbName));
             });
         });

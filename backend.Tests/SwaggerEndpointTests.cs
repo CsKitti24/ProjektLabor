@@ -39,6 +39,8 @@ namespace backend.Tests
                         services.Remove(descriptor);
                     }
 
+                    services.RemoveAppDbContextConfiguration();
+
                     services.AddDbContext<AppDbContext>(options =>
                     {
                         options.UseInMemoryDatabase(dbName);

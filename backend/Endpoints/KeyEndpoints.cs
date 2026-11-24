@@ -78,8 +78,7 @@ namespace ProjektLabor.Endpoints
             .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<KeyDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // K2 – GET /api/keys/{id}
             group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
@@ -122,8 +121,7 @@ namespace ProjektLabor.Endpoints
             .Produces<KeyDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // K3 – POST /api/keys
             group.MapPost("/", async (
@@ -195,8 +193,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // K4 – PUT /api/keys/{id}
             group.MapPut("/{id:int}", async (
@@ -320,8 +317,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // K5 – DELETE /api/keys/{id} (Deaktiválás)
             group.MapDelete("/{id:int}", async (
@@ -359,8 +355,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // K6 – GET /api/keys/{id}/status
             group.MapGet("/{id:int}/status", async (int id, AppDbContext db) =>
@@ -406,8 +401,7 @@ namespace ProjektLabor.Endpoints
             .Produces<KeyStatusDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // K7 – GET /api/keys/{id}/movements
             group.MapGet("/{id:int}/movements", async (int id, AppDbContext db) =>
@@ -461,8 +455,7 @@ namespace ProjektLabor.Endpoints
             .Produces<List<KeyMovementItemDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             group.MapGet("/{id:int}/rooms", async (
                 int id,
@@ -490,8 +483,7 @@ namespace ProjektLabor.Endpoints
             .WithSummary("Mesterkulcshoz rendelt termek listázása")
             .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<KeyRoomDto>>(StatusCodes.Status200OK)
-            .Produces(StatusCodes.Status404NotFound)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status404NotFound);
 
             group.MapPut("/{id:int}/rooms", async (
                 int id,
@@ -584,8 +576,7 @@ namespace ProjektLabor.Endpoints
             .Produces<List<KeyRoomDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             return group;
         }

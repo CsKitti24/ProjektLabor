@@ -17,6 +17,11 @@ namespace ProjektLabor.Services
         private readonly ILogger<AuthService> _logger;
         private readonly AuditService _auditService;
 
+        // Nem létező felhasználónál is lefuttatunk egy ugyanilyen költségű BCrypt-ellenőrzést, hogy a
+        // válaszidőből ne derüljön ki, létezik-e a felhasználónév.
+        private static readonly Lazy<string> DummyPasswordHash = new(
+            () => BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString("N"), workFactor: 12));
+
         public AuthService(
             AppDbContext db,
             IConfiguration config,
@@ -43,6 +48,7 @@ namespace ProjektLabor.Services
 
             if (user is null || !user.Aktiv)
             {
+                BCrypt.Net.BCrypt.Verify(request.Jelszo, DummyPasswordHash.Value);
                 _logger.LogWarning("Bejelentkezési kísérlet nem létező vagy inaktív felhasználóval: {Username}", request.Username);
                 await _auditService.LogForUserAsync(
                     null,
@@ -61,6 +67,21 @@ namespace ProjektLabor.Services
                     "LOGIN_FAILED",
                     "Authentication",
                     entitasId: request.Username);
+                return null;
+            }
+
+            // A mintafiókok jelszava nyilvános: ha nincsenek kifejezetten engedélyezve, az eredeti jelszóval
+            // akkor sem lehet belépni, ha valaki időközben újraaktiválta a fiókot.
+            if (!_config.GetValue("SampleAccounts:Enabled", false) &&
+                AdminBootstrapper.KnownSampleAccountPasswordHashes.Contains(user.JelszoHash))
+            {
+                _logger.LogWarning("Bejelentkezés elutasítva: {Username} még a nyilvános mintajelszót használja.", request.Username);
+                await _auditService.LogForUserAsync(
+                    null,
+                    "LOGIN_FAILED",
+                    "Authentication",
+                    entitasId: request.Username,
+                    indoklas: "A fiók még a nyilvános mintajelszót használja.");
                 return null;
             }
 
@@ -84,7 +105,8 @@ namespace ProjektLabor.Services
                     Nev = user.Nev,
                     Email = user.Email,
                     Username = user.Username,
-                    Role = user.Role
+                    Role = user.Role,
+                    HasPin = user.PinHash != null
                 }
             };
         }
@@ -105,7 +127,14 @@ namespace ProjektLabor.Services
                 new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
                 new Claim(JwtRegisteredClaimNames.Email, user.Email),
                 new Claim("role", user.Role),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                // A kiadás ideje: jelszócsere után az ennél korábban kiadott tokeneket elutasítjuk.
+                new Claim(
+                    JwtRegisteredClaimNames.Iat,
+                    DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ClaimValueTypes.Integer64),
+                // Jelszóverzió: az utolsó jelszócsere időbélyege. Csere után a régi értékű tokeneket elutasítjuk.
+                new Claim(PasswordVersionClaim, GetPasswordVersion(user))
             };
 
             var token = new JwtSecurityToken(
@@ -139,7 +168,8 @@ namespace ProjektLabor.Services
                     Nev = u.Nev,
                     Email = u.Email,
                     Username = u.Username,
-                    Role = u.Role
+                    Role = u.Role,
+                    HasPin = u.PinHash != null
                 })
                 .FirstOrDefaultAsync();
 
@@ -148,11 +178,68 @@ namespace ProjektLabor.Services
 
         /// <summary>
         /// A bejelentkezett felhasználó saját jelszavának cseréje a jelenlegi jelszó ellenőrzésével.
-        /// Visszatér: (siker, hibaüzenet); a hibaüzenet null, ha a csere sikerült.
+        /// Visszatér: (siker, hibaüzenet, új token); a hibaüzenet null, ha a csere sikerült. A régi tokenek
+        /// a cserével érvényüket vesztik, ezért a hívó az új tokennel folytathatja a munkát.
         /// </summary>
-        public async Task<(bool Success, string? Error)> ChangePasswordAsync(
+        public async Task<(bool Success, string? Error, string? NewToken)> ChangePasswordAsync(
             ClaimsPrincipal principal,
             ChangePasswordRequestDto request)
+        {
+            var userIdClaim = principal.FindFirst(JwtRegisteredClaimNames.Sub)
+                           ?? principal.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim is null || !int.TryParse(userIdClaim.Value, out var userId))
+            {
+                return (false, null, null);
+            }
+
+            var user = await _db.Felhasznalok.FirstOrDefaultAsync(u => u.Id == userId && u.Aktiv);
+            if (user is null)
+            {
+                return (false, null, null);
+            }
+
+            if (!BCrypt.Net.BCrypt.Verify(request.JelenlegiJelszo, user.JelszoHash))
+            {
+                await _auditService.LogForUserAsync(
+                    user.Id,
+                    "PASSWORD_CHANGE_FAILED",
+                    "Felhasznalo",
+                    entitasId: user.Id.ToString());
+                return (false, "A jelenlegi jelszó hibás.", null);
+            }
+
+            var policyError = PasswordPolicy.Validate(request.UjJelszo);
+            if (policyError is not null)
+            {
+                return (false, policyError, null);
+            }
+
+            if (string.Equals(request.JelenlegiJelszo, request.UjJelszo, StringComparison.Ordinal))
+            {
+                return (false, "Az új jelszó nem egyezhet meg a jelenlegivel.", null);
+            }
+
+            user.JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.UjJelszo, workFactor: 12);
+            user.UpdatedAt = DateTime.UtcNow;
+            // A korábban kiadott (pl. egy másik gépen nyitva hagyott) bejelentkezések érvényüket vesztik.
+            user.JelszoValtozas = user.UpdatedAt;
+            await _db.SaveChangesAsync();
+
+            await _auditService.LogForUserAsync(
+                user.Id,
+                "PASSWORD_CHANGE",
+                "Felhasznalo",
+                entitasId: user.Id.ToString());
+            return (true, null, GenerateJwtToken(user));
+        }
+
+        /// <summary>
+        /// Az oktató saját PIN-kódjának beállítása a jelenlegi jelszó ellenőrzésével.
+        /// Visszatér: (siker, hibaüzenet); a hibaüzenet null, ha a felhasználó nem található.
+        /// </summary>
+        public async Task<(bool Success, string? Error)> SetOwnPinAsync(
+            ClaimsPrincipal principal,
+            SetOwnPinRequestDto request)
         {
             var userIdClaim = principal.FindFirst(JwtRegisteredClaimNames.Sub)
                            ?? principal.FindFirst(ClaimTypes.NameIdentifier);
@@ -171,34 +258,37 @@ namespace ProjektLabor.Services
             {
                 await _auditService.LogForUserAsync(
                     user.Id,
-                    "PASSWORD_CHANGE_FAILED",
+                    "PIN_CHANGE_FAILED",
                     "Felhasznalo",
                     entitasId: user.Id.ToString());
                 return (false, "A jelenlegi jelszó hibás.");
             }
 
-            var policyError = PasswordPolicy.Validate(request.UjJelszo);
-            if (policyError is not null)
-            {
-                return (false, policyError);
-            }
-
-            if (string.Equals(request.JelenlegiJelszo, request.UjJelszo, StringComparison.Ordinal))
-            {
-                return (false, "Az új jelszó nem egyezhet meg a jelenlegivel.");
-            }
-
-            user.JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.UjJelszo, workFactor: 12);
+            user.PinHash = BCrypt.Net.BCrypt.HashPassword(request.Pin);
+            // Új PIN beállításakor a korábbi hibás próbálkozások és a zárolás megszűnik.
+            user.PinHibasProbalkozasok = 0;
+            user.PinZarolvaEddig = null;
             user.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
 
             await _auditService.LogForUserAsync(
                 user.Id,
-                "PASSWORD_CHANGE",
+                "PIN_CHANGE",
                 "Felhasznalo",
-                entitasId: user.Id.ToString());
+                entitasId: user.Id.ToString(),
+                ujErtek: "Saját PIN beállítva");
             return (true, null);
         }
+
+        public const string PasswordVersionClaim = "pwv";
+
+        public static string GetPasswordVersion(Felhasznalo user) =>
+            GetPasswordVersion(user.JelszoValtozas);
+
+        public static string GetPasswordVersion(DateTime? passwordChangedAt) =>
+            (passwordChangedAt?.Ticks ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        public DateTime GetTokenExpiry() => DateTime.UtcNow.AddHours(GetExpiresInHours());
 
         private double GetExpiresInHours()
         {

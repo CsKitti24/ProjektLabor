@@ -36,6 +36,8 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
                     services.Remove(descriptor);
                 }
 
+                services.RemoveAppDbContextConfiguration();
+
                 services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(dbName));
             });
         });

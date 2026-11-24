@@ -1,5 +1,5 @@
 # --- Build: forrás fordítása és publikálása Release módban ---
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY backend.csproj ./
@@ -9,7 +9,7 @@ COPY . .
 RUN dotnet publish backend.csproj --configuration Release --no-restore --output /app/publish /p:UseAppHost=false
 
 # --- Futtatás: csak a runtime és a publikált alkalmazás, SDK nélkül ---
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
 # A curl a docker-compose healthcheckhez kell.
 RUN apt-get update \

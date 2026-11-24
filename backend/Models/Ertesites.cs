@@ -23,13 +23,13 @@ namespace ProjektLabor.Models
 
         public bool Olvasva { get; set; }
 
-        [Required]
+        [Required, MaxLength(50)]
         public string ErtesitesTipus { get; set; } = string.Empty; // BeforeEnd
 
         [Required]
         public DateTime IdoPont { get; set; }
 
-        [Required]
+        [Required, MaxLength(50)]
         public string Allapot { get; set; } = string.Empty; // Kesz, KuldesAlatt, Hiba
 
         [MaxLength(100)]

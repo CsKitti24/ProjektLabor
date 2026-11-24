@@ -9,7 +9,9 @@ namespace ProjektLabor.DTOs.Auth
         public string Username { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "A jelszó megadása kötelező.")]
-        [MinLength(6, ErrorMessage = "A jelszó legalább 6 karakter kell legyen.")]
+        // Bejelentkezéskor nem írunk elő minimális hosszt (a jelszószabályt a beállításkor ellenőrizzük);
+        // a felső korlát a túl nagy kérések ellen véd.
+        [MaxLength(200, ErrorMessage = "A jelszó túl hosszú.")]
         public string Jelszo { get; set; } = string.Empty;
     }
 }

@@ -30,39 +30,34 @@ public static class ReportEndpoints
             .Produces<DailyReportResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
         reports.MapGet("/weekly", GetWeeklyAsync)
             .WithName("GetWeeklyReport")
             .WithSummary("Heti forgalmi összesítő")
             .Produces<WeeklyReportResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
         reports.MapGet("/room-utilization", GetRoomUtilizationAsync)
             .WithName("GetRoomUtilizationReport")
             .WithSummary("Termek foglalási kihasználtsága")
             .Produces<RoomUtilizationReportResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
         reports.MapGet("/key-traffic", GetKeyTrafficAsync)
             .WithName("GetKeyTrafficReport")
             .WithSummary("Kulcsok forgalmi statisztikája")
             .Produces<KeyTrafficReportResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
         reports.MapGet("/reliability", GetReliabilityAsync)
             .WithName("GetReliabilityReport")
             .WithSummary("Rendszerszintű megbízhatósági összesítő")
             .Produces<ReliabilityReportResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
         return endpoints;
     }

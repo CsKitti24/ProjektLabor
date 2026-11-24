@@ -184,7 +184,7 @@ public sealed class DailyKeyClosingProcessor
                 {
                     _db.AuditLogok.Add(new AuditLog
                     {
-                        MuveletTipus = "Automatizálási adatprobléma",
+                        MuveletTipus = "AUTOMATION_DATA_ISSUE",
                         EntitasTipus = "Kulcsmozgas",
                         EntitasId = movement.Id.ToString(CultureInfo.InvariantCulture),
                         AutomationKey = automationKey,
@@ -214,12 +214,12 @@ public sealed class DailyKeyClosingProcessor
                 Pont = PenaltyPoints,
                 Automatikus = true,
                 EsemenyIdopontja = now,
-                Tanev = GetAcademicYear(now),
+                Tanev = AppTime.AcademicYear(now),
                 CreatedAt = now
             });
             _db.AuditLogok.Add(new AuditLog
             {
-                MuveletTipus = "Automatikus büntetőpont",
+                MuveletTipus = "AUTOMATIC_PENALTY",
                 EntitasTipus = "Kulcsmozgas",
                 EntitasId = movement.Id.ToString(CultureInfo.InvariantCulture),
                 UjErtek = $"{PenaltyEventType}: +{PenaltyPoints}; FelhasznaloId: {movement.RecipientId.Value}",
@@ -262,9 +262,4 @@ public sealed class DailyKeyClosingProcessor
     private static DateTime AsUtc(DateTime value) =>
         DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
-    private static string GetAcademicYear(DateTime date)
-    {
-        var startYear = date.Month >= 9 ? date.Year : date.Year - 1;
-        return $"{startYear}/{startYear + 1}";
-    }
 }

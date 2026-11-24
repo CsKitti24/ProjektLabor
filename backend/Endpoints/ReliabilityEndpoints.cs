@@ -51,7 +51,7 @@ public static class ReliabilityEndpoints
             return Results.NotFound(new { message = "A megadott oktató nem található." });
         }
 
-        var academicYear = GetAcademicYear(DateTime.UtcNow);
+        var academicYear = AppTime.AcademicYear(DateTime.UtcNow);
         var score = await CalculateScoreAsync(userId, academicYear, db, cancellationToken);
 
         return Results.Ok(CreateScoreResponse(instructor.Id, instructor.Nev, academicYear, score));
@@ -71,7 +71,7 @@ public static class ReliabilityEndpoints
             return Results.Forbid();
         }
 
-        var academicYear = GetAcademicYear(DateTime.UtcNow);
+        var academicYear = AppTime.AcademicYear(DateTime.UtcNow);
         var instructors = await db.Felhasznalok
             .AsNoTracking()
             .Where(user => user.Role == RoleNames.Oktato && user.Aktiv)
@@ -172,7 +172,7 @@ public static class ReliabilityEndpoints
             return Results.NotFound(new { message = "A bejelentkezett oktató nem található." });
         }
 
-        var academicYear = GetAcademicYear(DateTime.UtcNow);
+        var academicYear = AppTime.AcademicYear(DateTime.UtcNow);
         var score = await CalculateScoreAsync(instructorId.Value, academicYear, db, cancellationToken);
 
         return Results.Ok(CreateScoreResponse(instructor.Id, instructor.Nev, academicYear, score));
@@ -186,12 +186,13 @@ public static class ReliabilityEndpoints
     {
         if (request.UserId <= 0 ||
             request.Pont == 0 ||
+            request.Pont is < -MaximumScore or > MaximumScore ||
             string.IsNullOrWhiteSpace(request.Indoklas) ||
             request.Indoklas.Length > 500)
         {
             return Results.BadRequest(new
             {
-                message = "Érvényes oktatóazonosító, nullától eltérő pontkorrekció és legfeljebb 500 karakteres indoklás szükséges."
+                message = "Érvényes oktatóazonosító, nullától eltérő, legfeljebb ±100 pontos korrekció és legfeljebb 500 karakteres indoklás szükséges."
             });
         }
 
@@ -214,7 +215,7 @@ public static class ReliabilityEndpoints
             return Results.NotFound(new { message = "A megadott oktató nem található." });
         }
 
-        var academicYear = GetAcademicYear(DateTime.UtcNow);
+        var academicYear = AppTime.AcademicYear(DateTime.UtcNow);
         var previousScore = await CalculateScoreAsync(
             request.UserId, academicYear, db, cancellationToken);
         var newScore = Math.Clamp(previousScore + request.Pont, 0, MaximumScore);
@@ -235,7 +236,7 @@ public static class ReliabilityEndpoints
         db.AuditLogok.Add(new AuditLog
         {
             FelhasznaloId = administratorId.Value,
-            MuveletTipus = "Pontkorrekció",
+            MuveletTipus = "RELIABILITY_CORRECTION",
             EntitasTipus = "Megbízhatósági pontszám",
             EntitasId = request.UserId.ToString(CultureInfo.InvariantCulture),
             RegiErtek = previousScore.ToString(CultureInfo.InvariantCulture),
@@ -323,11 +324,6 @@ public static class ReliabilityEndpoints
             (score, pointsForEvent) => Math.Clamp(score + pointsForEvent, 0, MaximumScore));
     }
 
-    private static string GetAcademicYear(DateTime date)
-    {
-        var startYear = date.Month >= 9 ? date.Year : date.Year - 1;
-        return $"{startYear}/{startYear + 1}";
-    }
 
     private static ReliabilityScoreResponse CreateScoreResponse(
         int userId,
