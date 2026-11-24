@@ -166,6 +166,7 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 | A1 | POST | `/api/auth/login` | Bejelentkezés, JWT token kiadás | ✅ Kész |
 | A2 | POST | `/api/auth/logout` | Kijelentkezés | ✅ Kész |
 | A3 | GET | `/api/auth/me` | Bejelentkezett felhasználó adatai | ✅ Kész |
+| A4 | POST | `/api/auth/change-password` | Saját jelszó cseréje | ✅ Kész |
 
 ### Felhasználókezelés
 
@@ -402,6 +403,24 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 **Kapcsolódó entitások:** `Felhasznalok`
 
 **HTTP státuszkódok:** `200 OK`, `401 Unauthorized`
+
+---
+
+### A4 – POST `/api/auth/change-password`
+
+**Funkció:** A bejelentkezett felhasználó saját jelszavának cseréje. A jelenlegi jelszót ellenőrzi; az új jelszóra ugyanaz a szabály vonatkozik, mint a felhasználó létrehozásakor (legalább 12 karakter, legfeljebb 72 UTF-8 bájt), és nem egyezhet a jelenlegivel. A bejelentkezéssel közös kéréskorlát (IP-nként percenként 10) védi. Auditnapló: `PASSWORD_CHANGE`, illetve hibás jelenlegi jelszónál `PASSWORD_CHANGE_FAILED`.
+
+**Jogosultság:** Autentikált felhasználó (bármely szerepkör)
+
+**Request DTO (`ChangePasswordRequestDto`):**
+```json
+{
+  "jelenlegiJelszo": "string",
+  "ujJelszo":        "string"
+}
+```
+
+**HTTP státuszkódok:** `200 OK`, `400 Bad Request` (hibás jelenlegi jelszó vagy gyenge új jelszó), `401 Unauthorized`, `429 Too Many Requests`
 
 ---
 
@@ -1208,6 +1227,7 @@ Nem saját vagy nem létező értesítés esetén `404 Not Found`.
 | POST /api/auth/login | ✅ | ✅ | ✅ | ✅ |
 | POST /api/auth/logout | ✅ | ✅ | ✅ | ✅ |
 | GET /api/auth/me | ✅ | ✅ | ✅ | ✅ |
+| POST /api/auth/change-password | ✅ | ✅ | ✅ | ✅ |
 | **Felhasználók** | | | | |
 | GET /api/users | ❌ | ❌ | ✅ | ❌ |
 | GET /api/users/{id} | ❌ | ❌ | ✅ | ❌ |

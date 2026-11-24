@@ -414,6 +414,66 @@ public sealed class SecurityIntegrationTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
+    public async Task AdminBootstrap_DeactivatesSampleAccountsWithKnownPasswords_UnlessExplicitlyEnabled()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase($"BootstrapSampleTestDb_{Guid.NewGuid():N}")
+            .Options;
+        await using var db = new AppDbContext(options);
+        var knownHashes = AdminBootstrapper.KnownSampleAccountPasswordHashes;
+        db.Felhasznalok.AddRange(
+            new Felhasznalo { Username = "admin", Email = "admin@projektlabor.local", Nev = "Admin", Role = RoleNames.Adminisztrator, JelszoHash = knownHashes[0] },
+            new Felhasznalo { Username = "oktato", Email = "oktato@projektlabor.local", Nev = "Oktató", Role = RoleNames.Oktato, JelszoHash = knownHashes[1] },
+            new Felhasznalo { Username = "changed", Email = "changed@projektlabor.local", Nev = "Changed", Role = RoleNames.Oktato, JelszoHash = BCryptHasher.HashPassword("Changed-password-2026", 4) });
+        await db.SaveChangesAsync();
+
+        var enabled = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["SampleAccounts:Enabled"] = "true" })
+            .Build();
+        await AdminBootstrapper.InitializeAsync(db, enabled, NullLogger.Instance);
+        Assert.All(await db.Felhasznalok.ToListAsync(), user => Assert.True(user.Aktiv));
+
+        var password = "Strong-bootstrap-password-2026";
+        var production = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["BootstrapAdmin:Username"] = "admin",
+                ["BootstrapAdmin:Password"] = password
+            })
+            .Build();
+        await AdminBootstrapper.InitializeAsync(db, production, NullLogger.Instance);
+
+        var users = await db.Felhasznalok.ToDictionaryAsync(user => user.Username);
+        Assert.False(users["oktato"].Aktiv);
+        Assert.True(users["changed"].Aktiv);
+        // A letiltott minta-adminisztrátort a megadott, erős jelszóval vesszük át.
+        Assert.True(users["admin"].Aktiv);
+        Assert.Equal(RoleNames.Adminisztrator, users["admin"].Role);
+        Assert.True(BCryptHasher.Verify(password, users["admin"].JelszoHash));
+        Assert.DoesNotContain(users["admin"].JelszoHash, knownHashes);
+    }
+
+    [Fact]
+    public async Task AdminBootstrap_RejectsPlaceholderCredentials()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase($"BootstrapPlaceholderTestDb_{Guid.NewGuid():N}")
+            .Options;
+        await using var db = new AppDbContext(options);
+        var placeholder = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["BootstrapAdmin:Username"] = "REPLACE_WITH_BOOTSTRAP_ADMIN",
+                ["BootstrapAdmin:Password"] = "REPLACE_WITH_A_BOOTSTRAP_PASSWORD_12+"
+            })
+            .Build();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => AdminBootstrapper.InitializeAsync(db, placeholder, NullLogger.Instance));
+        Assert.False(await db.Felhasznalok.AnyAsync());
+    }
+
+    [Fact]
     public async Task AdminBootstrap_RejectsMissingOrInvalidConfigurationForAnEmptyDatabase()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()

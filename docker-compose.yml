@@ -28,6 +28,8 @@ services:
       - Authentication__Jwt__SigningKey=${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
       - BootstrapAdmin__Username=${BOOTSTRAP_ADMIN_USERNAME:?Set BOOTSTRAP_ADMIN_USERNAME in .env}
       - BootstrapAdmin__Password=${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}
+      # A mintafiókok (admin/oktato/portas/igazgato/radli.richard) jelszava nyilvános; csak bemutatóhoz kapcsold be.
+      - SampleAccounts__Enabled=${SAMPLE_ACCOUNTS_ENABLED:-false}
       - Cors__AllowedOrigins=${CORS_ALLOWED_ORIGINS:-}
       - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=sa;TrustServerCertificate=True;
       - Database__Password=${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}

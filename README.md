@@ -27,7 +27,7 @@ A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikál
 | **ORM / Migráció** | Entity Framework Core 8 | Code-first megközelítés, automatikus séma-migrációk indításkor. |
 | **Hitelesítés** | JSON Web Token HttpOnly sütiben + BCrypt | A token JavaScriptből nem olvasható; minden kérésnél adatbázis-ellenőrzés (aktív felhasználó, egyező szerepkör), bejelentkezési kéréskorlát, PIN-zárolás. |
 | **Dokumentáció** | Swagger / OpenAPI v1 | Fejlesztői módban interaktív tesztelő felület (`/swagger`). |
-| **Tesztelés & CI** | xUnit, WebApplicationFactory, Vitest, GitHub Actions | 169 backend teszt (valódi SQL Serveren is) és 28 frontend teszt, linting, Docker-build ellenőrzés. |
+| **Tesztelés & CI** | xUnit, WebApplicationFactory, Vitest, GitHub Actions | 172 backend teszt (valódi SQL Serveren is) és 30 frontend teszt, linting, Docker-build ellenőrzés. |
 
 ---
 
@@ -243,12 +243,13 @@ cp .env.example .env
 A `.env` fájlban add meg a kulcsokat:
 - `MSSQL_SA_PASSWORD`: Erős adatbázis rendszergazda jelszó.
 - `JWT_SIGNING_KEY`: Legalább 32 bájtos véletlenszerű kulcs (pl. `openssl rand -base64 48`).
-- `BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD`: Az induló adminisztrátori fiók adatai.
+- `BOOTSTRAP_ADMIN_USERNAME` és `BOOTSTRAP_ADMIN_PASSWORD`: Az induló adminisztrátori fiók adatai (legalább 12 karakteres jelszó; a `REPLACE_WITH_` mintaértékeket a rendszer elutasítja). Akkor jön létre, ha nincs aktív adminisztrátor.
+- `SAMPLE_ACCOUNTS_ENABLED`: `true` esetén a lenti mintafiókok aktívak maradnak (csak bemutatóhoz/fejlesztéshez). Alapértelmezés: `false`.
 - *(Opcionális)* `CORS_ALLOWED_ORIGINS`: vesszővel elválasztott originök, ha a frontendet nem a beépített proxyn keresztül éred el.
 
 ### Közös kezdő felhasználók
 
-A migrációk minden adatbázisba felveszik az alábbi fiókokat (`SeedRoleUsersAndReliabilitySample`):
+A migrációk minden adatbázisba felveszik az alábbi fiókokat (`SeedRoleUsersAndReliabilitySample`). Mivel a jelszavuk itt nyilvános, **a backend induláskor letiltja azokat, amelyek jelszava még az eredeti**, kivéve ha `SAMPLE_ACCOUNTS_ENABLED=true` (Docker) vagy `SampleAccounts:Enabled=true` (a `Development` környezet `appsettings.Development.json`-ja ezt bekapcsolja). Ha emiatt nem marad aktív adminisztrátor, a `BOOTSTRAP_ADMIN_*` adataiból jön létre egy (az azonos nevű, letiltott mintafiók átvételével).
 
 | Felhasználónév | Jelszó | Szerepkör |
 | :--- | :--- | :--- |
@@ -258,7 +259,7 @@ A migrációk minden adatbázisba felveszik az alábbi fiókokat (`SeedRoleUsers
 | `igazgato` | `Igazgatojelszo1!` | Üzemeltetési igazgató |
 
 Az `oktato` fiók kulcsátvételi PIN-je `4729`.
-A jelszavak ismertek, ezért internetről elérhető telepítés előtt változtasd meg őket.
+Bemutatóhoz a `.env`-ben állítsd be: `SAMPLE_ACCOUNTS_ENABLED=true`. Éles üzemben hagyd `false`-on. A saját jelszavát minden felhasználó a **Profil → Jelszó módosítása** űrlapon cserélheti le; a megváltoztatott jelszavú mintafiókokat a rendszer már nem tiltja le.
 
 ### 2. Alkalmazás indítása konténerben
 ```bash

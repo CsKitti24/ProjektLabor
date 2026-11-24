@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User as UserIcon, LogOut, Shield, Mail, Award, RefreshCw } from 'lucide-react'
+import { User as UserIcon, LogOut, Shield, Mail, Award, RefreshCw, KeyRound } from 'lucide-react'
+import axios from 'axios'
 import { useAuth, type UserRole } from '../auth/AuthContext'
 import client from '../api/client'
 
@@ -59,6 +60,45 @@ export default function ProfilePage() {
       void Promise.resolve().then(() => loadReliability())
     }
   }, [canViewReliability, loadReliability])
+
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordSuccess, setPasswordSuccess] = useState('')
+
+  const handleChangePassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setPasswordError('')
+    setPasswordSuccess('')
+
+    if (newPassword.length < 12) {
+      setPasswordError('Az új jelszónak legalább 12 karakterből kell állnia.')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Az új jelszó és a megerősítés nem egyezik.')
+      return
+    }
+
+    setIsChangingPassword(true)
+    try {
+      await client.post('/auth/change-password', {
+        jelenlegiJelszo: currentPassword,
+        ujJelszo: newPassword,
+      })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordSuccess('A jelszó sikeresen megváltozott.')
+    } catch (error) {
+      const message = axios.isAxiosError<{ message?: string }>(error) ? error.response?.data?.message : undefined
+      setPasswordError(message || 'A jelszó módosítása nem sikerült. Próbáld újra.')
+    } finally {
+      setIsChangingPassword(false)
+    }
+  }
 
   const handleLogout = () => {
     logout()
@@ -181,6 +221,69 @@ export default function ProfilePage() {
             </div>
           </div>
         )}
+        <div className="card profile-stat-card">
+          <div className="profile-stat-header">
+            <div className="profile-stat-icon-wrap">
+              <KeyRound size={18} strokeWidth={1.5} color="var(--color-primary)" />
+            </div>
+            <h3 className="profile-stat-title">Jelszó módosítása</h3>
+          </div>
+
+          <form onSubmit={(event) => void handleChangePassword(event)} noValidate>
+            <div className="form-group">
+              <label className="form-label" htmlFor="current-password">Jelenlegi jelszó</label>
+              <input
+                id="current-password"
+                type="password"
+                className="form-input"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="new-password">Új jelszó (legalább 12 karakter)</label>
+              <input
+                id="new-password"
+                type="password"
+                className="form-input"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="confirm-password">Új jelszó megerősítése</label>
+              <input
+                id="confirm-password"
+                type="password"
+                className="form-input"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                required
+              />
+            </div>
+
+            {passwordError && (
+              <div className="alert alert-error" role="alert">{passwordError}</div>
+            )}
+            {passwordSuccess && (
+              <div className="alert alert-success" role="status">{passwordSuccess}</div>
+            )}
+
+            <button
+              type="submit"
+              className="btn btn-primary btn-sm"
+              disabled={isChangingPassword || !currentPassword || !newPassword || !confirmPassword}
+            >
+              {isChangingPassword ? <span className="spinner" /> : <KeyRound size={14} strokeWidth={1.5} />}
+              <span>Jelszó módosítása</span>
+            </button>
+          </form>
+        </div>
       </div>
 
       <style>{`
