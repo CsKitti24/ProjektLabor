@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using ProjektLabor.Data;
 using ProjektLabor.DTOs;
 using ProjektLabor.DTOs.Auth;
@@ -77,11 +77,21 @@ builder.Services
                 var user = await db.Felhasznalok
                     .AsNoTracking()
                     .Where(item => item.Id == userId)
-                    .Select(item => new { item.Role, item.Aktiv })
+                    .Select(item => new { item.Role, item.Aktiv, item.JelszoValtozas })
                     .SingleOrDefaultAsync(context.HttpContext.RequestAborted);
                 if (user is null || !user.Aktiv || !string.Equals(user.Role, role, StringComparison.Ordinal))
                 {
                     context.Fail("The user no longer exists, is inactive, or has a different role.");
+                    return;
+                }
+
+                // Jelszócsere után a korábban kiadott tokenek érvénytelenek: a token jelszóverziója
+                // (az utolsó csere időbélyege) meg kell egyezzen az aktuálissal.
+                if (user.JelszoValtozas is not null &&
+                    context.Principal?.FindFirst(AuthService.PasswordVersionClaim)?.Value !=
+                    AuthService.GetPasswordVersion(user.JelszoValtozas))
+                {
+                    context.Fail("The token was issued before the last password change.");
                 }
             }
         };
@@ -142,15 +152,9 @@ builder.Services.AddSwaggerGen(options =>
         In = ParameterLocation.Header,
         Description = "Írd be a JWT tokent."
     });
-    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
     {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
-            },
-            Array.Empty<string>()
-        }
+        [new OpenApiSecuritySchemeReference("Bearer", document)] = []
     });
 });
 
@@ -210,7 +214,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
     foreach (var network in new[] { "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16" })
     {
-        options.KnownNetworks.Add(Microsoft.AspNetCore.HttpOverrides.IPNetwork.Parse(network));
+        options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
     }
 });
 
@@ -244,6 +248,33 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 {
     var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
     var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("UnhandledException");
+
+    // Párhuzamos kérések ütközése: nem szerverhiba, a felhasználó frissítés után újrapróbálhatja.
+    if (exception is not null && SqlServerLocking.IsUniqueConstraintViolation(exception))
+    {
+        logger.LogWarning(exception, "Unique constraint violation for {Method} {Path}.", context.Request.Method, context.Request.Path);
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            message = "Ez az adat időközben már rögzítésre került (például egy párhuzamos kérésből). Frissítsd az oldalt, és ellenőrizd az adatokat.",
+            traceId = context.TraceIdentifier
+        });
+        return;
+    }
+
+    if (exception is not null && SqlServerLocking.IsTransientConcurrencyFailure(exception))
+    {
+        logger.LogWarning(exception, "Database contention for {Method} {Path}.", context.Request.Method, context.Request.Path);
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        context.Response.Headers.RetryAfter = "2";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            message = "A rendszer éppen egy párhuzamos műveletet dolgoz fel. Kérjük, néhány másodperc múlva próbáld újra.",
+            traceId = context.TraceIdentifier
+        });
+        return;
+    }
+
     logger.LogError(exception, "Unhandled exception for {Method} {Path}.", context.Request.Method, context.Request.Path);
 
     context.Response.StatusCode = StatusCodes.Status500InternalServerError;
@@ -391,8 +422,7 @@ api.MapPost("/api/auth/login", async (
 .WithTags("Auth")
 .Produces<LoginResponseDto>(StatusCodes.Status200OK)
 .Produces(StatusCodes.Status400BadRequest)
-.Produces(StatusCodes.Status401Unauthorized)
-.WithOpenApi();
+.Produces(StatusCodes.Status401Unauthorized);
 
 api.MapPost("/api/auth/logout", async (HttpContext context, AuditService auditService) =>
 {
@@ -405,8 +435,7 @@ api.MapPost("/api/auth/logout", async (HttpContext context, AuditService auditSe
     .WithTags("Auth")
     .RequireAuthorization("Authenticated")
     .Produces(StatusCodes.Status200OK)
-    .Produces(StatusCodes.Status401Unauthorized)
-    .WithOpenApi();
+    .Produces(StatusCodes.Status401Unauthorized);
 
 api.MapGet("/api/auth/me", async (HttpContext context, AuthService authService) =>
 {
@@ -420,17 +449,21 @@ api.MapGet("/api/auth/me", async (HttpContext context, AuthService authService) 
 .WithTags("Auth")
 .RequireAuthorization("Authenticated")
 .Produces<CurrentUserDto>(StatusCodes.Status200OK)
-.Produces(StatusCodes.Status401Unauthorized)
-.WithOpenApi();
+.Produces(StatusCodes.Status401Unauthorized);
 
 api.MapPost("/api/auth/change-password", async (
     ChangePasswordRequestDto request,
     HttpContext context,
     AuthService authService) =>
 {
-    var (success, error) = await authService.ChangePasswordAsync(context.User, request);
+    var (success, error, newToken) = await authService.ChangePasswordAsync(context.User, request);
     if (success)
     {
+        // A régi tokenek érvénytelenné váltak; ez a munkamenet az új tokennel folytatódik.
+        context.Response.Cookies.Append(
+            AuthCookie.Name,
+            newToken!,
+            AuthCookie.CreateOptions(context.Request, authService.GetTokenExpiry()));
         return Results.Ok(new { message = "A jelszó sikeresen megváltozott." });
     }
 
@@ -447,8 +480,34 @@ api.MapPost("/api/auth/change-password", async (
 .Produces(StatusCodes.Status200OK)
 .Produces(StatusCodes.Status400BadRequest)
 .Produces(StatusCodes.Status401Unauthorized)
-.Produces(StatusCodes.Status429TooManyRequests)
-.WithOpenApi();
+.Produces(StatusCodes.Status429TooManyRequests);
+
+api.MapPut("/api/auth/pin", async (
+    SetOwnPinRequestDto request,
+    HttpContext context,
+    AuthService authService) =>
+{
+    var (success, error) = await authService.SetOwnPinAsync(context.User, request);
+    if (success)
+    {
+        return Results.Ok(new { message = "A PIN-kód beállítva." });
+    }
+
+    return error is null
+        ? Results.Json(new { message = "A felhasználó nem található." }, statusCode: StatusCodes.Status401Unauthorized)
+        : Results.BadRequest(new { message = error });
+})
+// A jelszó próbálgatása ellen ugyanaz a kéréskorlát véd, mint a bejelentkezésnél.
+.RequireRateLimiting("login")
+.WithName("SetOwnPin")
+.WithSummary("Az oktató saját kulcsátvételi PIN-kódjának beállítása")
+.WithTags("Auth")
+.RequireAuthorization("Oktato")
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest)
+.Produces(StatusCodes.Status401Unauthorized)
+.Produces(StatusCodes.Status403Forbidden)
+.Produces(StatusCodes.Status429TooManyRequests);
 
 // Az adatbázis-ellenőrzés legfeljebb ennyi ideig tarthat, hogy elérhetetlen adatbázisnál a
 // health-check gyorsan 503-at adjon, ne lógjon percekig.
@@ -492,8 +551,7 @@ api.MapGet("/api/health", async (AppDbContext dbContext, ILogger<Program> logger
 .WithSummary("Egészségellenőrzés az adatbázis-kapcsolattal együtt")
 .WithTags("Health")
 .Produces(StatusCodes.Status200OK)
-.Produces(StatusCodes.Status503ServiceUnavailable)
-.WithOpenApi();
+.Produces(StatusCodes.Status503ServiceUnavailable);
 
 api.MapUserEndpoints();
 api.MapRoomEndpoints();

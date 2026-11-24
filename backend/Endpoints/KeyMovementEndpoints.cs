@@ -57,8 +57,7 @@ namespace ProjektLabor.Endpoints
             .Produces<List<KeyRecipientDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // KM1 – POST /api/key-movements/issue
             group.MapPost("/issue", async (
@@ -313,8 +312,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // KM2 – POST /api/key-movements/return
             group.MapPost("/return", async (
@@ -491,8 +489,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // KM3 – GET /api/key-movements
             group.MapGet("/", async (
@@ -584,8 +581,7 @@ namespace ProjektLabor.Endpoints
             .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<KeyMovementListDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // KM4 – GET /api/key-movements/{id}
             group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
@@ -632,8 +628,7 @@ namespace ProjektLabor.Endpoints
             .Produces<KeyMovementItemDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // KM5 – GET /api/key-movements/overdue
             group.MapGet("/overdue", async (
@@ -717,8 +712,7 @@ namespace ProjektLabor.Endpoints
             .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<List<OverdueKeyDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             return group;
         }

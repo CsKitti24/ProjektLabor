@@ -75,8 +75,7 @@ namespace ProjektLabor.Endpoints
             .WithSummary("A bejelentkezett felhasználó saját foglalásai")
             .RequireAuthorization("Oktato")
             .Produces<List<BookingDto>>(StatusCodes.Status200OK)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             // B1 – GET /api/bookings
             group.MapGet("/", async (
@@ -144,8 +143,7 @@ namespace ProjektLabor.Endpoints
             .WithSummary("Foglalások listázása szűrőkkel és lapozással")
             .RequireAuthorization("AdminOrPortasOrIgazgato")
             .Produces<BookingListDto>(StatusCodes.Status200OK)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             // B2 – GET /api/bookings/{id}
             group.MapGet("/{id:int}", async (int id, AppDbContext db, ClaimsPrincipal caller) =>
@@ -182,8 +180,7 @@ namespace ProjektLabor.Endpoints
             .WithSummary("Egy foglalás részletes adatainak lekérdezése")
             .Produces<BookingDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             // B3 – POST /api/bookings
             group.MapPost("/", async (
@@ -301,8 +298,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             // B4 – PUT /api/bookings/{id}
             group.MapPut("/{id:int}", async (
@@ -490,8 +486,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             // B5 – DELETE /api/bookings/{id} (Lemondás)
             group.MapDelete("/{id:int}", async (
@@ -549,8 +544,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             return group;
         }

@@ -185,7 +185,7 @@ public sealed class SqlServerIntegrationTests
 
                 var duplicateAudit = new AuditLog
                 {
-                    MuveletTipus = "Automatizálási adatprobléma",
+                    MuveletTipus = "AUTOMATION_DATA_ISSUE",
                     EntitasTipus = "Kulcsmozgas",
                     EntitasId = unresolvedMovementId.ToString(),
                     AutomationKey = $"DailyKeyClosing:UnresolvedRecipient:{unresolvedMovementId}",
@@ -441,6 +441,8 @@ public sealed class SqlServerIntegrationTests
                 {
                     services.Remove(optionsRegistration);
                 }
+
+                services.RemoveAppDbContextConfiguration();
 
                 services.AddDbContext<AppDbContext>(options => options.UseSqlServer(
                     connectionString,
@@ -845,8 +847,11 @@ public sealed class SqlServerIntegrationTests
             await db.SaveChangesAsync();
             await transaction.RollbackAsync();
 
-            // A SeedRoleUsersAndReliabilitySample migráció szerepkörönként egy fiókot hoz létre.
-            var configuration = new ConfigurationBuilder().Build();
+            // A SeedRoleUsersAndReliabilitySample migráció szerepkörönként egy fiókot hoz létre. A nyilvános
+            // mintajelszóval csak kifejezett engedéllyel (SampleAccounts:Enabled=true) lehet belépni.
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["SampleAccounts:Enabled"] = "true" })
+                .Build();
             var authService = new AuthService(
                 db,
                 configuration,
@@ -915,9 +920,75 @@ public sealed class SqlServerIntegrationTests
             // A Down() kiveszi a mintaadatokat, a fiókokat pedig inaktiválja (az audit napló hivatkozik rájuk).
             await db.GetService<IMigrator>().MigrateAsync("20261117193607_AddUserSoftDeletePinLockAndMovementRoom");
             db.ChangeTracker.Clear();
-            Assert.False((await db.Felhasznalok.SingleAsync(user => user.Username == "radli.richard")).Aktiv);
+            // Csak a régi sémában is létező oszlopot kérdezzük le (a JelszoValtozas egy későbbi migrációé).
+            Assert.False(await db.Felhasznalok
+                .Where(user => user.Username == "radli.richard")
+                .Select(user => user.Aktiv)
+                .SingleAsync());
             Assert.False(await db.Kulcsok.AnyAsync(key => key.Szam.StartsWith("MINTA-")));
             Assert.False(await db.MegbizhatosagiEsemenyek.AnyAsync(item => item.FelhasznaloId == radli.Id));
+        }
+        finally
+        {
+            await DropIsolatedDatabaseAsync(databaseName);
+        }
+    }
+
+    [SqlServerFact]
+    public async Task SqlServer_HardeningMigration_DeduplicatesRoomNames_AndProductionStartupRemovesSampleData()
+    {
+        var databaseName = $"ProjektLaborHardening_{Guid.NewGuid():N}";
+        var connectionString = await CreateIsolatedDatabaseAsync(databaseName);
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlServer(connectionString)
+                .Options;
+            await using var db = new AppDbContext(options);
+            var migrator = db.GetService<IMigrator>();
+            await migrator.MigrateAsync("20261117204241_LinkSampleKeyIssuesToBookings");
+
+            // Egy valódi, azonos nevű terem a mintaterem mellett, és egy régi magyar audit-művelettípus.
+            await db.Database.ExecuteSqlRawAsync("""
+                INSERT INTO [Termek] ([Nev], [Kapacitas], [Leiras], [Felszereltseg], [Aktivalva])
+                VALUES (N'B-101', 40, N'Valódi terem', NULL, 1);
+                INSERT INTO [AuditLogok] ([MuveletTipus], [EntitasTipus], [LetrehozasIdeje])
+                VALUES (N'Pontkorrekció', N'Megbízhatósági pontszám', SYSUTCDATETIME());
+                """);
+
+            await migrator.MigrateAsync();
+            db.ChangeTracker.Clear();
+
+            var b101Rooms = await db.Termek.Where(room => room.Nev.StartsWith("B-101")).ToListAsync();
+            Assert.Equal(2, b101Rooms.Count);
+            Assert.Equal("Valódi terem", b101Rooms.Single(room => room.Nev == "B-101").Leiras);
+            Assert.Contains(b101Rooms, room => room.Leiras == SampleDataCleanup.SampleRoomDescription && room.Nev == $"B-101 (#{room.Id})");
+            Assert.True(await db.AuditLogok.AnyAsync(entry => entry.MuveletTipus == "RELIABILITY_CORRECTION"));
+            Assert.False(await db.AuditLogok.AnyAsync(entry => entry.MuveletTipus == "Pontkorrekció"));
+
+            var production = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["BootstrapAdmin:Username"] = "admin",
+                    ["BootstrapAdmin:Password"] = "Strong-bootstrap-password-2026"
+                })
+                .Build();
+            await AdminBootstrapper.InitializeAsync(db, production, NullLogger.Instance);
+            db.ChangeTracker.Clear();
+
+            Assert.False(await db.Kulcsok.AnyAsync(key => key.Szam.StartsWith("MINTA-")));
+            Assert.False(await db.Termek.AnyAsync(room => room.Leiras == SampleDataCleanup.SampleRoomDescription));
+            Assert.True(await db.Termek.AnyAsync(room => room.Nev == "B-101" && room.Leiras == "Valódi terem"));
+            var radliId = await db.Felhasznalok.Where(user => user.Username == "radli.richard").Select(user => user.Id).SingleAsync();
+            Assert.False(await db.Foglalasok.AnyAsync(booking => booking.FelhasznaloId == radliId));
+            Assert.False(await db.MegbizhatosagiEsemenyek.AnyAsync(item => item.FelhasznaloId == radliId));
+            Assert.False(await db.Felhasznalok.AnyAsync(user => user.Username == "radli.richard" && user.Aktiv));
+
+            // Az egyedi index adatbázis-szinten is véd (kis- és nagybetűtől függetlenül).
+            db.Termek.Add(new Terem { Nev = "b-101", Kapacitas = 1 });
+            var duplicate = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            Assert.True(SqlServerLocking.IsUniqueConstraintViolation(duplicate));
         }
         finally
         {

@@ -23,7 +23,7 @@ namespace ProjektLabor.Models
         public int? AtvevoFelhasznaloId { get; set; }
         public Felhasznalo? AtvevoFelhasznalo { get; set; }
 
-        [Required]
+        [Required, MaxLength(50)]
         public string MozgasTipus { get; set; } = string.Empty; // Kiadás, Visszavétel, etc.
 
         [Required]

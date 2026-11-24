@@ -57,6 +57,16 @@ public static class AppTime
     public static DateTime LocalToUtc(DateOnly date, TimeOnly time) =>
         ConvertLocalToUtc(date.ToDateTime(time, DateTimeKind.Unspecified));
 
+    /// <summary>
+    /// A tanév (pl. "2026/2027") az intézmény helyi dátuma szerint: szeptember 1-jén, helyi éjfélkor vált.
+    /// </summary>
+    public static string AcademicYear(DateTime value)
+    {
+        var local = ToLocal(value);
+        var startYear = local.Month >= 9 ? local.Year : local.Year - 1;
+        return $"{startYear}/{startYear + 1}";
+    }
+
     public static DateOnly LocalDate(DateTime value) => DateOnly.FromDateTime(ToLocal(value));
 
     private static DateTime ConvertLocalToUtc(DateTime localValue)

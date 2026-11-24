@@ -82,7 +82,7 @@ flowchart TB
         UI --> Router --> State --> HTTP
     end
 
-    subgraph Backend["Alkalmazásszerver (.NET 8 Minimal API)"]
+    subgraph Backend["Alkalmazásszerver (.NET 10 Minimal API)"]
         GW["Kéréskezelő & CORS Middleware"]
         AuthM["JWT Bearer Authentication Handler"]
         RBAC["ASP.NET Core Authorization Policy Engine"]
@@ -130,7 +130,7 @@ flowchart TB
 - **Éles kiszolgálás:** a frontend éles buildjét nginx szolgálja ki, és az `/api` kéréseket a backendre továbbítja (azonos origin, CORS nélkül).
 
 ### 3.2. Backend API megvalósítás
-- **.NET 8 Minimal API:** Magas teljesítmény, alacsony memóriahasználat, logikailag szeparált `MapGroup` végpont-osztályok.
+- **.NET 10 Minimal API:** Magas teljesítmény, alacsony memóriahasználat, logikailag szeparált `MapGroup` végpont-osztályok.
 - **JWT HttpOnly sütiben:** HMAC-SHA256 aláírással ellátott tokenek 32+ bájtos egyedi kulccsal. Minden kérésnél az adatbázis alapján is ellenőrizzük, hogy a felhasználó létezik, aktív, és a szerepköre egyezik – így az inaktiválás és a szerepkörváltás azonnal hat.
 - **Szerepkör-házirendek (Policies):** Deklaratív `.RequireAuthorization("PolicyName")` védelem. Ha nincs token: `401 Unauthorized`; ha a szerepkör nem megfelelő: `403 Forbidden`.
 - **Védelmi rétegek:** bejelentkezési kéréskorlát (IP-nként percenként 10), PIN-zárolás 5 hibás próbálkozás után, a DTO-k ellenőrző attribútumai minden végponton (hibás bemenetre `400`), egységes magyar nyelvű hibaválasz váratlan hibánál, szűkített CORS, időkorlátos health-check.
@@ -396,7 +396,7 @@ A minőségbiztosítás automatizált tesztpiramisra és folyamatos integráció
 flowchart TD
     subgraph CI["GitHub Actions Pipeline (.github/workflows/ci.yml)"]
         direction TB
-        B_Build["1. Backend Build & Restore (.NET 8 Release)"]
+        B_Build["1. Backend Build & Restore (.NET 10 Release)"]
         B_Unit["2. Backend Egységtesztek (Domain & Validation)"]
         B_RBAC["3. RBAC & Biztonsági Integrációs Tesztek (WebApplicationFactory)"]
         SQL_Job["4. Valós SQL Server Integrációs Job (MSSQL 2022 Konténer)"]

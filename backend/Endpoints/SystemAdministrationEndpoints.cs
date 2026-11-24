@@ -122,7 +122,7 @@ public static class SystemAdministrationEndpoints
         db.AuditLogok.Add(new AuditLog
         {
             FelhasznaloId = userId,
-            MuveletTipus = "Rendszerparaméter módosítása",
+            MuveletTipus = "SYSTEM_PARAMETER_UPDATE",
             EntitasTipus = "Rendszerparaméter",
             EntitasId = parameter.Kulcs,
             RegiErtek = oldValue,

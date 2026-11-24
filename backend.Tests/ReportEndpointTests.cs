@@ -30,6 +30,8 @@ public class ReportEndpointTests : IClassFixture<WebApplicationFactory<Program>>
                     services.Remove(descriptor);
                 }
 
+                services.RemoveAppDbContextConfiguration();
+
                 services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(_dbName));
             });
         });

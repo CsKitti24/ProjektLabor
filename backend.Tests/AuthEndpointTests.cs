@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -31,6 +32,8 @@ namespace backend.Tests
                         services.Remove(descriptor);
                     }
 
+                    services.RemoveAppDbContextConfiguration();
+
                     services.AddDbContext<AppDbContext>(options =>
                     {
                         options.UseInMemoryDatabase(_dbName);
@@ -62,6 +65,17 @@ namespace backend.Tests
             }
         }
 
+        // A token csak a HttpOnly sütiben érkezik (a JSON-válaszban nincs).
+        private static string ReadAuthCookie(HttpResponseMessage response)
+        {
+            Assert.True(response.Headers.TryGetValues("Set-Cookie", out var cookies));
+            var cookie = cookies.Single(value => value.StartsWith(AuthCookie.Name + "=", StringComparison.Ordinal));
+            var token = cookie[(AuthCookie.Name.Length + 1)..].Split(';')[0];
+            Assert.False(string.IsNullOrWhiteSpace(token));
+            Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
+            return token;
+        }
+
         [Fact]
         public async Task Login_WithValidCredentials_ReturnsOkAndToken()
         {
@@ -80,7 +94,8 @@ namespace backend.Tests
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var result = await response.Content.ReadFromJsonAsync<LoginResponseDto>();
             Assert.NotNull(result);
-            Assert.False(string.IsNullOrWhiteSpace(result.Token));
+            var token = ReadAuthCookie(response);
+            Assert.DoesNotContain(token, await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
             Assert.Equal("oktato1", result.Felhasznalo.Username);
             Assert.Equal("Oktato", result.Felhasznalo.Role);
         }
@@ -105,7 +120,7 @@ namespace backend.Tests
                 var result = await response.Content.ReadFromJsonAsync<LoginResponseDto>();
                 Assert.NotNull(result);
                 Assert.Equal(role, result.Felhasznalo.Role);
-                Assert.False(string.IsNullOrWhiteSpace(result.Token));
+                ReadAuthCookie(response);
 
                 var responseBody = await response.Content.ReadAsStringAsync();
                 Assert.DoesNotContain(password, responseBody, StringComparison.Ordinal);
@@ -169,10 +184,9 @@ namespace backend.Tests
                 Jelszo = password
             });
             Assert.Equal(HttpStatusCode.OK, successfulLogin.StatusCode);
-            var login = await successfulLogin.Content.ReadFromJsonAsync<LoginResponseDto>();
-            Assert.NotNull(login);
+            var loginToken = ReadAuthCookie(successfulLogin);
             client.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", login.Token);
+                new AuthenticationHeaderValue("Bearer", loginToken);
             Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/api/auth/logout", null)).StatusCode);
 
             using var scope = _factory.Services.CreateScope();
@@ -190,8 +204,8 @@ namespace backend.Tests
             {
                 Assert.DoesNotContain(password, entry.RegiErtek ?? string.Empty, StringComparison.Ordinal);
                 Assert.DoesNotContain(password, entry.UjErtek ?? string.Empty, StringComparison.Ordinal);
-                Assert.DoesNotContain(login.Token, entry.RegiErtek ?? string.Empty, StringComparison.Ordinal);
-                Assert.DoesNotContain(login.Token, entry.UjErtek ?? string.Empty, StringComparison.Ordinal);
+                Assert.DoesNotContain(loginToken, entry.RegiErtek ?? string.Empty, StringComparison.Ordinal);
+                Assert.DoesNotContain(loginToken, entry.UjErtek ?? string.Empty, StringComparison.Ordinal);
             });
             Assert.Null(auditEntries[0].FelhasznaloId);
             Assert.NotNull(auditEntries[1].FelhasznaloId);
@@ -227,11 +241,8 @@ namespace backend.Tests
                 Username = "portas1",
                 Jelszo = "PortasJelszo!"
             });
-            var loginResult = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>();
-            Assert.NotNull(loginResult);
-
             client.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", loginResult.Token);
+                new AuthenticationHeaderValue("Bearer", ReadAuthCookie(loginResponse));
 
             // Act
             var meResponse = await client.GetAsync("/api/auth/me");
@@ -271,11 +282,8 @@ namespace backend.Tests
                 Username = "admin1",
                 Jelszo = "AdminJelszo!"
             });
-            var loginResult = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>();
-            Assert.NotNull(loginResult);
-
             client.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", loginResult.Token);
+                new AuthenticationHeaderValue("Bearer", ReadAuthCookie(loginResponse));
 
             // Act
             var logoutResponse = await client.PostAsync("/api/auth/logout", null);
@@ -307,10 +315,9 @@ namespace backend.Tests
                 new ChangePasswordRequestDto { JelenlegiJelszo = "RegiJelszo12345", UjJelszo = "UjJelszo1234567" });
             Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
 
-            var login = await (await client.PostAsJsonAsync("/api/auth/login",
-                new LoginRequestDto { Username = "jelszocsere", Jelszo = "RegiJelszo12345" }))
-                .Content.ReadFromJsonAsync<LoginResponseDto>();
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login!.Token);
+            var oldToken = ReadAuthCookie(await client.PostAsJsonAsync("/api/auth/login",
+                new LoginRequestDto { Username = "jelszocsere", Jelszo = "RegiJelszo12345" }));
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", oldToken);
 
             var wrongCurrent = await client.PostAsJsonAsync("/api/auth/change-password",
                 new ChangePasswordRequestDto { JelenlegiJelszo = "RosszJelszo12345", UjJelszo = "UjJelszo1234567" });
@@ -323,6 +330,12 @@ namespace backend.Tests
             var changed = await client.PostAsJsonAsync("/api/auth/change-password",
                 new ChangePasswordRequestDto { JelenlegiJelszo = "RegiJelszo12345", UjJelszo = "UjJelszo1234567" });
             Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+            var newToken = ReadAuthCookie(changed);
+
+            // A jelszócsere előtt kiadott token (pl. egy másik gépen) már nem érvényes, az új igen.
+            Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/auth/me")).StatusCode);
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", newToken);
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/me")).StatusCode);
 
             var anon = _factory.CreateClient();
             var oldLogin = await anon.PostAsJsonAsync("/api/auth/login",
@@ -337,5 +350,42 @@ namespace backend.Tests
             Assert.True(await db.AuditLogok.AnyAsync(entry => entry.MuveletTipus == "PASSWORD_CHANGE"));
             Assert.True(await db.AuditLogok.AnyAsync(entry => entry.MuveletTipus == "PASSWORD_CHANGE_FAILED"));
         }
-}
+
+        [Fact]
+        public async Task Login_WithPublicSamplePassword_IsRejectedUnlessSampleAccountsAreEnabled()
+        {
+            const string samplePassword = "Oktatojelszo1!";
+            var sampleHash = AdminBootstrapper.KnownSampleAccountPasswordHashes
+                .Single(hash => BCrypt.Net.BCrypt.Verify(samplePassword, hash));
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                db.Felhasznalok.Add(new Felhasznalo
+                {
+                    Username = "minta_oktato",
+                    Nev = "Minta Oktató",
+                    Email = "minta_oktato@test.hu",
+                    Role = RoleNames.Oktato,
+                    JelszoHash = sampleHash
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var production = _factory.WithWebHostBuilder(builder =>
+                builder.ConfigureAppConfiguration((_, configuration) =>
+                    configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["SampleAccounts:Enabled"] = "false"
+                    })));
+            var rejected = await production.CreateClient().PostAsJsonAsync("/api/auth/login",
+                new LoginRequestDto { Username = "minta_oktato", Jelszo = samplePassword });
+            Assert.Equal(HttpStatusCode.Unauthorized, rejected.StatusCode);
+            Assert.False(rejected.Headers.Contains("Set-Cookie"));
+
+            // Fejlesztői környezetben (SampleAccounts:Enabled=true) a mintafiók használható.
+            var allowed = await _factory.CreateClient().PostAsJsonAsync("/api/auth/login",
+                new LoginRequestDto { Username = "minta_oktato", Jelszo = samplePassword });
+            Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        }
+    }
 }

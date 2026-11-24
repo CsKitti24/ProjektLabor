@@ -52,6 +52,8 @@ public static partial class AdminBootstrapper
                     exposedSampleAccounts.Count,
                     string.Join(", ", exposedSampleAccounts.Select(user => user.Username)));
             }
+
+            await SampleDataCleanup.RemoveUntouchedSampleDataAsync(db, logger, cancellationToken);
         }
 
         var hasActiveAdministrator = await db.Felhasznalok.AnyAsync(
@@ -79,6 +81,7 @@ public static partial class AdminBootstrapper
             }
 
             existing.JelszoHash = passwordHash;
+            existing.JelszoValtozas = DateTime.UtcNow;
             existing.Role = RoleNames.Adminisztrator;
             existing.Aktiv = true;
             existing.UpdatedAt = DateTime.UtcNow;

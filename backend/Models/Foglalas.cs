@@ -24,7 +24,7 @@ namespace ProjektLabor.Models
         [Required]
         public DateTime EndTime { get; set; }
 
-        [Required]
+        [Required, MaxLength(50)]
         public string Status { get; set; } = string.Empty; // Expected values: Aktiv, NoShow, Megszuntetve, Kesz
 
         [MaxLength(500)]

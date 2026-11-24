@@ -72,6 +72,8 @@ namespace backend.Migrations
 
                     b.HasIndex("FelhasznaloId");
 
+                    b.HasIndex("LetrehozasIdeje");
+
                     b.ToTable("AuditLogok");
                 });
 
@@ -85,7 +87,8 @@ namespace backend.Migrations
 
                     b.Property<string>("Allapot")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<string>("AutomationKey")
                         .HasMaxLength(100)
@@ -99,7 +102,8 @@ namespace backend.Migrations
 
                     b.Property<string>("ErtesitesTipus")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<int?>("FoglalasId")
                         .HasColumnType("int");
@@ -155,6 +159,9 @@ namespace backend.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<DateTime?>("JelszoValtozas")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("Nev")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -172,7 +179,8 @@ namespace backend.Migrations
 
                     b.Property<string>("Role")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -219,7 +227,8 @@ namespace backend.Migrations
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<int>("TeremId")
                         .HasColumnType("int");
@@ -231,7 +240,7 @@ namespace backend.Migrations
 
                     b.HasIndex("FelhasznaloId");
 
-                    b.HasIndex("TeremId");
+                    b.HasIndex("TeremId", "StartTime", "EndTime");
 
                     b.ToTable("Foglalasok");
                 });
@@ -260,7 +269,8 @@ namespace backend.Migrations
 
                     b.Property<string>("Statusz")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<int>("TeremId")
                         .HasColumnType("int");
@@ -389,7 +399,8 @@ namespace backend.Migrations
 
                     b.Property<string>("MozgasTipus")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<int>("OperátorId")
                         .HasColumnType("int");
@@ -411,9 +422,9 @@ namespace backend.Migrations
 
                     b.HasIndex("FoglalasId");
 
-                    b.HasIndex("KulcsId");
-
                     b.HasIndex("OperátorId");
+
+                    b.HasIndex("KulcsId", "Idopont", "Id");
 
                     b.ToTable("Kulcsmozgasok");
                 });
@@ -584,6 +595,9 @@ namespace backend.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Nev")
+                        .IsUnique();
 
                     b.ToTable("Termek");
                 });

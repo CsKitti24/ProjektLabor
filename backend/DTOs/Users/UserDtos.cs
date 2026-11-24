@@ -10,6 +10,8 @@ namespace ProjektLabor.DTOs.Users
         public string Email { get; set; } = string.Empty;
         public string Role { get; set; } = string.Empty;
         public bool Aktiv { get; set; }
+        // Van-e beállított PIN-kód (kulcsátvételhez szükséges); maga a PIN sosem kerül ki.
+        public bool HasPin { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }
@@ -25,7 +27,10 @@ namespace ProjektLabor.DTOs.Users
     public class CreateUserRequestDto
     {
         [Required(ErrorMessage = "A felhasználónév megadása kötelező.")]
+        [MinLength(3, ErrorMessage = "A felhasználónév legalább 3 karakter legyen.")]
         [MaxLength(50, ErrorMessage = "A felhasználónév legfeljebb 50 karakter lehet.")]
+        [RegularExpression(@"^\s*[A-Za-z0-9._-]+\s*$",
+            ErrorMessage = "A felhasználónév csak angol betűket, számjegyeket, pontot, kötőjelet és aláhúzást tartalmazhat.")]
         public string Username { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "Az email cím megadása kötelező.")]

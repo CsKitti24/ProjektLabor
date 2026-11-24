@@ -57,6 +57,7 @@ namespace ProjektLabor.Endpoints
                         Email = u.Email,
                         Role = u.Role,
                         Aktiv = u.Aktiv,
+                        HasPin = u.PinHash != null,
                         CreatedAt = u.CreatedAt,
                         UpdatedAt = u.UpdatedAt
                     })
@@ -74,8 +75,7 @@ namespace ProjektLabor.Endpoints
             .WithSummary("Felhasználók listázása lapozással és szerepkör szerinti szűréssel")
             .Produces<UserListDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // U2 – GET /api/users/{id}
             group.MapGet("/{id:int}", async (int id, AppDbContext db) =>
@@ -91,6 +91,7 @@ namespace ProjektLabor.Endpoints
                         Email = u.Email,
                         Role = u.Role,
                         Aktiv = u.Aktiv,
+                        HasPin = u.PinHash != null,
                         CreatedAt = u.CreatedAt,
                         UpdatedAt = u.UpdatedAt
                     })
@@ -108,8 +109,7 @@ namespace ProjektLabor.Endpoints
             .Produces<UserDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // U3 – POST /api/users
             group.MapPost("/", async (
@@ -187,6 +187,7 @@ namespace ProjektLabor.Endpoints
                     Email = user.Email,
                     Role = user.Role,
                     Aktiv = user.Aktiv,
+                    HasPin = user.PinHash != null,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
                 };
@@ -199,8 +200,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // U4 – PUT /api/users/{id}
             group.MapPut("/{id:int}", async (
@@ -247,6 +247,8 @@ namespace ProjektLabor.Endpoints
                         return Results.BadRequest(new { message = newPasswordError });
                     }
                     user.JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.UjJelszo, workFactor: 12);
+                    // A felhasználó meglévő bejelentkezései érvényüket vesztik.
+                    user.JelszoValtozas = DateTime.UtcNow;
                     changes.Add("Jelszo modosult");
                 }
 
@@ -271,6 +273,7 @@ namespace ProjektLabor.Endpoints
                     Email = user.Email,
                     Role = user.Role,
                     Aktiv = user.Aktiv,
+                    HasPin = user.PinHash != null,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
                 };
@@ -284,8 +287,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // U5 – DELETE /api/users/{id}
             // Fizikai törlés helyett inaktiválás: a foglalások, kulcsmozgások és hibajegyek
@@ -349,8 +351,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // U5b – POST /api/users/{id}/reactivate
             group.MapPost("/{id:int}/reactivate", async (
@@ -390,8 +391,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             // U6 – PUT /api/users/{id}/role
             group.MapPut("/{id:int}/role", async (
@@ -474,6 +474,7 @@ namespace ProjektLabor.Endpoints
                     Email = user.Email,
                     Role = user.Role,
                     Aktiv = user.Aktiv,
+                    HasPin = user.PinHash != null,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
                 });
@@ -484,8 +485,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             group.MapPut("/{id:int}/pin", async (
                 int id,
@@ -528,8 +528,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             return group;
         }

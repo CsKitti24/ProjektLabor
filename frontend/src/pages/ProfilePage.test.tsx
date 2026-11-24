@@ -11,12 +11,15 @@ vi.mock('../api/client', () => ({
   default: {
     get: vi.fn(),
     post: vi.fn(),
+    put: vi.fn(),
   },
 }))
 
+const mockAuth = vi.hoisted(() => ({ role: 'Portas' }))
+
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({
-    user: { userId: 5, username: 'portas1', nev: 'Portás Pál', email: 'portas1@test.hu', role: 'Portas' },
+    user: { userId: 5, username: 'portas1', nev: 'Portás Pál', email: 'portas1@test.hu', role: mockAuth.role },
     logout: vi.fn(),
   }),
 }))
@@ -42,6 +45,7 @@ describe('ProfilePage password change', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    mockAuth.role = 'Portas'
   })
 
   it('rejects a mismatched confirmation without calling the API', async () => {
@@ -65,5 +69,23 @@ describe('ProfilePage password change', () => {
       ujJelszo: 'UjJelszo1234567',
     })
     expect((screen.getByLabelText('Jelenlegi jelszó') as HTMLInputElement).value).toBe('')
+  })
+
+  it('lets an instructor set their own key pickup PIN after confirming the password', async () => {
+    mockAuth.role = 'Oktato'
+    vi.mocked(client.get).mockResolvedValue(axiosResponse({ userId: 5, nev: 'Oktató', tanev: '2026/2027', pontszam: 0, kovetkezmeny: 'Nincs' }))
+    vi.mocked(client.put).mockResolvedValue(axiosResponse({ message: 'ok' }))
+    render(<MemoryRouter><ProfilePage /></MemoryRouter>)
+
+    fireEvent.change(screen.getByLabelText('Jelenlegi jelszó (megerősítéshez)'), { target: { value: 'RegiJelszo12345' } })
+    fireEvent.change(screen.getByLabelText('Új PIN-kód (4–8 számjegy)'), { target: { value: '12a4' } })
+    fireEvent.click(screen.getByRole('button', { name: 'PIN-kód mentése' }))
+    expect(await screen.findByText('A PIN-kód 4–8 számjegyből állhat.')).toBeTruthy()
+    expect(client.put).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Új PIN-kód (4–8 számjegy)'), { target: { value: '4821' } })
+    fireEvent.click(screen.getByRole('button', { name: 'PIN-kód mentése' }))
+    expect(await screen.findByText('A kulcsátvételi PIN-kód beállítva.')).toBeTruthy()
+    expect(client.put).toHaveBeenCalledWith('/auth/pin', { jelenlegiJelszo: 'RegiJelszo12345', pin: '4821' })
   })
 })

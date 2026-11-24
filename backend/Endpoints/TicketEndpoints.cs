@@ -124,8 +124,7 @@ namespace ProjektLabor.Endpoints
             .WithSummary("Hibajegyek listázása szűrőkkel és lapozással")
             .RequireAuthorization("TicketReaders")
             .Produces<TicketListDto>(StatusCodes.Status200OK)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             // T2 – GET /api/tickets/{id}
             group.MapGet("/{id:int}", async (int id, AppDbContext db, ClaimsPrincipal caller) =>
@@ -173,8 +172,7 @@ namespace ProjektLabor.Endpoints
             .RequireAuthorization("TicketReaders")
             .Produces<TicketDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             // T3 – POST /api/tickets
             group.MapPost("/", async (
@@ -256,8 +254,7 @@ namespace ProjektLabor.Endpoints
             .Produces<TicketDto>(StatusCodes.Status201Created)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status401Unauthorized);
 
             // T4 – PUT /api/tickets/{id}/status
             group.MapPut("/{id:int}/status", async (
@@ -335,8 +332,7 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .WithOpenApi();
+            .Produces(StatusCodes.Status403Forbidden);
 
             return group;
         }

@@ -29,6 +29,8 @@ public class SystemAdministrationEndpointTests : IClassFixture<WebApplicationFac
                     services.Remove(descriptor);
                 }
 
+                services.RemoveAppDbContextConfiguration();
+
                 services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(_dbName));
             });
         });
@@ -65,7 +67,7 @@ public class SystemAdministrationEndpointTests : IClassFixture<WebApplicationFac
         Assert.Equal(HttpStatusCode.OK, parameterResponse.StatusCode);
 
         var auditResponse = await client.GetAsync(
-            $"/api/audit?felhasznaloId={administrator.Id}&muveletTipus={Uri.EscapeDataString("Rendszerparaméter módosítása")}");
+            $"/api/audit?felhasznaloId={administrator.Id}&muveletTipus={Uri.EscapeDataString("SYSTEM_PARAMETER_UPDATE")}");
         Assert.Equal(HttpStatusCode.OK, auditResponse.StatusCode);
         var audit = await auditResponse.Content.ReadFromJsonAsync<SystemAdministrationEndpoints.AuditLogListResponse>();
         Assert.NotNull(audit);

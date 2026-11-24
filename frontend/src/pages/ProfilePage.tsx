@@ -100,6 +100,36 @@ export default function ProfilePage() {
     }
   }
 
+  const [pinPassword, setPinPassword] = useState('')
+  const [newPin, setNewPin] = useState('')
+  const [isSavingPin, setIsSavingPin] = useState(false)
+  const [pinError, setPinError] = useState('')
+  const [pinSuccess, setPinSuccess] = useState('')
+
+  const handleSetPin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setPinError('')
+    setPinSuccess('')
+
+    if (!/^[0-9]{4,8}$/.test(newPin)) {
+      setPinError('A PIN-kód 4–8 számjegyből állhat.')
+      return
+    }
+
+    setIsSavingPin(true)
+    try {
+      await client.put('/auth/pin', { jelenlegiJelszo: pinPassword, pin: newPin })
+      setPinPassword('')
+      setNewPin('')
+      setPinSuccess('A kulcsátvételi PIN-kód beállítva.')
+    } catch (error) {
+      const message = axios.isAxiosError<{ message?: string }>(error) ? error.response?.data?.message : undefined
+      setPinError(message || 'A PIN-kód beállítása nem sikerült. Próbáld újra.')
+    } finally {
+      setIsSavingPin(false)
+    }
+  }
+
   const handleLogout = () => {
     logout()
     navigate('/')
@@ -284,6 +314,64 @@ export default function ProfilePage() {
             </button>
           </form>
         </div>
+        {canViewReliability && (
+          <div className="card profile-stat-card">
+            <div className="profile-stat-header">
+              <div className="profile-stat-icon-wrap">
+                <KeyRound size={18} strokeWidth={1.5} color="var(--color-primary)" />
+              </div>
+              <h3 className="profile-stat-title">Kulcsátvételi PIN-kód</h3>
+            </div>
+            <p className="profile-stat-desc">
+              A portán a kulcs átvételekor ezt a PIN-kódot kell megadnod.
+            </p>
+
+            <form onSubmit={(event) => void handleSetPin(event)} noValidate>
+              <div className="form-group">
+                <label className="form-label" htmlFor="pin-password">Jelenlegi jelszó (megerősítéshez)</label>
+                <input
+                  id="pin-password"
+                  type="password"
+                  className="form-input"
+                  autoComplete="current-password"
+                  value={pinPassword}
+                  onChange={(event) => setPinPassword(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="new-pin">Új PIN-kód (4–8 számjegy)</label>
+                <input
+                  id="new-pin"
+                  type="password"
+                  inputMode="numeric"
+                  className="form-input"
+                  autoComplete="new-password"
+                  maxLength={8}
+                  value={newPin}
+                  onChange={(event) => setNewPin(event.target.value)}
+                  required
+                />
+              </div>
+
+              {pinError && (
+                <div className="alert alert-error" role="alert">{pinError}</div>
+              )}
+              {pinSuccess && (
+                <div className="alert alert-success" role="status">{pinSuccess}</div>
+              )}
+
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                disabled={isSavingPin || !pinPassword || !newPin}
+              >
+                {isSavingPin ? <span className="spinner" /> : <KeyRound size={14} strokeWidth={1.5} />}
+                <span>PIN-kód mentése</span>
+              </button>
+            </form>
+          </div>
+        )}
       </div>
 
       <style>{`
