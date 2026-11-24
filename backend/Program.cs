@@ -423,6 +423,33 @@ api.MapGet("/api/auth/me", async (HttpContext context, AuthService authService) 
 .Produces(StatusCodes.Status401Unauthorized)
 .WithOpenApi();
 
+api.MapPost("/api/auth/change-password", async (
+    ChangePasswordRequestDto request,
+    HttpContext context,
+    AuthService authService) =>
+{
+    var (success, error) = await authService.ChangePasswordAsync(context.User, request);
+    if (success)
+    {
+        return Results.Ok(new { message = "A jelszó sikeresen megváltozott." });
+    }
+
+    return error is null
+        ? Results.Json(new { message = "A felhasználó nem található." }, statusCode: StatusCodes.Status401Unauthorized)
+        : Results.BadRequest(new { message = error });
+})
+// A jelenlegi jelszó próbálgatása ellen ugyanaz a kéréskorlát véd, mint a bejelentkezésnél.
+.RequireRateLimiting("login")
+.WithName("ChangeOwnPassword")
+.WithSummary("A bejelentkezett felhasználó saját jelszavának cseréje")
+.WithTags("Auth")
+.RequireAuthorization("Authenticated")
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest)
+.Produces(StatusCodes.Status401Unauthorized)
+.Produces(StatusCodes.Status429TooManyRequests)
+.WithOpenApi();
+
 // Az adatbázis-ellenőrzés legfeljebb ennyi ideig tarthat, hogy elérhetetlen adatbázisnál a
 // health-check gyorsan 503-at adjon, ne lógjon percekig.
 var healthDatabaseTimeout = TimeSpan.FromSeconds(

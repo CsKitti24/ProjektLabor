@@ -146,6 +146,60 @@ namespace ProjektLabor.Services
             return user;
         }
 
+        /// <summary>
+        /// A bejelentkezett felhasználó saját jelszavának cseréje a jelenlegi jelszó ellenőrzésével.
+        /// Visszatér: (siker, hibaüzenet); a hibaüzenet null, ha a csere sikerült.
+        /// </summary>
+        public async Task<(bool Success, string? Error)> ChangePasswordAsync(
+            ClaimsPrincipal principal,
+            ChangePasswordRequestDto request)
+        {
+            var userIdClaim = principal.FindFirst(JwtRegisteredClaimNames.Sub)
+                           ?? principal.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim is null || !int.TryParse(userIdClaim.Value, out var userId))
+            {
+                return (false, null);
+            }
+
+            var user = await _db.Felhasznalok.FirstOrDefaultAsync(u => u.Id == userId && u.Aktiv);
+            if (user is null)
+            {
+                return (false, null);
+            }
+
+            if (!BCrypt.Net.BCrypt.Verify(request.JelenlegiJelszo, user.JelszoHash))
+            {
+                await _auditService.LogForUserAsync(
+                    user.Id,
+                    "PASSWORD_CHANGE_FAILED",
+                    "Felhasznalo",
+                    entitasId: user.Id.ToString());
+                return (false, "A jelenlegi jelszó hibás.");
+            }
+
+            var policyError = PasswordPolicy.Validate(request.UjJelszo);
+            if (policyError is not null)
+            {
+                return (false, policyError);
+            }
+
+            if (string.Equals(request.JelenlegiJelszo, request.UjJelszo, StringComparison.Ordinal))
+            {
+                return (false, "Az új jelszó nem egyezhet meg a jelenlegivel.");
+            }
+
+            user.JelszoHash = BCrypt.Net.BCrypt.HashPassword(request.UjJelszo, workFactor: 12);
+            user.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+
+            await _auditService.LogForUserAsync(
+                user.Id,
+                "PASSWORD_CHANGE",
+                "Felhasznalo",
+                entitasId: user.Id.ToString());
+            return (true, null);
+        }
+
         private double GetExpiresInHours()
         {
             return _config.GetValue<double>("Jwt:ExpiresInHours", 8);

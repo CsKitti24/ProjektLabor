@@ -296,5 +296,46 @@ namespace backend.Tests
             // Assert
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
-    }
+    
+        [Fact]
+        public async Task ChangePassword_RequiresCurrentPassword_AndReplacesTheOldOne()
+        {
+            await SeedUserAsync("jelszocsere", "RegiJelszo12345");
+            var client = _factory.CreateClient();
+
+            var anonymous = await client.PostAsJsonAsync("/api/auth/change-password",
+                new ChangePasswordRequestDto { JelenlegiJelszo = "RegiJelszo12345", UjJelszo = "UjJelszo1234567" });
+            Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+            var login = await (await client.PostAsJsonAsync("/api/auth/login",
+                new LoginRequestDto { Username = "jelszocsere", Jelszo = "RegiJelszo12345" }))
+                .Content.ReadFromJsonAsync<LoginResponseDto>();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login!.Token);
+
+            var wrongCurrent = await client.PostAsJsonAsync("/api/auth/change-password",
+                new ChangePasswordRequestDto { JelenlegiJelszo = "RosszJelszo12345", UjJelszo = "UjJelszo1234567" });
+            Assert.Equal(HttpStatusCode.BadRequest, wrongCurrent.StatusCode);
+
+            var tooShort = await client.PostAsJsonAsync("/api/auth/change-password",
+                new ChangePasswordRequestDto { JelenlegiJelszo = "RegiJelszo12345", UjJelszo = "rovid" });
+            Assert.Equal(HttpStatusCode.BadRequest, tooShort.StatusCode);
+
+            var changed = await client.PostAsJsonAsync("/api/auth/change-password",
+                new ChangePasswordRequestDto { JelenlegiJelszo = "RegiJelszo12345", UjJelszo = "UjJelszo1234567" });
+            Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+
+            var anon = _factory.CreateClient();
+            var oldLogin = await anon.PostAsJsonAsync("/api/auth/login",
+                new LoginRequestDto { Username = "jelszocsere", Jelszo = "RegiJelszo12345" });
+            Assert.Equal(HttpStatusCode.Unauthorized, oldLogin.StatusCode);
+            var newLogin = await anon.PostAsJsonAsync("/api/auth/login",
+                new LoginRequestDto { Username = "jelszocsere", Jelszo = "UjJelszo1234567" });
+            Assert.Equal(HttpStatusCode.OK, newLogin.StatusCode);
+
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.True(await db.AuditLogok.AnyAsync(entry => entry.MuveletTipus == "PASSWORD_CHANGE"));
+            Assert.True(await db.AuditLogok.AnyAsync(entry => entry.MuveletTipus == "PASSWORD_CHANGE_FAILED"));
+        }
+}
 }
