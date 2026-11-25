@@ -47,6 +47,16 @@ const NEXT_STATUSES: Record<string, string[]> = {
   Zarva: [],
 }
 
+// A szűrőben a portán automatikusan rögzített "Sérülés" kategória is szerepel.
+const CATEGORY_FILTER_OPTIONS = [
+  'Technikai hiba',
+  'Bútorzat / Felszerelés',
+  'Zár / Kulcs probléma',
+  'Takarítási igény',
+  'Egyéb észrevétel',
+  'Sérülés',
+]
+
 const STATUS_LABELS: Record<string, string> = {
   Nyitva: 'Nyitva',
   Folyamatban: 'Folyamatban',
@@ -101,13 +111,20 @@ export default function TicketsPage() {
   const [leiras, setLeiras] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [modalError, setModalError] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
 
   const loadTickets = useCallback(() => {
     setIsLoading(true)
     setError('')
     client
       .get<{ items?: Ticket[]; totalCount?: number } | Ticket[]>('/tickets', {
-        params: { page, pageSize: DEFAULT_PAGE_SIZE },
+        params: {
+          page,
+          pageSize: DEFAULT_PAGE_SIZE,
+          kategoria: categoryFilter || undefined,
+          statusz: statusFilter || undefined,
+        },
       })
       .then((r) => {
         const list = Array.isArray(r.data)
@@ -128,7 +145,7 @@ export default function TicketsPage() {
         setError(axErr.response?.data?.message || 'Nem sikerült betölteni a hibajegyeket.')
       })
       .finally(() => setIsLoading(false))
-  }, [page])
+  }, [page, categoryFilter, statusFilter])
 
   const loadRooms = useCallback(async () => {
     setIsLoadingRooms(true)
@@ -224,6 +241,29 @@ export default function TicketsPage() {
             <span>Új hibajegy</span>
           </button>
         )}
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+        <select
+          className="form-select"
+          style={{ flex: '0 1 220px' }}
+          aria-label="Szűrés kategória szerint"
+          value={categoryFilter}
+          onChange={(e) => { setCategoryFilter(e.target.value); setPage(1) }}
+        >
+          <option value="">Minden kategória</option>
+          {CATEGORY_FILTER_OPTIONS.map((category) => <option key={category} value={category}>{category}</option>)}
+        </select>
+        <select
+          className="form-select"
+          style={{ flex: '0 1 180px' }}
+          aria-label="Szűrés állapot szerint"
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+        >
+          <option value="">Minden állapot</option>
+          {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
       </div>
 
       {error && (

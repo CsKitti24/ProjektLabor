@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Search, User as UserIcon, LogOut } from 'lucide-react'
 import { useAuth, type UserRole } from '../auth/AuthContext'
 import LoginModal from './LoginModal'
+import { getNavItems } from './navItems'
 
 interface NavbarProps {
   onLoginClick?: () => void
@@ -27,6 +28,20 @@ export default function Navbar({ onLoginClick }: NavbarProps) {
   const { user, logout } = useAuth()
   const [showLoginModal, setShowLoginModal] = useState(false)
   const navigate = useNavigate()
+  const [query, setQuery] = useState('')
+  const navItems = user ? getNavItems(user.role) : []
+
+  // Gyorskeresés: ha a beírt szöveg egy menüpontra illik, oda ugrik; különben a termek között keres
+  // (név, leírás, felszereltség).
+  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const term = query.trim()
+    if (!term) return
+    const lowered = term.toLocaleLowerCase('hu')
+    const page = navItems.find((item) => item.label.toLocaleLowerCase('hu').includes(lowered))
+    navigate(page ? page.to : `/rooms?q=${encodeURIComponent(term)}`)
+    setQuery('')
+  }
 
   const handleProfileClick = () => {
     if (!user) {
@@ -56,17 +71,30 @@ export default function Navbar({ onLoginClick }: NavbarProps) {
           <span className="navbar-title">Kulcs- és teremkezelő rendszer</span>
         </Link>
 
-        {/* Középen: Inaktív keresősáv */}
+        {/* Középen: gyorskeresés (menüpontok és termek); bejelentkezés nélkül inaktív */}
         <div className="navbar-center">
-          <div className="navbar-search" title="A keresés jelenleg nem aktív">
+          <form
+            className="navbar-search"
+            role="search"
+            title={user ? 'Menüpont vagy terem keresése' : 'A kereséshez jelentkezz be'}
+            onSubmit={handleSearch}
+          >
             <Search size={15} strokeWidth={1.5} color="var(--color-gray-400)" />
             <input
               type="text"
-              placeholder="Keresés a rendszerben…"
-              disabled
+              placeholder={user ? 'Menüpont vagy terem keresése…' : 'Keresés a rendszerben…'}
+              disabled={!user}
               aria-label="Keresés"
+              list={user ? 'navbar-search-pages' : undefined}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
             />
-          </div>
+            {user && (
+              <datalist id="navbar-search-pages">
+                {navItems.map((item) => <option key={item.to} value={item.label} />)}
+              </datalist>
+            )}
+          </form>
         </div>
 
         {/* Jobb oldal: Fiók / Profil vagy felhasználó kezelése */}

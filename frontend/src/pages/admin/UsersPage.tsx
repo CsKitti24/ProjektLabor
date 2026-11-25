@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Users, AlertCircle, Check, Shield } from 'lucide-react'
+import { Users, AlertCircle, Check, Shield, UserPlus, Search } from 'lucide-react'
 import client from '../../api/client'
 import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
+import CreateUserModal from './CreateUserModal'
 
 interface UserItem {
   id: number | string
@@ -49,12 +50,35 @@ export default function UsersPage() {
   const [editPasswordConfirmation, setEditPasswordConfirmation] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<string | number | null>(null)
+  const [editNev, setEditNev] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [showCreate, setShowCreate] = useState(false)
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  // A keresés gépelés közben, rövid várakozás után frissül (nem minden billentyűleütésre).
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput.trim())
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
 
   useEffect(() => {
     let ignore = false
     client
       .get<{ items?: UserItem[]; totalCount?: number } | UserItem[]>('/users', {
-        params: { page, pageSize: DEFAULT_PAGE_SIZE },
+        params: {
+          page,
+          pageSize: DEFAULT_PAGE_SIZE,
+          kereses: search || undefined,
+          role: roleFilter || undefined,
+          aktiv: statusFilter === '' ? undefined : statusFilter === 'active',
+        },
       })
       .then((r) => {
         if (!ignore) {
@@ -77,11 +101,13 @@ export default function UsersPage() {
     return () => {
       ignore = true
     }
-  }, [page])
+  }, [page, search, roleFilter, statusFilter, reloadKey])
 
   const handleEditStart = (user: UserItem) => {
     setEditingId(user.id)
     setEditRole(user.role)
+    setEditNev(user.nev ?? '')
+    setEditEmail(user.email ?? '')
     setEditPin('')
     setEditPassword('')
     setEditPasswordConfirmation('')
@@ -130,6 +156,26 @@ export default function UsersPage() {
     } catch (err: unknown) {
       const axErr = err as { response?: { data?: { message?: string } } }
       setError(axErr.response?.data?.message || 'A PIN-kód beállítása sikertelen.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleSaveDetails = async (user: UserItem) => {
+    if (!editNev.trim() || !editEmail.trim()) {
+      setError('A név és az e-mail cím nem lehet üres.')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      await client.put(`/users/${user.id}`, { nev: editNev.trim(), email: editEmail.trim() })
+      setUsers((prev) => prev.map((u) => (u.id === user.id
+        ? { ...u, nev: editNev.trim(), email: editEmail.trim().toLowerCase() }
+        : u)))
+      showSuccess('A felhasználó adatai frissítve.')
+    } catch (err: unknown) {
+      setError(errorMessage(err, 'Az adatok módosítása sikertelen.'))
     } finally {
       setIsSaving(false)
     }
@@ -194,7 +240,58 @@ export default function UsersPage() {
           </h1>
           <p className="page-subtitle">Rendszerfelhasználók és RBAC szerepkörök kezelése</p>
         </div>
+        <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
+          <UserPlus size={15} strokeWidth={1.5} />
+          <span>Új felhasználó</span>
+        </button>
       </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+        <div style={{ position: 'relative', flex: '1 1 240px' }}>
+          <Search size={14} strokeWidth={1.5} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-gray-400)' }} />
+          <input
+            className="form-input"
+            style={{ paddingLeft: 30 }}
+            aria-label="Keresés név, felhasználónév vagy e-mail szerint"
+            placeholder="Keresés név, felhasználónév vagy e-mail szerint…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+        </div>
+        <select
+          className="form-select"
+          style={{ flex: '0 1 200px' }}
+          aria-label="Szűrés szerepkör szerint"
+          value={roleFilter}
+          onChange={(e) => { setRoleFilter(e.target.value); setPage(1) }}
+        >
+          <option value="">Minden szerepkör</option>
+          {ROLES.map((r) => <option key={r} value={r}>{getRoleLabel(r)}</option>)}
+        </select>
+        <select
+          className="form-select"
+          style={{ flex: '0 1 160px' }}
+          aria-label="Szűrés állapot szerint"
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+        >
+          <option value="">Aktív és inaktív</option>
+          <option value="active">Csak aktív</option>
+          <option value="inactive">Csak inaktív</option>
+        </select>
+      </div>
+
+      {showCreate && (
+        <CreateUserModal
+          onClose={() => setShowCreate(false)}
+          onCreated={(message) => {
+            setShowCreate(false)
+            setPage(1)
+            setReloadKey((key) => key + 1)
+            showSuccess(message)
+          }}
+        />
+      )}
 
       {error && (
         <div className="alert alert-error">
@@ -230,7 +327,7 @@ export default function UsersPage() {
               {users.length === 0 ? (
                 <tr>
                   <td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 36 }}>
-                    Nincs felhasználó a rendszerben.
+                    {search || roleFilter || statusFilter ? 'Nincs a szűrésnek megfelelő felhasználó.' : 'Nincs felhasználó a rendszerben.'}
                   </td>
                 </tr>
               ) : (
@@ -256,7 +353,25 @@ export default function UsersPage() {
                     <td>
                       {editingId === user.id ? (
                         <div style={{ display: 'grid', gap: 8, maxWidth: 220 }}>
+                          <input
+                            aria-label={`${user.nev || user.username} neve`}
+                            className="form-input"
+                            placeholder="Teljes név"
+                            maxLength={100}
+                            value={editNev}
+                            onChange={(e) => setEditNev(e.target.value)}
+                          />
+                          <input
+                            aria-label={`${user.nev || user.username} e-mail címe`}
+                            className="form-input"
+                            type="email"
+                            placeholder="E-mail cím"
+                            maxLength={100}
+                            value={editEmail}
+                            onChange={(e) => setEditEmail(e.target.value)}
+                          />
                           <select
+                            aria-label={`${user.nev || user.username} szerepköre`}
                             className="form-select"
                             style={{ padding: '4px 8px', fontSize: 13 }}
                             value={editRole}
@@ -324,10 +439,18 @@ export default function UsersPage() {
                           <button
                             type="button"
                             className="btn btn-primary btn-sm"
-                            disabled={isSaving}
+                            disabled={isSaving || editRole === user.role}
                             onClick={() => handleSave(user.id)}
                           >
-                            {isSaving ? 'Mentés…' : 'Mentés'}
+                            {isSaving ? 'Mentés…' : 'Szerepkör mentése'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={isSaving || (editNev.trim() === (user.nev ?? '') && editEmail.trim().toLowerCase() === (user.email ?? '').toLowerCase())}
+                            onClick={() => handleSaveDetails(user)}
+                          >
+                            Adatok mentése
                           </button>
                           <button
                             type="button"

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { CalendarDays, Search, AlertCircle } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { CalendarDays, Search, AlertCircle, PlusCircle } from 'lucide-react'
 import client from '../../api/client'
 import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
 
@@ -108,14 +109,20 @@ export default function BookingsPage() {
           <p className="page-subtitle">Az intézményben rögzített tantermi idősávok áttekintése</p>
         </div>
 
-        <div className="search-bar">
-          <Search size={15} color="var(--color-gray-400)" strokeWidth={1.5} />
-          <input
-            type="text"
-            placeholder="Keresés terem vagy oktató szerint…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="search-bar">
+            <Search size={15} color="var(--color-gray-400)" strokeWidth={1.5} />
+            <input
+              type="text"
+              placeholder="Keresés terem vagy oktató szerint…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <Link to="/new-booking" className="btn btn-primary btn-sm">
+            <PlusCircle size={14} strokeWidth={1.5} />
+            <span>Foglalás oktató nevében</span>
+          </Link>
         </div>
       </div>
 

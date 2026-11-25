@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { AlertCircle, Building2, Key, Pencil, Plus, Search, Trash2, UserPlus, X } from 'lucide-react'
 import client from '../../api/client'
+import { fetchAllUsers } from '../../api/users'
 
 interface KeyItem {
   id: number
@@ -143,16 +144,16 @@ export default function KeysPage() {
   }
 
   const loadMasterAccess = async (key: KeyItem) => {
-    const [accessResponse, userResponse] = await Promise.all([
+    // Inaktivált oktató nem kaphat mesterkulcs-jogosultságot; az összes aktív oktatót betöltjük (minden oldalt).
+    const [accessResponse, instructorList] = await Promise.all([
       client.get<MasterAccess[]>(`/keys/${key.id}/master-access`),
-      client.get<{ items?: UserOption[] } | UserOption[]>('/users', {
-        params: { role: 'Oktato', page: 1, pageSize: 100 },
-      }),
+      fetchAllUsers({ role: 'Oktato', aktiv: true }),
     ])
     setMasterAccess(accessResponse.data)
-    const instructorList = Array.isArray(userResponse.data) ? userResponse.data : (userResponse.data.items ?? [])
-    // Inaktivált oktató nem kaphat mesterkulcs-jogosultságot.
-    setInstructors(instructorList.filter((instructor) => instructor.aktiv !== false))
+    setInstructors(instructorList
+      .filter((instructor) => instructor.aktiv !== false)
+      .map((instructor) => ({ id: instructor.id, nev: instructor.nev || instructor.username, username: instructor.username, aktiv: instructor.aktiv }))
+      .sort((a, b) => a.nev.localeCompare(b.nev, 'hu')))
     setSelectedInstructorId('')
   }
 

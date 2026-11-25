@@ -2,7 +2,29 @@ import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { PlusCircle, ArrowLeft, Check, AlertCircle, Calendar, Filter, Sparkles, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
+import { fetchAllUsers, type UserListItem } from '../../api/users'
+import { useAuth } from '../../auth/AuthContext'
 import { localDateInputValue, localDateTimeToIso } from '../../utils/dateTime'
+
+interface TimeRange {
+  startTime: string
+  endTime: string
+}
+
+interface RoomAvailability {
+  szabad: TimeRange[]
+  foglalt: TimeRange[]
+  karbantartas: TimeRange[]
+}
+
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' })
+}
+
+function isWeekend(date: string): boolean {
+  const day = new Date(`${date}T12:00:00`).getDay()
+  return day === 0 || day === 6
+}
 
 interface Room {
   id: number | string
@@ -37,6 +59,12 @@ const COMMON_SPECIAL_NEEDS = [
 
 export default function NewBookingPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'Adminisztrator'
+  // Adminisztrátor oktató nevében foglal: a foglalás csak oktató nevére szólhat.
+  const [instructors, setInstructors] = useState<UserListItem[]>([])
+  const [instructorId, setInstructorId] = useState('')
+  const [availability, setAvailability] = useState<RoomAvailability | null>(null)
   const [rooms, setRooms] = useState<Room[]>([])
   const [roomId, setRoomId] = useState('')
   const [date, setDate] = useState(() => localDateInputValue())
@@ -94,6 +122,52 @@ export default function NewBookingPage() {
     void Promise.resolve().then(() => loadRooms())
   }, [loadRooms])
 
+  useEffect(() => {
+    if (!isAdmin) return
+    let ignore = false
+    fetchAllUsers({ role: 'Oktato', aktiv: true })
+      .then((list) => {
+        if (ignore) return
+        const sorted = [...list].sort((a, b) => (a.nev || a.username).localeCompare(b.nev || b.username, 'hu'))
+        setInstructors(sorted)
+      })
+      .catch(() => {
+        if (!ignore) setError('Az oktatók listájának betöltése nem sikerült.')
+      })
+    return () => {
+      ignore = true
+    }
+  }, [isAdmin])
+
+  // A kiválasztott terem foglaltsága az adott napon (foglalások és karbantartás), hogy ütköző sávot ne
+  // kelljen próbálgatni.
+  useEffect(() => {
+    if (!roomId || !date || isWeekend(date)) {
+      void Promise.resolve().then(() => setAvailability(null))
+      return
+    }
+    let ignore = false
+    client
+      .get<RoomAvailability>(`/rooms/${roomId}/availability`, { params: { datum: date } })
+      .then((response) => {
+        if (!ignore) setAvailability(Array.isArray(response.data?.szabad) ? response.data : null)
+      })
+      .catch(() => {
+        if (!ignore) setAvailability(null)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [roomId, date])
+
+  const isSlotBusy = (start: string, end: string): boolean => {
+    if (!availability) return false
+    const slotStart = new Date(`${date}T${start}:00`).getTime()
+    const slotEnd = new Date(`${date}T${end}:00`).getTime()
+    return [...availability.foglalt, ...availability.karbantartas].some((busy) =>
+      new Date(busy.startTime).getTime() < slotEnd && new Date(busy.endTime).getTime() > slotStart)
+  }
+
   const toggleSpecialNeed = (need: string) => {
     const currentNeeds = specialisIgenyek
       .split(',')
@@ -113,6 +187,14 @@ export default function NewBookingPage() {
     e.preventDefault()
     if (!roomId || !date) {
       setError('Kérjük, válassz termet és dátumot.')
+      return
+    }
+    if (isWeekend(date)) {
+      setError('Hétvégére nem lehet foglalni.')
+      return
+    }
+    if (isAdmin && !instructorId) {
+      setError('Válaszd ki, melyik oktató nevére szól a foglalás.')
       return
     }
 
@@ -136,10 +218,11 @@ export default function NewBookingPage() {
         startTime: startIso,
         endTime: endIso,
         specialisIgenyek: specialisIgenyek.trim() || undefined,
+        felhasznaloId: isAdmin ? Number(instructorId) : undefined,
       })
 
       setSuccess('A foglalás azonnal és sikeresen aktiválva a rendszerben!')
-      setTimeout(() => navigate('/my-bookings'), 1200)
+      setTimeout(() => navigate(isAdmin ? '/bookings' : '/my-bookings'), 1200)
     } catch (err: unknown) {
       const axErr = err as { response?: { data?: { message?: string } } }
       setError(axErr.response?.data?.message || 'A foglalás mentése sikertelen.')
@@ -158,12 +241,14 @@ export default function NewBookingPage() {
             <PlusCircle size={20} strokeWidth={1.5} color="var(--color-primary)" />
             <span>Új teremfoglalás</span>
           </h1>
-          <p className="page-subtitle">Idősáv és terem lefoglalása oktatói szerepkörből</p>
+          <p className="page-subtitle">
+            {isAdmin ? 'Foglalás rögzítése egy oktató nevében' : 'Idősáv és terem lefoglalása oktatói szerepkörből'}
+          </p>
         </div>
 
-        <Link to="/my-bookings" className="btn btn-secondary btn-sm">
+        <Link to={isAdmin ? '/bookings' : '/my-bookings'} className="btn btn-secondary btn-sm">
           <ArrowLeft size={14} strokeWidth={1.5} />
-          <span>Vissza a foglalásaimhoz</span>
+          <span>{isAdmin ? 'Vissza a foglalásokhoz' : 'Vissza a foglalásaimhoz'}</span>
         </Link>
       </div>
 
@@ -244,6 +329,26 @@ export default function NewBookingPage() {
         </div>
 
         <form onSubmit={handleSubmit}>
+          {isAdmin && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="booking-instructor">Oktató (akinek a nevére a foglalás szól) *</label>
+              <select
+                id="booking-instructor"
+                className="form-select"
+                value={instructorId}
+                onChange={(e) => setInstructorId(e.target.value)}
+                required
+              >
+                <option value="">Válassz oktatót…</option>
+                {instructors.map((instructor) => (
+                  <option key={instructor.id} value={instructor.id}>
+                    {instructor.nev || instructor.username} ({instructor.username})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="form-group">
             <label className="form-label" htmlFor="booking-room">
               Terem kiválasztása *
@@ -288,6 +393,17 @@ export default function NewBookingPage() {
               onChange={(e) => setDate(e.target.value)}
               required
             />
+            {isWeekend(date) && (
+              <div className="alert alert-error" role="alert" style={{ marginTop: 8 }}>Hétvégére nem lehet foglalni.</div>
+            )}
+            {availability && !isWeekend(date) && (
+              <div style={{ fontSize: 12.5, color: 'var(--color-gray-600)', marginTop: 8 }} aria-label="Szabad idősávok">
+                <strong>Szabad ezen a napon:</strong>{' '}
+                {availability.szabad.length === 0
+                  ? 'a terem egész nap foglalt.'
+                  : availability.szabad.map((slot) => `${formatTime(slot.startTime)}–${formatTime(slot.endTime)}`).join(', ')}
+              </div>
+            )}
           </div>
 
           <div className="form-group">
@@ -310,8 +426,8 @@ export default function NewBookingPage() {
                 onChange={(e) => setSelectedSlotIndex(Number(e.target.value))}
               >
                 {DEFAULT_SLOTS.map((slot, index) => (
-                  <option key={slot.label} value={index}>
-                    {slot.label}
+                  <option key={slot.label} value={index} disabled={isSlotBusy(slot.start, slot.end)}>
+                    {slot.label}{isSlotBusy(slot.start, slot.end) ? ' – foglalt' : ''}
                   </option>
                 ))}
               </select>

@@ -24,6 +24,9 @@ export default function KeyReturnPage() {
   const [teremAllapot, setTeremAllapot] = useState('')
   const [serulesLeiras, setSerulesLeiras] = useState('')
   const [megjegyzes, setMegjegyzes] = useState('')
+  // Kényszerített visszavétel: a kulcs a portán van, de az átvevő nincs jelen (nincs PIN), indoklás kötelező.
+  const [forced, setForced] = useState(false)
+  const [indoklas, setIndoklas] = useState('')
   // Régi, foglalás nélküli mesterkulcs-kiadásnál a kiadás terme nem ismert: ilyenkor a portás választja ki.
   const [roomsByKey, setRoomsByKey] = useState<Record<string, KeyRoom[]>>({})
   const [returnRoomId, setReturnRoomId] = useState('')
@@ -80,8 +83,14 @@ export default function KeyReturnPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!keyId || !pin || !teremAllapot.trim()) {
-      setError('Válaszd ki a kulcsot, add meg az átvevő PIN-kódját és a terem állapotát.')
+    if (!keyId || (!forced && !pin) || !teremAllapot.trim()) {
+      setError(forced
+        ? 'Válaszd ki a kulcsot, és add meg a terem állapotát.'
+        : 'Válaszd ki a kulcsot, add meg az átvevő PIN-kódját és a terem állapotát.')
+      return
+    }
+    if (forced && !indoklas.trim()) {
+      setError('A kényszerített visszavételhez indoklás szükséges (pl. ki hozta vissza a kulcsot).')
       return
     }
     if (needsRoom && !returnRoomId) {
@@ -93,17 +102,25 @@ export default function KeyReturnPage() {
     setIsLoading(true)
 
     try {
-      await client.post('/key-movements/return', {
+      const common = {
         kulcsId: Number(keyId),
         teremId: needsRoom ? Number(returnRoomId) : undefined,
-        pin,
         teremAllapot: teremAllapot.trim(),
         serulesLeiras: serulesLeiras.trim() || undefined,
         megjegyzes: megjegyzes.trim() || undefined,
-      })
+      }
+      if (forced) {
+        await client.post('/key-movements/force-return', { ...common, indoklas: indoklas.trim() })
+      } else {
+        await client.post('/key-movements/return', { ...common, pin })
+      }
 
-      setSuccess('A kulcs sikeresen visszavételezve a portára!')
+      setSuccess(forced
+        ? 'A kulcs kényszerített visszavétele rögzítve (az indoklás az auditnaplóba került).'
+        : 'A kulcs sikeresen visszavételezve a portára!')
       setPin('')
+      setIndoklas('')
+      setForced(false)
       setTeremAllapot('')
       setSerulesLeiras('')
       setMegjegyzes('')
@@ -195,12 +212,37 @@ export default function KeyReturnPage() {
             </div>
           )}
 
-          <div className="form-group">
-            <label className="form-label" htmlFor="return-pin">Az átvevő PIN-kódja *</label>
-            <input id="return-pin" className="form-input" type="password" inputMode="numeric"
-              pattern="[0-9]{4,8}" minLength={4} maxLength={8} autoComplete="off"
-              value={pin} onChange={(e) => setPin(e.target.value)} required />
+          <div className="form-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <input
+              id="return-forced"
+              type="checkbox"
+              checked={forced}
+              onChange={(e) => setForced(e.target.checked)}
+              style={{ width: 16, height: 16, accentColor: 'var(--color-primary)' }}
+            />
+            <label htmlFor="return-forced" className="form-label" style={{ marginBottom: 0, cursor: 'pointer' }}>
+              Az átvevő nincs jelen (kényszerített visszavétel PIN nélkül)
+            </label>
           </div>
+
+          {forced ? (
+            <div className="form-group">
+              <label className="form-label" htmlFor="return-reason">Indoklás *</label>
+              <textarea id="return-reason" className="form-textarea" rows={2} maxLength={400}
+                placeholder="pl. A kulcsot kolléga hozta vissza; a terem zárva volt"
+                value={indoklas} onChange={(e) => setIndoklas(e.target.value)} required />
+              <p style={{ fontSize: 12, color: 'var(--color-gray-500)', marginTop: 4 }}>
+                Csak akkor használd, ha a kulcs fizikailag a portán van. Az indoklás az auditnaplóba kerül.
+              </p>
+            </div>
+          ) : (
+            <div className="form-group">
+              <label className="form-label" htmlFor="return-pin">Az átvevő PIN-kódja *</label>
+              <input id="return-pin" className="form-input" type="password" inputMode="numeric"
+                pattern="[0-9]{4,8}" minLength={4} maxLength={8} autoComplete="off"
+                value={pin} onChange={(e) => setPin(e.target.value)} required />
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label" htmlFor="return-condition">Terem állapota *</label>

@@ -1053,6 +1053,8 @@ public sealed class SqlServerIntegrationTests
                 Assert.Equal(HttpStatusCode.OK, (await adminClient.GetAsync(url)).StatusCode);
             }
             Assert.Equal(HttpStatusCode.OK, (await instructorClient.GetAsync("/api/bookings/my?page=2147483647")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await adminClient.GetAsync("/api/users?kereses=sql&aktiv=true&role=Oktato")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await instructorClient.GetAsync("/api/notifications/my?csakOlvasatlan=true&pageSize=1")).StatusCode);
 
             var wrongPin = await porterClient.PostAsJsonAsync("/api/key-movements/issue",
                 new { kulcsId = keyId, atvevoFelhasznaloId = instructorId, pin = "9999", teremAllapot = "Rendben" });

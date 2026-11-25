@@ -64,3 +64,48 @@ describe('ReportsPage reliability tab', () => {
     expect(client.get).toHaveBeenCalledWith('/reliability/users')
   })
 })
+
+describe('ReportsPage periods', () => {
+  const traffic = { osszesKulcskiadas: 3, osszesKulcsvisszavetel: 2, osszesKesedelmesFoglalas: 0, osszesNoShow: 1, termenkintiForgalom: [] }
+
+  beforeEach(() => {
+    vi.mocked(client.get).mockImplementation((url) => {
+      if (url === '/reports/key-traffic') {
+        return Promise.resolve(axiosResponse({
+          osszesMozgas: 4,
+          osszesKiadas: 2,
+          osszesVisszavetel: 2,
+          kulcsok: [{ kulcsId: 1, kulcsSzam: 'K-101', teremNev: 'A-101', osszesMozgas: 4, kiadasok: 2, visszavetelok: 2 }],
+        }))
+      }
+      return Promise.resolve(axiosResponse(traffic))
+    })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('loads the daily traffic report for the chosen day', async () => {
+    render(<ReportsPage />)
+    await screen.findByText('3')
+
+    fireEvent.change(screen.getByLabelText('Időszak'), { target: { value: 'day' } })
+    fireEvent.change(screen.getByLabelText('Nap'), { target: { value: '2026-10-12' } })
+
+    await vi.waitFor(() => expect(client.get).toHaveBeenLastCalledWith('/reports/daily', { params: { datum: '2026-10-12' } }))
+  })
+
+  it('shows the key traffic report for a date range', async () => {
+    render(<ReportsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /Kulcsforgalom/ }))
+
+    expect(await screen.findByText('K-101')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Kezdő nap'), { target: { value: '2026-10-01' } })
+
+    await vi.waitFor(() => expect(client.get).toHaveBeenLastCalledWith('/reports/key-traffic', {
+      params: expect.objectContaining({ kezdet: '2026-10-01' }),
+    }))
+  })
+})

@@ -370,6 +370,68 @@ public sealed class BusinessRulesRoundTwoTests : IClassFixture<WebApplicationFac
         Assert.Equal(20, room.GetProperty("rendelkezesreAlloOra").GetDouble());
     }
 
+    [Fact]
+    public async Task UserList_SupportsSearchAndActiveFilter_OrderedByName()
+    {
+        var seed = await SeedAsync();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Felhasznalok.Add(new Felhasznalo { Username = "kovacs.bela", Email = "kb@example.test", Nev = "Kovács Béla", Role = RoleNames.Oktato, JelszoHash = "x", Aktiv = false });
+            await db.SaveChangesAsync();
+        }
+
+        using var admin = CreateClient(seed.Admin);
+        var found = await admin.GetFromJsonAsync<ProjektLabor.DTOs.Users.UserListDto>("/api/users?kereses=KOVACS");
+        Assert.Equal(["kovacs.bela"], found!.Items.Select(user => user.Username));
+
+        var inactive = await admin.GetFromJsonAsync<ProjektLabor.DTOs.Users.UserListDto>("/api/users?aktiv=false");
+        Assert.All(inactive!.Items, user => Assert.False(user.Aktiv));
+        Assert.Contains(inactive.Items, user => user.Username == "kovacs.bela");
+
+        var all = await admin.GetFromJsonAsync<ProjektLabor.DTOs.Users.UserListDto>("/api/users");
+        var names = all!.Items.Select(user => user.Nev).ToList();
+        Assert.Equal(names.OrderBy(name => name, StringComparer.Ordinal).ToList(), names);
+    }
+
+    [Fact]
+    public async Task MyNotifications_CanBeLimitedToUnread_ForTheBadge()
+    {
+        var seed = await SeedAsync();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Ertesitesek.AddRange(
+                new Ertesites { CimzettFelhasznaloId = seed.Instructor.Id, ErtesitesTipus = "BeforeEnd", Allapot = "Kesz", IdoPont = DateTime.UtcNow, Olvasva = false },
+                new Ertesites { CimzettFelhasznaloId = seed.Instructor.Id, ErtesitesTipus = "BeforeEnd", Allapot = "Kesz", IdoPont = DateTime.UtcNow, Olvasva = true });
+            await db.SaveChangesAsync();
+        }
+
+        using var instructor = CreateClient(seed.Instructor);
+        var unread = await instructor.GetAsync("/api/notifications/my?csakOlvasatlan=true&pageSize=1");
+        Assert.Equal("1", unread.Headers.GetValues("X-Total-Count").Single());
+        var all = await instructor.GetAsync("/api/notifications/my?pageSize=1");
+        Assert.Equal("2", all.Headers.GetValues("X-Total-Count").Single());
+    }
+
+    [Fact]
+    public async Task RoomUpdate_CannotDeactivateWhileKeyIsIssued()
+    {
+        var seed = await SeedAsync();
+        using var porter = CreateClient(seed.Porter);
+        Assert.Equal(HttpStatusCode.Created, (await porter.PostAsJsonAsync("/api/key-movements/issue", new
+        {
+            kulcsId = seed.KeyId,
+            atvevoFelhasznaloId = seed.Instructor.Id,
+            pin = InstructorPin,
+            teremAllapot = "Rendben"
+        })).StatusCode);
+
+        using var admin = CreateClient(seed.Admin);
+        var response = await admin.PutAsJsonAsync($"/api/rooms/{seed.RoomId}", new { aktivalva = false });
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
     private static Foglalas NewBooking(int userId, int roomId, DateTime startUtc) => new()
     {
         FelhasznaloId = userId,

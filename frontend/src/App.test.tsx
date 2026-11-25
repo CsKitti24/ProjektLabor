@@ -32,20 +32,24 @@ describe('App role-protected booking routes', () => {
     vi.clearAllMocks()
   })
 
-  it.each(['/my-bookings', '/new-booking'])(
-    'does not expose %s to administrators when its API is instructor-only',
-    async (path) => {
-      window.history.pushState({}, '', path)
-      render(<App />)
+  it('does not expose /my-bookings to administrators when its API is instructor-only', async () => {
+    window.history.pushState({}, '', '/my-bookings')
+    render(<App />)
 
-      await waitFor(() => {
-        expect(window.location.pathname).toBe('/profile')
-      })
-      expect(screen.getByText('Profile page')).toBeTruthy()
-      expect(screen.queryByText('My bookings page')).toBeNull()
-      expect(screen.queryByText('New booking page')).toBeNull()
-    },
-  )
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/profile')
+    })
+    expect(screen.getByText('Profile page')).toBeTruthy()
+    expect(screen.queryByText('My bookings page')).toBeNull()
+  })
+
+  it('lets administrators open /new-booking to book in the name of an instructor', async () => {
+    window.history.pushState({}, '', '/new-booking')
+    render(<App />)
+
+    expect(await screen.findByText('New booking page')).toBeTruthy()
+    expect(window.location.pathname).toBe('/new-booking')
+  })
 
   it.each(['/audit', '/parameters'])(
     'does not expose %s to instructors',

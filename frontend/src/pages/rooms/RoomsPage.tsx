@@ -1,5 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react'
-import { Search, DoorOpen, Plus, AlertCircle, Check, X, Filter } from 'lucide-react'
+import { Search, DoorOpen, Plus, AlertCircle, Check, X, Filter, Pencil, RotateCcw } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import client from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 
@@ -22,7 +23,9 @@ export default function RoomsPage() {
   const isAdmin = user?.role === 'Adminisztrator'
 
   const [rooms, setRooms] = useState<Room[]>([])
-  const [search, setSearch] = useState('')
+  // A navigációs sáv keresője ?q= paraméterrel ide irányít.
+  const [searchParams] = useSearchParams()
+  const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
   const [minKapacitasFilter, setMinKapacitasFilter] = useState('')
   const [filterActiveOnly, setFilterActiveOnly] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -38,6 +41,45 @@ export default function RoomsPage() {
   const [newAktivalva, setNewAktivalva] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [modalError, setModalError] = useState('')
+  // Szerkesztéskor a módosított terem; null esetén a modál új termet rögzít.
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null)
+
+  const showSuccess = (message: string) => {
+    setSuccessMsg(message)
+    setTimeout(() => setSuccessMsg(''), 4000)
+  }
+
+  const openCreateModal = () => {
+    setEditingRoom(null)
+    setNewNev('')
+    setNewKapacitas(30)
+    setNewLeiras('')
+    setNewFelszereltseg('')
+    setNewAktivalva(true)
+    setModalError('')
+    setShowAddModal(true)
+  }
+
+  const openEditModal = (room: Room) => {
+    setEditingRoom(room)
+    setNewNev(room.nev || room.name || '')
+    setNewKapacitas(room.kapacitas ?? room.capacity ?? 1)
+    setNewLeiras(room.leiras ?? room.description ?? '')
+    setNewFelszereltseg(room.felszereltseg ?? '')
+    setModalError('')
+    setShowAddModal(true)
+  }
+
+  const handleReactivateRoom = async (room: Room) => {
+    try {
+      await client.put(`/rooms/${room.id}`, { aktivalva: true })
+      setRooms((prev) => prev.map((r) => (r.id === room.id ? { ...r, aktivalva: true } : r)))
+      showSuccess(`A(z) ${room.nev || room.name} terem újra aktív és foglalható.`)
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { message?: string } } }
+      setError(axErr.response?.data?.message || 'A terem újraaktiválása sikertelen.')
+    }
+  }
 
   const fetchRooms = () => {
     setIsLoading(true)
@@ -93,6 +135,20 @@ export default function RoomsPage() {
     setIsSubmitting(true)
 
     try {
+      if (editingRoom) {
+        await client.put(`/rooms/${editingRoom.id}`, {
+          nev: newNev.trim(),
+          kapacitas: Number(newKapacitas),
+          leiras: newLeiras.trim(),
+          felszereltseg: newFelszereltseg.trim(),
+        })
+        setShowAddModal(false)
+        setEditingRoom(null)
+        showSuccess('A terem adatai frissítve.')
+        fetchRooms()
+        return
+      }
+
       await client.post('/rooms', {
         nev: newNev.trim(),
         kapacitas: Number(newKapacitas),
@@ -119,26 +175,26 @@ export default function RoomsPage() {
   }
 
   const handleDeleteRoom = async (id: number | string, name: string) => {
-    if (!window.confirm(`Biztosan törölni szeretnéd a(z) "${name}" termet?`)) return
+    if (!window.confirm(`Biztosan deaktiválod a(z) "${name}" termet? Az előzményei megmaradnak, és később újraaktiválható.`)) return
 
+    // A törlés valójában deaktiválás: a terem a listában marad "Inaktív" jelöléssel.
     const removeRoom = (message: string) => {
-      setSuccessMsg(message)
-      setTimeout(() => setSuccessMsg(''), 4000)
-      setRooms((prev) => prev.filter((r) => r.id !== id))
+      showSuccess(message)
+      setRooms((prev) => prev.map((r) => (r.id === id ? { ...r, aktivalva: false } : r)))
     }
 
     try {
       await client.delete(`/rooms/${id}`)
-      removeRoom('Terem sikeresen törölve.')
+      removeRoom('A terem deaktiválva.')
     } catch (err: unknown) {
       const axErr = err as { response?: { status?: number; data?: { message?: string; jovobeliFoglalasok?: number } } }
       const futureCount = axErr.response?.data?.jovobeliFoglalasok
       if (axErr.response?.status === 409 && futureCount) {
         // A teremnek jövőbeli foglalásai vannak: csak kifejezett megerősítésre mondjuk le őket.
-        if (!window.confirm(`${axErr.response?.data?.message}\n\nLemondod mind a(z) ${futureCount} foglalást, és törlöd a termet?`)) return
+        if (!window.confirm(`${axErr.response?.data?.message}\n\nLemondod mind a(z) ${futureCount} foglalást (az oktatók értesítést kapnak), és deaktiválod a termet?`)) return
         try {
           await client.delete(`/rooms/${id}`, { params: { foglalasokLemondasa: true } })
-          removeRoom(`Terem törölve, ${futureCount} jövőbeli foglalás lemondva.`)
+          removeRoom(`A terem deaktiválva, ${futureCount} jövőbeli foglalás lemondva.`)
         } catch (retryErr: unknown) {
           const retryAxErr = retryErr as { response?: { data?: { message?: string } } }
           alert(retryAxErr.response?.data?.message || 'A terem törlése sikertelen.')
@@ -183,7 +239,7 @@ export default function RoomsPage() {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => setShowAddModal(true)}
+              onClick={openCreateModal}
             >
               <Plus size={15} strokeWidth={1.5} />
               <span>Új terem</span>
@@ -256,7 +312,7 @@ export default function RoomsPage() {
                 <th style={{ width: '25%' }}>Felszereltség</th>
                 <th style={{ width: '28%' }}>Leírás / Megjegyzés</th>
                 <th style={{ width: '10%' }}>Állapot</th>
-                {isAdmin && <th style={{ width: '5%', textAlign: 'right' }}>Művelet</th>}
+                {isAdmin && <th style={{ width: '15%', textAlign: 'right' }}>Művelet</th>}
               </tr>
             </thead>
             <tbody>
@@ -301,16 +357,38 @@ export default function RoomsPage() {
                         )}
                       </td>
                       {isAdmin && (
-                        <td style={{ textAlign: 'right' }}>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
-                            style={{ color: 'var(--color-danger)' }}
-                            onClick={() => handleDeleteRoom(room.id, roomName)}
-                            title="Terem törlése"
+                            onClick={() => openEditModal(room)}
+                            aria-label={`${roomName} szerkesztése`}
+                            title="Szerkesztés"
                           >
-                            Törlés
+                            <Pencil size={13} strokeWidth={1.5} />
+                            <span>Szerkesztés</span>
                           </button>
+                          {isAct ? (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ color: 'var(--color-danger)' }}
+                              onClick={() => handleDeleteRoom(room.id, roomName)}
+                              title="Terem deaktiválása"
+                            >
+                              Deaktiválás
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => void handleReactivateRoom(room)}
+                              title="Terem újraaktiválása"
+                            >
+                              <RotateCcw size={13} strokeWidth={1.5} />
+                              <span>Újraaktiválás</span>
+                            </button>
+                          )}
                         </td>
                       )}
                     </tr>
@@ -328,9 +406,9 @@ export default function RoomsPage() {
           <div className="modal" style={{ maxWidth: 460 }}>
             <div className="modal-header">
               <div>
-                <h2 className="modal-title">Új terem rögzítése</h2>
+                <h2 className="modal-title">{editingRoom ? 'Terem szerkesztése' : 'Új terem rögzítése'}</h2>
                 <p style={{ fontSize: '12.5px', color: 'var(--color-gray-500)', marginTop: 2 }}>
-                  Új oktatási vagy rendezvényhelyszín hozzáadása
+                  {editingRoom ? 'A terem adatainak módosítása' : 'Új oktatási vagy rendezvényhelyszín hozzáadása'}
                 </p>
               </div>
               <button
@@ -352,8 +430,9 @@ export default function RoomsPage() {
 
             <form onSubmit={handleCreateRoom}>
               <div className="form-group">
-                <label className="form-label">Terem neve / azonosítója *</label>
+                <label className="form-label" htmlFor="room-name">Terem neve / azonosítója *</label>
                 <input
+                  id="room-name"
                   type="text"
                   className="form-input"
                   placeholder="pl. I. előadó (IB028) vagy 204-es terem"
@@ -365,8 +444,9 @@ export default function RoomsPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Befogadóképesség (fő) *</label>
+                <label className="form-label" htmlFor="room-capacity">Befogadóképesség (fő) *</label>
                 <input
+                  id="room-capacity"
                   type="number"
                   className="form-input"
                   min={1}
@@ -399,6 +479,7 @@ export default function RoomsPage() {
                 />
               </div>
 
+              {!editingRoom && (
               <div className="form-group" style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 }}>
                 <input
                   type="checkbox"
@@ -411,6 +492,7 @@ export default function RoomsPage() {
                   A terem azonnal aktív és foglalható
                 </label>
               </div>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
                 <button

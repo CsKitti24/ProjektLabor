@@ -70,7 +70,7 @@ Az API ASP.NET Core 10 Minimal API, JWT-hitelesítéssel és szerepkör-alapú p
 ### Megbízhatóság, értesítések, riportok, paraméterek
 
 - Pontszám: a tanévi büntetőpontok időrendi összege 0 és 100 közé szorítva (a magasabb a rosszabb). `GET /api/reliability/users` – az összes aktív oktató pontszáma, a legrosszabb elöl (Adminisztrátor, Üzemeltetési Igazgató).
-- `GET /api/notifications/my`: lapozható (`page`, `pageSize`, alapból 50, legfeljebb 100); a válasz lista, az összes elem számát az `X-Total-Count` fejléc adja. A helyiség mesterkulcsnál a kiadás terme. `GET /api/notifications/pending`: az olvasatlan vagy küldés alatt álló értesítések, ugyanígy lapozva. Az értesítések `uzenet` mezője szöveges magyarázatot adhat (pl. a lemondás oka).
+- `GET /api/notifications/my`: lapozható (`page`, `pageSize`, alapból 50, legfeljebb 100); a válasz lista, az összes elem számát az `X-Total-Count` fejléc adja. `csakOlvasatlan=true` mellett csak az olvasatlanok (a felület olvasatlan-jelvénye `pageSize=1` mellett az `X-Total-Count`-ot használja). A helyiség mesterkulcsnál a kiadás terme. `GET /api/notifications/pending`: az olvasatlan vagy küldés alatt álló értesítések, ugyanígy lapozva. Az értesítések `uzenet` mezője szöveges magyarázatot adhat (pl. a lemondás oka).
 - Riportok: a napi/heti riport a `LeNemAdott` eseményeket késedelmes leadásként számolja; a termenkénti foglalásszámba a lemondott és a `NoShow` foglalás nem számít bele; mesterkulcsnál a kiadás terme számít.
 - Terem-kihasználtság: a rendelkezésre álló idő a munkanapok nyitvatartása (08:00–20:00); a karbantartásból csak az erre eső rész vonódik le.
 - Karbantartás: lezárult időszakra nem rögzíthető, legfeljebb 90 napos, a leírás legfeljebb 500 karakter; a már lezárult karbantartás nem módosítható és nem törölhető (`409`). Ütköző foglalásnál `409` a foglalások listájával; a kérés `lemondandoFoglalasIds` mezőjében megjelölt foglalásokat a backend a karbantartással **egy tranzakcióban** mondja le (értesítéssel), így részleges állapot nem maradhat.
@@ -464,6 +464,9 @@ Sikeres csere után a felhasználó **minden korábban kiadott tokenje érvényt
 
 **Query paraméterek:**
 - `role` (opcionális): szűrés szerepkör szerint
+- `aktiv` (opcionális): `true` csak aktív, `false` csak inaktív felhasználók
+- `kereses` (opcionális): szabad szöveges keresés névben, felhasználónévben és e-mail-címben (kis- és nagybetűtől függetlenül)
+- A lista név szerint rendezett.
 - `page` (opcionális, default: 1), `pageSize` (opcionális, default: 20)
 
 **Response DTO (`UserListDto`) – 200 OK:**
