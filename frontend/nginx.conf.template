@@ -12,8 +12,16 @@ server {
     server_tokens off;
     client_max_body_size 1m;
 
+    # Tömörítés: a JS/CSS/JSON/SVG válaszok gzippel kisebbek (a woff2 és a png már tömörített).
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml application/xml;
+
     # Biztonsági fejlécek (minden válaszra; a location-blokkok add_header-je felülírná, ezért ott is szerepelnek).
-    set $csp "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'";
+    set $csp "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'";
 
     root /usr/share/nginx/html;
     index index.html;

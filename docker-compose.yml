@@ -1,10 +1,20 @@
+# Közös naplóbeállítás: a Docker json-naplói szolgáltatásonként legfeljebb 5 x 10 MB-ot foglalnak,
+# így a hosszan futó stack nem tölti meg a lemezt.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    # HTTPS-proxy mögött (docker-compose.https.yml) a .env-ben FRONTEND_BIND=127.0.0.1:3000, hogy a
+    # titkosítatlan port csak a gépről legyen elérhető.
     ports:
-      - "3000:3000"
+      - "${FRONTEND_BIND:-3000}:3000"
     environment:
       - BACKEND_URL=http://backend:8000
     networks:
@@ -12,6 +22,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    restart: unless-stopped
+    logging: *default-logging
 
   backend:
     build:
@@ -33,6 +45,8 @@ services:
       - Cors__AllowedOrigins=${CORS_ALLOWED_ORIGINS:-}
       # HTTPS-t lezáró proxy mögött true: a bejelentkezési süti csak titkosított kapcsolaton utazik.
       - Authentication__Cookie__SecureOnly=${AUTH_COOKIE_SECURE:-false}
+      # Azok a gépnevek, amelyeken a rendszert elérik (a böngésző címsorában lévő név), pontosvesszővel.
+      - AllowedHosts=${ALLOWED_HOSTS:-localhost;127.0.0.1;backend}
       # Az alkalmazás nem "sa"-ként, hanem a db-init által létrehozott, csak ehhez az adatbázishoz
       # jogosult felhasználóval csatlakozik.
       - ConnectionStrings__DefaultConnection=Server=mssql;Database=KeyAndRoomDb;User Id=projektlabor_app;TrustServerCertificate=True;
@@ -50,6 +64,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    restart: unless-stopped
+    logging: *default-logging
 
   # Egyszeri előkészítés: létrehozza az adatbázist és az alkalmazás saját (nem rendszergazda) felhasználóját.
   db-init:
@@ -67,6 +83,7 @@ services:
       mssql:
         condition: service_healthy
     restart: "no"
+    logging: *default-logging
 
   mssql:
     platform: linux/amd64
@@ -83,12 +100,39 @@ services:
       - app-network
     volumes:
       - mssql-data:/var/opt/mssql
+      # Az adatbázismentések a gépen, az adatkötettől külön (innen másolhatók máshová is).
+      - ${BACKUP_DIR:-./backups}:/var/opt/mssql/backup
     healthcheck:
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -C -Q \"SELECT 1\" || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -Q \"SELECT 1\" || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 15
       start_period: 15s
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Ütemezett adatbázismentés: induláskor, majd BACKUP_INTERVAL_HOURS óránként teljes, ellenőrzött mentés
+  # a BACKUP_DIR mappába; a BACKUP_RETENTION_DAYS napnál régebbieket törli. Helyreállítási próba:
+  #   docker compose run --rm db-backup restore-test
+  db-backup:
+    platform: linux/amd64
+    image: mcr.microsoft.com/mssql/server:2022-latest@sha256:cf8f0ab2ebe61feec2eed2629061a07d247f791c2a8ddda74a4ac9f06a291718
+    entrypoint: ["/bin/bash", "/scripts/backup.sh"]
+    environment:
+      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD:?Set MSSQL_SA_PASSWORD in .env}
+      - BACKUP_INTERVAL_HOURS=${BACKUP_INTERVAL_HOURS:-24}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ./database/backup.sh:/scripts/backup.sh:ro
+      - ./database/restore-test.sh:/scripts/restore-test.sh:ro
+      - ${BACKUP_DIR:-./backups}:/var/opt/mssql/backup
+    networks:
+      - app-network
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    logging: *default-logging
 
 networks:
   app-network:

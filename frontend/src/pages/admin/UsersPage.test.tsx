@@ -103,7 +103,7 @@ describe('UsersPage', () => {
     }))
   })
 
-  it('creates a new instructor with an initial PIN', async () => {
+  it('creates a new instructor without letting the admin set a PIN', async () => {
     vi.mocked(client.post).mockResolvedValue(axiosResponse({ id: 9 }))
     render(<UsersPage />)
 
@@ -113,7 +113,7 @@ describe('UsersPage', () => {
     fireEvent.change(screen.getByLabelText('E-mail cím *'), { target: { value: 'kiss.anna@iskola.hu' } })
     fireEvent.change(screen.getByLabelText('Kezdő jelszó (legalább 12 karakter) *'), { target: { value: 'Kezdo-jelszo-2026' } })
     fireEvent.change(screen.getByLabelText('Jelszó megerősítése *'), { target: { value: 'Kezdo-jelszo-2026' } })
-    fireEvent.change(screen.getByLabelText('Kulcsátvételi PIN (4–8 számjegy, később is megadható)'), { target: { value: '4821' } })
+    expect(screen.queryByLabelText(/Kulcsátvételi PIN/)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Létrehozás' }))
 
     expect(await screen.findByText('Kiss Anna felhasználó létrehozva.')).toBeTruthy()
@@ -124,7 +124,7 @@ describe('UsersPage', () => {
       role: 'Oktato',
       jelszo: 'Kezdo-jelszo-2026',
     })
-    expect(client.put).toHaveBeenCalledWith('/users/9/pin', { pin: '4821' })
+    expect(client.put).not.toHaveBeenCalled()
   })
 
   it('rejects an invalid username before calling the API', async () => {

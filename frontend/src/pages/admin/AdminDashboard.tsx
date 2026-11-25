@@ -29,37 +29,18 @@ interface BookingListResponse {
 }
 
 interface TicketListResponse {
-  items: Ticket[]
   totalCount: number
 }
 
-interface Ticket {
-  statusz?: string
-}
-
-async function fetchAllTickets(): Promise<Ticket[]> {
-  const pageSize = 100
-  const tickets: Ticket[] = []
-  let hasMore = true
-  let page = 1
-
-  while (hasMore) {
-    const response = await client.get<TicketListResponse>('/tickets', {
-      params: { page, pageSize },
-    })
-    if (!Array.isArray(response.data.items) || !Number.isInteger(response.data.totalCount)) {
-      throw new Error('A hibajegy-válasz formátuma érvénytelen.')
-    }
-
-    tickets.push(...response.data.items)
-    hasMore = tickets.length < response.data.totalCount
-    if (hasMore && response.data.items.length === 0) {
-      throw new Error('A hibajegyek lapozása nem teljes.')
-    }
-    page += 1
+// A nyitott (Nyitva vagy Folyamatban) hibajegyek száma egyetlen kéréssel: pageSize=1, csak a totalCount kell.
+async function countOpenTickets(): Promise<number> {
+  const response = await client.get<TicketListResponse>('/tickets', {
+    params: { nyitott: true, page: 1, pageSize: 1 },
+  })
+  if (!Number.isInteger(response.data.totalCount)) {
+    throw new Error('A hibajegy-válasz formátuma érvénytelen.')
   }
-
-  return tickets
+  return response.data.totalCount
 }
 
 // A függő értesítések száma (GET /notifications/pending, X-Total-Count). Nem kritikus: hiba esetén null.
@@ -101,12 +82,12 @@ export default function AdminDashboard() {
             ig: endOfDay.toISOString(),
           },
         })
-      const [roomsRes, keysRes, activeBookingsRes, doneBookingsRes, ticketsData, pendingNotifications] = await Promise.all([
+      const [roomsRes, keysRes, activeBookingsRes, doneBookingsRes, openTickets, pendingNotifications] = await Promise.all([
         client.get<Array<{ aktivalva?: boolean }>>('/rooms'),
         client.get<Array<{ jelenlegiAllapot?: string }>>('/keys'),
         countTodayBookings('Aktiv'),
         countTodayBookings('Kesz'),
-        fetchAllTickets(),
+        countOpenTickets(),
         isAdmin ? countPendingNotifications() : Promise.resolve(null),
       ])
 
@@ -117,10 +98,6 @@ export default function AdminDashboard() {
       }
 
       const activeKeys = keysRes.data.filter((key) => key.jelenlegiAllapot === 'Kiadva').length
-      const openTickets = ticketsData.filter(
-        (ticket) => !['Zarva', 'Lezarva', 'Megoldva', 'Closed', 'Resolved'].includes(ticket.statusz ?? '')
-      ).length
-
       setStats({
         rooms: roomsRes.data.filter((room) => room.aktivalva !== false).length,
         activeKeys,

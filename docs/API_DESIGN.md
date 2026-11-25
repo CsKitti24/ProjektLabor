@@ -8,7 +8,7 @@ Az API ASP.NET Core 10 Minimal API, JWT-hitelesítéssel és szerepkör-alapú p
 
 ### Hitelesítés, biztonság, hibakezelés
 
-- **Bejelentkezés:** a `POST /api/auth/login` a JWT-t `projektlabor_auth` nevű **HttpOnly** sütiben állítja be (`SameSite=Strict`, `Path=/api`, HTTPS-en `Secure`, 8 órás lejárat). A böngészős kliens a tokent nem tárolja; a munkamenetet a `GET /api/auth/me` állítja helyre, a `POST /api/auth/logout` törli a sütit. Az `Authorization: Bearer` fejléc továbbra is használható (Swagger, tesztek, más kliensek).
+- **Bejelentkezés:** a `POST /api/auth/login` a JWT-t `projektlabor_auth` nevű **HttpOnly** sütiben állítja be (`SameSite=Strict`, `Path=/api`, HTTPS-en `Secure`, 8 órás lejárat, aktivitás közben `POST /api/auth/refresh`-sel megújítva, legfeljebb 14 óráig). A böngészős kliens a tokent nem tárolja; a munkamenetet a `GET /api/auth/me` állítja helyre, a `POST /api/auth/logout` törli a sütit. Az `Authorization: Bearer` fejléc továbbra is használható (Swagger, tesztek, más kliensek).
 - **Token-ellenőrzés:** minden kérésnél az adatbázis alapján is ellenőrizzük, hogy a felhasználó létezik, aktív, és a szerepköre egyezik a tokenben lévővel – az inaktiválás és a szerepkörváltás azonnal hat. A jelszócsere (saját vagy adminisztrátori) a korábban kiadott tokeneket is azonnal érvényteleníti.
 - **Kéréskorlát:** kliens-IP-nként percenként legfeljebb 10 bejelentkezési kísérlet (`429 Too Many Requests`). A frontend nginx proxyja mögött a valódi IP-t csak privát hálózatból érkező `X-Forwarded-For` alapján fogadjuk el.
 - **CORS:** csak a `Cors:AllowedOrigins` (környezeti változóban `CORS_ALLOWED_ORIGINS`) listában szereplő originök, sütikkel együtt. A Docker Compose-os futtatásnál a frontend azonos originről, proxyn át éri el az API-t.
@@ -29,7 +29,7 @@ Az API ASP.NET Core 10 Minimal API, JWT-hitelesítéssel és szerepkör-alapú p
 - `DELETE /api/users/{id}` **inaktivál** (nem töröl): az előzmények megmaradnak, az inaktív felhasználó nem tud belépni. `POST /api/users/{id}/reactivate` újraaktivál. Nem inaktiválható saját maga, az utolsó aktív adminisztrátor, aktív foglalással vagy kint lévő kulccsal rendelkező felhasználó.
 - Szerepkörváltás (`PUT /api/users/{id}/role`): saját admin szerepkör és az utolsó aktív admin nem fokozható le. Oktatóról más szerepkörre csak akkor, ha nincs aktív jövőbeli foglalása és nincs nála kulcs; ilyenkor a mesterkulcs-jogosultságai megszűnnek.
 - Jelszószabály (létrehozás és módosítás): legalább 12 karakter, legfeljebb 72 UTF-8 bájt. A felhasználónév és az e-mail-cím egyediségét a levágott (az e-mailnél kisbetűs) értéken ellenőrizzük.
-- `PUT /api/users/{id}/pin`: az átvevői PIN (4–8 számjegy) beállítása; ilyenkor a hibás próbálkozások száma és a PIN-zárolás nullázódik. A PIN bcrypt hashként tárolódik, és nem jelenik meg válaszokban vagy a naplóban.
+- `DELETE /api/users/{id}/pin`: az átvevői PIN nullázása (adminisztrátor). Az admin nem állíthat be PIN-t; újat az oktató ad meg a `PUT /api/auth/pin` végponton. Nullázáskor a hibás próbálkozások száma és a PIN-zárolás is megszűnik. A PIN bcrypt hashként tárolódik, és nem jelenik meg válaszokban vagy a naplóban.
 - A `UserDto` tartalmazza az `aktiv` mezőt; születési dátumot a rendszer nem tárol.
 
 ### Termek, karbantartás
@@ -177,6 +177,7 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 | A3 | GET | `/api/auth/me` | Bejelentkezett felhasználó adatai | ✅ Kész |
 | A4 | POST | `/api/auth/change-password` | Saját jelszó cseréje | ✅ Kész |
 | A5 | PUT | `/api/auth/pin` | Saját kulcsátvételi PIN beállítása (oktató) | ✅ Kész |
+| A6 | POST | `/api/auth/refresh` | Munkamenet megújítása (csúszó lejárat, legfeljebb `Jwt:MaxSessionHours`, alapból 14 óra a belépéstől); válasz: `expiresAt`, `sessionEndsAt` | ✅ Kész |
 
 ### Felhasználókezelés
 
@@ -189,7 +190,7 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 | U5 | DELETE | `/api/users/{id}` | Felhasználó inaktiválása (soft delete) | ✅ Kész |
 | U6 | PUT | `/api/users/{id}/role` | Felhasználó szerepkörének módosítása | ✅ Kész |
 | U7 | POST | `/api/users/{id}/reactivate` | Inaktivált felhasználó újraaktiválása | ✅ Kész |
-| U8 | PUT | `/api/users/{id}/pin` | Kulcsátvételi PIN beállítása (zárolás nullázásával) | ✅ Kész |
+| U8 | DELETE | `/api/users/{id}/pin` | Kulcsátvételi PIN nullázása (újat az oktató állít be) | ✅ Kész |
 
 ### Termek
 
@@ -256,7 +257,7 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 
 | # | Metódus | Endpoint | Funkció | Státusz |
 |---|---|---|---|---|
-| T1 | GET | `/api/tickets` | Hibajegyek listázása (Oktató: csak saját) | ✅ Kész |
+| T1 | GET | `/api/tickets` | Hibajegyek listázása (Oktató: csak saját); `nyitott=true` csak a Nyitva/Folyamatban állapotúak (`pageSize=1`-gyel darabszámhoz) | ✅ Kész |
 | T2 | GET | `/api/tickets/{id}` | Egy hibajegy részletei (Oktató: csak saját) | ✅ Kész |
 | T3 | POST | `/api/tickets` | Új hibajegy rögzítése (Oktató/Portás/Adminisztrátor) | ✅ Kész |
 | T4 | PUT | `/api/tickets/{id}/status` | Hibajegy státuszának frissítése | ✅ Kész |

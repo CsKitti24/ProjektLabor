@@ -1,0 +1,35 @@
+# HTTPS-proxy a frontend elé. Használat (a .env-ben COMPOSE_FILE-lal is megadható):
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+# Előtte: tanúsítvány a deploy/https/certs mappába (fullchain.pem, privkey.pem), a .env-ben
+# PUBLIC_HOSTNAME, ALLOWED_HOSTS, FRONTEND_BIND=127.0.0.1:3000 (lásd README).
+services:
+  https-proxy:
+    image: nginx:1.30-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - PUBLIC_HOSTNAME=${PUBLIC_HOSTNAME:?Set PUBLIC_HOSTNAME in .env}
+      - HSTS_MAX_AGE=${HSTS_MAX_AGE:-31536000}
+      # Csak a saját változóinkat helyettesítse be, az nginx $host stb. változóit ne.
+      - NGINX_ENVSUBST_FILTER=^(PUBLIC_HOSTNAME|HSTS_MAX_AGE)$
+    volumes:
+      - ./deploy/https/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./deploy/https/certs:/etc/nginx/certs:ro
+    networks:
+      - app-network
+    depends_on:
+      - frontend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  backend:
+    environment:
+      # Kliens -> HTTPS-proxy -> frontend nginx -> backend: két megbízható proxy van az úton.
+      - ForwardedHeaders__ForwardLimit=2
+      # A bejelentkezési süti csak HTTPS-en utazik.
+      - Authentication__Cookie__SecureOnly=true

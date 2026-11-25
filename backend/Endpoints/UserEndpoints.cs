@@ -521,45 +521,41 @@ namespace ProjektLabor.Endpoints
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden);
 
-            group.MapPut("/{id:int}/pin", async (
+            // PIN nullázása: a kulcsátvételi PIN az oktató titka, ezért az adminisztrátor nem állíthat be
+            // helyette újat, csak törölheti (pl. elfelejtett vagy kiszivárgott PIN esetén). Utána az oktató
+            // a profiljában (PUT /api/auth/pin) ad meg újat.
+            group.MapDelete("/{id:int}/pin", async (
                 int id,
-                SetPinRequest request,
                 AppDbContext db,
                 AuditService auditService,
                 ClaimsPrincipal caller) =>
             {
-                if (string.IsNullOrWhiteSpace(request.Pin) ||
-                    request.Pin.Length is < 4 or > 8 ||
-                    request.Pin.Any(character => character is < '0' or > '9'))
-                {
-                    return Results.BadRequest(new { message = "A PIN-kód 4–8 számjegyből állhat." });
-                }
-
                 var user = await db.Felhasznalok.FindAsync(id);
                 if (user is null)
                 {
                     return Results.NotFound(new { message = "A felhasználó nem található." });
                 }
 
-                user.PinHash = BCrypt.Net.BCrypt.HashPassword(request.Pin);
-                // Új PIN beállításakor a korábbi hibás próbálkozások és a zárolás megszűnik.
+                var hadPin = user.PinHash is not null;
+                user.PinHash = null;
+                // A korábbi hibás próbálkozások és a zárolás is megszűnik.
                 user.PinHibasProbalkozasok = 0;
                 user.PinZarolvaEddig = null;
                 user.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync();
                 await auditService.LogAsync(
                     caller,
-                    "PIN_CHANGE",
+                    "PIN_RESET",
                     "Felhasznalo",
                     id.ToString(),
-                    ujErtek: "PIN beállítva");
+                    regiErtek: hadPin ? "PIN beállítva" : "nincs PIN",
+                    ujErtek: "PIN nullázva");
 
-                return Results.NoContent();
+                return Results.Ok(new { message = $"{user.Nev} PIN-kódja nullázva; újat a saját profiljában adhat meg." });
             })
-            .WithName("SetUserPin")
-            .WithSummary("Felhasználói PIN beállítása kulcsátvételhez")
-            .Produces(StatusCodes.Status204NoContent)
-            .Produces(StatusCodes.Status400BadRequest)
+            .WithName("ResetUserPin")
+            .WithSummary("Felhasználó kulcsátvételi PIN-kódjának nullázása (újat az oktató állít be)")
+            .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden);
@@ -631,7 +627,6 @@ namespace ProjektLabor.Endpoints
             return group;
         }
 
-        public sealed record SetPinRequest(string Pin);
 
         // A felhasználónál van-e most kulcs (valamelyik kulcs legutolsó mozgása neki szóló kiadás).
         private static Task<bool> HoldsKeyAsync(AppDbContext db, int userId) =>

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import client from '../api/client'
+import SessionKeeper from './SessionKeeper'
 
 export type UserRole = 'Oktato' | 'Portas' | 'Adminisztrator' | 'UzemeltetesiIgazgato'
 
@@ -93,6 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{ user, login, logout, isLoading }}>
       {children}
+      {user && <SessionKeeper onExpired={logout} />}
     </AuthContext.Provider>
   )
 }
