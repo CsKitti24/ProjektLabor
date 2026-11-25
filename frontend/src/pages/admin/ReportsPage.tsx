@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { BarChart2, Calendar, TrendingUp, Award, DoorOpen, Key, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
 import { localDateInputValue } from '../../utils/dateTime'
+import { useAuth } from '../../auth/AuthContext'
+import ReliabilityDetailsModal from './ReliabilityDetailsModal'
 
 interface WeeklyReport {
   hetKezdete?: string
@@ -51,8 +53,7 @@ interface KeyTrafficReport {
 }
 
 function firstDayOfMonth(): string {
-  const now = new Date()
-  return localDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1))
+  return `${localDateInputValue().slice(0, 8)}01`
 }
 
 interface ReliabilityReport {
@@ -92,6 +93,9 @@ type TabType = 'weekly' | 'utilization' | 'keyTraffic' | 'reliability'
 type TrafficPeriod = 'day' | 'week'
 
 export default function ReportsPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'Adminisztrator'
+  const [detailsFor, setDetailsFor] = useState<InstructorReliability | null>(null)
   const [activeTab, setActiveTab] = useState<TabType>('weekly')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
@@ -594,12 +598,13 @@ export default function ReportsPage() {
                       <th style={{ textAlign: 'right' }}>Pontszám</th>
                       <th style={{ textAlign: 'right' }}>Események</th>
                       <th>Következmény</th>
+                      <th style={{ textAlign: 'right' }}>Részletek</th>
                     </tr>
                   </thead>
                   <tbody>
                     {!instructorScores || instructorScores.oktatok.length === 0 ? (
                       <tr>
-                        <td colSpan={4} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 24 }}>
+                        <td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 24 }}>
                           Nincs aktív oktató a rendszerben.
                         </td>
                       </tr>
@@ -615,12 +620,31 @@ export default function ReportsPage() {
                           <td>
                             <span className={scoreBadgeClass(item.pontszam)}>{item.kovetkezmeny}</span>
                           </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              aria-label={`${item.nev} pontjainak részletei`}
+                              onClick={() => setDetailsFor(item)}
+                            >
+                              {isAdmin ? 'Részletek / korrekció' : 'Részletek'}
+                            </button>
+                          </td>
                         </tr>
                       ))
                     )}
                   </tbody>
                 </table>
               </div>
+              {detailsFor && instructorScores && (
+                <ReliabilityDetailsModal
+                  instructor={detailsFor}
+                  tanev={instructorScores.tanev}
+                  canCorrect={isAdmin}
+                  onClose={() => setDetailsFor(null)}
+                  onCorrected={() => setRetryVersion((version) => version + 1)}
+                />
+              )}
               <p style={{ fontSize: 12, color: 'var(--color-gray-500)', marginTop: 8 }}>
                 A pontszám büntetőpont: minél magasabb, annál több rögzített hiba
                 {instructorScores ? ` (${instructorScores.tanev}. tanév)` : ''}.

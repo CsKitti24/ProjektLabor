@@ -4,6 +4,7 @@ import { AxiosHeaders, type AxiosResponse } from 'axios'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import client from '../../api/client'
+import { addDays, localDateInputValue, localDateTimeToIso } from '../../utils/dateTime'
 import MaintenancePage from './MaintenancePage'
 
 vi.mock('../../api/client', () => ({
@@ -19,8 +20,7 @@ function axiosResponse<T>(data: T): AxiosResponse<T> {
   return { data, status: 200, statusText: 'OK', headers: new AxiosHeaders(), config: { headers: new AxiosHeaders() } }
 }
 
-const future = new Date(Date.now() + 3 * 24 * 3600 * 1000)
-const futureDay = `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, '0')}-${String(future.getDate()).padStart(2, '0')}`
+const futureDay = addDays(localDateInputValue(), 3)
 
 describe('MaintenancePage', () => {
   beforeEach(() => {
@@ -31,8 +31,8 @@ describe('MaintenancePage', () => {
           teremId: 1,
           teremNev: 'A-101',
           felhasznaloNev: 'Admin',
-          startTime: new Date(`${futureDay}T08:00:00`).toISOString(),
-          endTime: new Date(`${futureDay}T12:00:00`).toISOString(),
+          startTime: localDateTimeToIso(futureDay, '08:00'),
+          endTime: localDateTimeToIso(futureDay, '12:00'),
           leiras: 'Festés',
         }]))
       }
@@ -59,8 +59,8 @@ describe('MaintenancePage', () => {
 
     await waitFor(() => expect(client.post).toHaveBeenCalledWith('/maintenance', expect.objectContaining({
       teremId: 1,
-      startTime: new Date('2030-03-04T18:00:00').toISOString(),
-      endTime: new Date('2030-03-06T10:00:00').toISOString(),
+      startTime: localDateTimeToIso('2030-03-04', '18:00'),
+      endTime: localDateTimeToIso('2030-03-06', '10:00'),
     })))
   })
 
@@ -74,7 +74,7 @@ describe('MaintenancePage', () => {
 
     await waitFor(() => expect(client.put).toHaveBeenCalledWith('/maintenance/3', expect.objectContaining({
       teremId: 1,
-      endTime: new Date(`${futureDay}T14:00:00`).toISOString(),
+      endTime: localDateTimeToIso(futureDay, '14:00'),
       leiras: 'Festés',
     })))
     expect(await screen.findByText('A karbantartás módosítva.')).toBeTruthy()
@@ -88,8 +88,8 @@ describe('MaintenancePage', () => {
             message: 'Ütközik',
             conflicts: [{
               foglalasId: 42, felhasznaloId: 5, felhasznaloNev: 'Oktató', teremId: 1, teremNev: 'A-101',
-              startTime: new Date(`${futureDay}T09:30:00`).toISOString(),
-              endTime: new Date(`${futureDay}T10:15:00`).toISOString(),
+              startTime: localDateTimeToIso(futureDay, '09:30'),
+              endTime: localDateTimeToIso(futureDay, '10:15'),
               status: 'Aktiv',
             }],
           },

@@ -24,6 +24,8 @@ export default function ParametersPage() {
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  // A módosítás oka (opcionális): az auditnaplóba kerül a régi és az új érték mellé.
+  const [reasons, setReasons] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let ignore = false
@@ -52,7 +54,12 @@ export default function ParametersPage() {
     }
     setSavingKey(parameter.kulcs)
     try {
-      const response = await client.put<Parameter>(`/parameters/${encodeURIComponent(parameter.kulcs)}`, { ertek: value })
+      const reason = reasons[parameter.kulcs]?.trim()
+      const response = await client.put<Parameter>(`/parameters/${encodeURIComponent(parameter.kulcs)}`, {
+        ertek: value,
+        indoklas: reason || undefined,
+      })
+      setReasons((current) => ({ ...current, [parameter.kulcs]: '' }))
       setParameters((current) => current.map((item) => item.kulcs === parameter.kulcs ? response.data : item))
       setValues((current) => ({ ...current, [parameter.kulcs]: response.data.ertek }))
       setError('')
@@ -83,13 +90,14 @@ export default function ParametersPage() {
       ) : (
         <div className="table-container">
           <table className="data-table">
-            <thead><tr><th>Paraméter</th><th>Leírás</th><th>Érték</th><th style={{ textAlign: 'right' }}>Művelet</th></tr></thead>
+            <thead><tr><th>Paraméter</th><th>Leírás</th><th>Érték</th>{canEdit && <th>Módosítás oka</th>}<th style={{ textAlign: 'right' }}>Művelet</th></tr></thead>
             <tbody>
               {parameters.map((parameter) => (
                 <tr key={parameter.kulcs}>
                   <td><code>{parameter.kulcs}</code></td>
                   <td>{parameter.leiras || '—'}</td>
                   <td><input className="form-input" aria-label={`${parameter.kulcs} értéke`} value={values[parameter.kulcs] ?? ''} disabled={!canEdit} onChange={(event) => setValues((current) => ({ ...current, [parameter.kulcs]: event.target.value }))} /></td>
+                  {canEdit && <td><input className="form-input" maxLength={500} placeholder="pl. új zárási rend" aria-label={`${parameter.kulcs} módosításának oka`} value={reasons[parameter.kulcs] ?? ''} onChange={(event) => setReasons((current) => ({ ...current, [parameter.kulcs]: event.target.value }))} /></td>}
                   <td style={{ textAlign: 'right' }}>{canEdit && <button type="button" className="btn btn-primary btn-sm" disabled={savingKey === parameter.kulcs} onClick={() => saveParameter(parameter)}>{savingKey === parameter.kulcs ? 'Mentés…' : 'Mentés'}</button>}</td>
                 </tr>
               ))}

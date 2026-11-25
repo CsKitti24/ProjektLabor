@@ -8,6 +8,9 @@ import type { UserRole } from '../auth/AuthContext'
 
 interface SidebarProps {
   role: UserRole
+  // Keskeny képernyőn az oldalsáv kicsúszó menü; isOpen jelzi, hogy látszik-e.
+  isOpen?: boolean
+  onNavigate?: () => void
 }
 
 function getRoleLabel(role: UserRole): string {
@@ -25,12 +28,12 @@ function getRoleLabel(role: UserRole): string {
   }
 }
 
-export default function Sidebar({ role }: SidebarProps) {
+export default function Sidebar({ role, isOpen = false, onNavigate }: SidebarProps) {
   const navItems = getNavItems(role)
   const unreadCount = useUnreadNotifications(role === 'Oktato' || role === 'Portas')
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${isOpen ? ' sidebar--open' : ''}`} id="app-sidebar">
       <div className="sidebar-header">
         <div className="sidebar-role-badge">
           <Shield size={13} strokeWidth={1.5} color="var(--color-primary)" />
@@ -42,6 +45,7 @@ export default function Sidebar({ role }: SidebarProps) {
         {navItems.map((item) => (
           <NavLink
             key={item.to}
+            onClick={onNavigate}
             to={item.to}
             end={item.to === '/admin'}
             className={({ isActive }) =>
@@ -140,6 +144,24 @@ export default function Sidebar({ role }: SidebarProps) {
 
         .sidebar-link-label {
           white-space: nowrap;
+        }
+      
+        /* Tablet és telefon: kicsúszó menü a tartalom fölött */
+        @media (max-width: 900px) {
+          .sidebar {
+            position: fixed;
+            top: 60px;
+            bottom: 0;
+            left: 0;
+            z-index: 95;
+            transform: translateX(-100%);
+            transition: transform 0.2s ease;
+            box-shadow: var(--shadow-modal);
+            overflow-y: auto;
+          }
+          .sidebar--open {
+            transform: translateX(0);
+          }
         }
       `}</style>
     </aside>

@@ -40,6 +40,7 @@ export function getNavItems(role: UserRole): NavItem[] {
       return [
         { to: '/key-issue', label: 'Kulcskiadás', icon: <ArrowUpRight size={17} strokeWidth={1.5} /> },
         { to: '/key-return', label: 'Kulcsvisszavétel', icon: <ArrowDownLeft size={17} strokeWidth={1.5} /> },
+        { to: '/bookings', label: 'Mai foglalások', icon: <CalendarDays size={17} strokeWidth={1.5} /> },
         { to: '/key-movements', label: 'Kulcsmozgások', icon: <List size={17} strokeWidth={1.5} /> },
         { to: '/active-keys', label: 'Aktív kulcsok', icon: <Key size={17} strokeWidth={1.5} /> },
         { to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> },
@@ -66,6 +67,7 @@ export function getNavItems(role: UserRole): NavItem[] {
         { to: '/reports', label: 'Riportok', icon: <BarChart2 size={17} strokeWidth={1.5} /> },
         { to: '/active-keys', label: 'Aktív kulcsok', icon: <Key size={17} strokeWidth={1.5} /> },
         { to: '/key-movements', label: 'Kulcsmozgások', icon: <List size={17} strokeWidth={1.5} /> },
+        { to: '/bookings', label: 'Foglalások', icon: <CalendarDays size={17} strokeWidth={1.5} /> },
         { to: '/audit', label: 'Auditnapló', icon: <ClipboardList size={17} strokeWidth={1.5} /> },
         { to: '/parameters', label: 'Rendszerparaméterek', icon: <Settings size={17} strokeWidth={1.5} /> },
         { to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> },

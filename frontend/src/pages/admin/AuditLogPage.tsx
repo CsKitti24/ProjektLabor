@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react'
 import { AlertCircle, ClipboardList, RefreshCw, Search } from 'lucide-react'
 import client from '../../api/client'
+import { APP_TIME_ZONE, localDateTimeToIso } from '../../utils/dateTime'
 import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
 
 interface AuditLog {
@@ -28,13 +29,49 @@ interface AuditFilters {
   veg: string
 }
 
+// Az auditnapló egységes művelettípus-kódjai magyar megnevezéssel (a szűrő legördülő listájához).
+const AUDIT_ACTIONS: Array<[string, string]> = [
+  ['LOGIN_SUCCESS', 'Sikeres bejelentkezés'],
+  ['LOGIN_FAILED', 'Sikertelen bejelentkezés'],
+  ['LOGIN_INVALID', 'Hiányos bejelentkezési kérés'],
+  ['LOGOUT', 'Kijelentkezés'],
+  ['PASSWORD_CHANGE', 'Jelszócsere'],
+  ['PASSWORD_CHANGE_FAILED', 'Sikertelen jelszócsere'],
+  ['PIN_CHANGE', 'PIN beállítása'],
+  ['PIN_CHANGE_FAILED', 'Sikertelen PIN-beállítás'],
+  ['CREATE', 'Létrehozás'],
+  ['UPDATE', 'Módosítás'],
+  ['UPDATE_STATUS', 'Állapotváltás'],
+  ['UPDATE_ROOMS', 'Mesterkulcs termeinek módosítása'],
+  ['DELETE', 'Törlés'],
+  ['DEACTIVATE', 'Deaktiválás / inaktiválás'],
+  ['REACTIVATE', 'Újraaktiválás'],
+  ['CANCEL', 'Foglalás lemondása'],
+  ['ROLE_CHANGE', 'Szerepkör-változás'],
+  ['GRANT', 'Mesterkulcs-jogosultság megadása'],
+  ['REVOKE', 'Mesterkulcs-jogosultság visszavonása'],
+  ['KEY_ISSUE', 'Kulcskiadás'],
+  ['KEY_RETURN', 'Kulcsvisszavétel'],
+  ['KEY_FORCED_RETURN', 'Kényszerített kulcsvisszavétel'],
+  ['SYSTEM_PARAMETER_UPDATE', 'Rendszerparaméter módosítása'],
+  ['RELIABILITY_CORRECTION', 'Pontkorrekció'],
+  ['AUTOMATIC_PENALTY', 'Automatikus büntetőpont'],
+  ['AUTOMATIC_NOTIFICATION', 'Automatikus értesítés'],
+  ['AUTOMATION_DATA_ISSUE', 'Automatizálási adatprobléma'],
+  ['ACCESS_UNAUTHENTICATED', 'Bejelentkezés nélküli hozzáférés'],
+  ['ACCESS_FORBIDDEN', 'Jogosulatlan hozzáférés'],
+  ['OPERATION_REJECTED', 'Elutasított művelet'],
+]
+
+const AUDIT_ACTION_LABELS = Object.fromEntries(AUDIT_ACTIONS)
+
 const EMPTY_FILTERS: AuditFilters = { muveletTipus: '', entitasTipus: '', kezdet: '', veg: '' }
 
 function formatDate(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleString('hu-HU', { dateStyle: 'medium', timeStyle: 'short' })
+    : date.toLocaleString('hu-HU', { timeZone: APP_TIME_ZONE, dateStyle: 'medium', timeStyle: 'short' })
 }
 
 // A szűrő napjai helyi naptári napok: a kezdet a nap eleje, a vég a nap vége (UTC ISO-ban küldve).
@@ -42,8 +79,8 @@ function toQueryParams(filters: AuditFilters, page: number) {
   const params: Record<string, string | number> = { page, pageSize: DEFAULT_PAGE_SIZE }
   if (filters.muveletTipus.trim()) params.muveletTipus = filters.muveletTipus.trim()
   if (filters.entitasTipus.trim()) params.entitasTipus = filters.entitasTipus.trim()
-  if (filters.kezdet) params.kezdet = new Date(`${filters.kezdet}T00:00:00`).toISOString()
-  if (filters.veg) params.veg = new Date(`${filters.veg}T23:59:59`).toISOString()
+  if (filters.kezdet) params.kezdet = localDateTimeToIso(filters.kezdet, '00:00')
+  if (filters.veg) params.veg = new Date(new Date(localDateTimeToIso(filters.veg, '23:59')).getTime() + 59_999).toISOString()
   return params
 }
 
@@ -124,9 +161,12 @@ export default function AuditLogPage() {
       >
         <div>
           <label className="form-label" htmlFor="audit-muvelet">Művelet</label>
-          <input id="audit-muvelet" className="form-input" placeholder="pl. ACCESS_FORBIDDEN"
+          <select id="audit-muvelet" className="form-select"
             value={draftFilters.muveletTipus}
-            onChange={(e) => setDraftFilters((current) => ({ ...current, muveletTipus: e.target.value }))} />
+            onChange={(e) => setDraftFilters((current) => ({ ...current, muveletTipus: e.target.value }))}>
+            <option value="">Minden művelet</option>
+            {AUDIT_ACTIONS.map(([code, label]) => <option key={code} value={code}>{label} ({code})</option>)}
+          </select>
         </div>
         <div>
           <label className="form-label" htmlFor="audit-entitas">Entitás</label>
@@ -189,7 +229,10 @@ export default function AuditLogPage() {
                     <tr>
                       <td>{formatDate(log.letrehozasIdeje)}</td>
                       <td>{log.felhasznaloNev || (log.felhasznaloId ? `#${log.felhasznaloId}` : 'Rendszer')}</td>
-                      <td>{log.muveletTipus}</td>
+                      <td>
+                        <div>{AUDIT_ACTION_LABELS[log.muveletTipus] ?? log.muveletTipus}</div>
+                        <div style={{ fontSize: 11, color: 'var(--color-gray-500)' }}>{log.muveletTipus}</div>
+                      </td>
                       <td>{log.entitasTipus}{log.entitasId ? ` #${log.entitasId}` : ''}</td>
                       <td style={{ textAlign: 'right' }}>
                         {hasDetails ? (

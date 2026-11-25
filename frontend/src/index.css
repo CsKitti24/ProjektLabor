@@ -557,3 +557,23 @@ select {
   color: var(--color-gray-500);
   margin-top: 4px;
 }
+
+/* Telefon: a felugró ablakok kitöltik a képernyőt és görgethetők, az űrlapsorok egymás alá kerülnek */
+@media (max-width: 600px) {
+  .modal {
+    padding: 20px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+  }
+  .modal [style*="grid-template-columns: 1fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+  .page-header .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .data-table th,
+  .data-table td {
+    padding: 8px 10px;
+  }
+}

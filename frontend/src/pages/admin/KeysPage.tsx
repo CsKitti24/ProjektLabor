@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { AlertCircle, Building2, Key, Pencil, Plus, Search, Trash2, UserPlus, X } from 'lucide-react'
 import client from '../../api/client'
+import DialogKeyboard from '../../components/DialogKeyboard'
 import { fetchAllUsers } from '../../api/users'
+import { useConfirm } from '../../components/confirmContext'
 
 interface KeyItem {
   id: number
@@ -32,6 +34,7 @@ interface MasterAccess {
 }
 
 export default function KeysPage() {
+  const confirm = useConfirm()
   const [keys, setKeys] = useState<KeyItem[]>([])
   const [rooms, setRooms] = useState<RoomOption[]>([])
   const [search, setSearch] = useState('')
@@ -132,7 +135,7 @@ export default function KeysPage() {
   }
 
   const deactivateKey = async (key: KeyItem) => {
-    if (!window.confirm(`Deaktiválod a(z) ${key.szam} kulcsot?`)) return
+    if (!(await confirm({ title: 'Kulcs deaktiválása', message: `Deaktiválod a(z) ${key.szam} kulcsot?`, confirmLabel: 'Deaktiválás', danger: true }))) return
     try {
       await client.delete(`/keys/${key.id}`)
       setKeys((current) => current.map((item) =>
@@ -324,7 +327,8 @@ export default function KeysPage() {
 
       {showEditor && (
         <div className="modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) setShowEditor(false) }}>
-          <form className="modal" style={{ maxWidth: 480 }} onSubmit={saveKey}>
+          <DialogKeyboard onClose={() => setShowEditor(false)} />
+          <form className="modal" style={{ maxWidth: 480 }} onSubmit={saveKey} role="dialog" aria-modal="true">
             <div className="modal-header">
               <h2 className="modal-title">{editingKey ? 'Kulcs szerkesztése' : 'Új kulcs rögzítése'}</h2>
               <button type="button" className="modal-close" onClick={() => setShowEditor(false)} aria-label="Bezárás">
@@ -361,7 +365,8 @@ export default function KeysPage() {
 
       {masterKey && (
         <div className="modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) setMasterKey(null) }}>
-          <div className="modal" style={{ maxWidth: 560 }}>
+          <DialogKeyboard onClose={() => setMasterKey(null)} />
+          <div className="modal" style={{ maxWidth: 560 }} role="dialog" aria-modal="true">
             <div className="modal-header">
               <div>
                 <h2 className="modal-title">Mesterkulcs-jogosultságok</h2>
@@ -404,7 +409,8 @@ export default function KeysPage() {
 
       {masterRoomKey && (
         <div className="modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) setMasterRoomKey(null) }}>
-          <div className="modal" style={{ maxWidth: 560 }}>
+          <DialogKeyboard onClose={() => setMasterRoomKey(null)} />
+          <div className="modal" style={{ maxWidth: 560 }} role="dialog" aria-modal="true">
             <div className="modal-header">
               <div>
                 <h2 className="modal-title">Mesterkulcs termei</h2>

@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { Wrench, Plus, X, AlertCircle, Check, Trash2, RefreshCw, Pencil } from 'lucide-react'
 import client from '../../api/client'
-import { localDateInputValue, localDateTimeToIso, localInputToIso } from '../../utils/dateTime'
+import DialogKeyboard from '../../components/DialogKeyboard'
+import { localDateInputValue, localDateTimeToIso, localInputToIso, isoToLocalInput, APP_TIME_ZONE } from '../../utils/dateTime'
+import { useConfirm } from '../../components/confirmContext'
 
 interface RoomOption {
   id: number
@@ -33,9 +35,7 @@ interface BookingConflict {
 type ConflictAction = 'cancel' | 'move'
 
 function toLocalDateTimeInput(value: string): string {
-  const date = new Date(value)
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-  return local.toISOString().slice(0, 16)
+  return isoToLocalInput(value)
 }
 
 function addMinutes(value: string, minutes: number): string {
@@ -48,12 +48,12 @@ function formatDateRange(start?: string, end?: string): string {
   if (!start) return '—'
   try {
     const dStart = new Date(start)
-    const sDate = dStart.toLocaleDateString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit' })
-    const sTime = dStart.toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' })
+    const sDate = dStart.toLocaleDateString('hu-HU', { timeZone: APP_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' })
+    const sTime = dStart.toLocaleTimeString('hu-HU', { timeZone: APP_TIME_ZONE, hour: '2-digit', minute: '2-digit' })
     if (!end) return `${sDate} ${sTime}`
     const dEnd = new Date(end)
-    const eTime = dEnd.toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' })
-    const eDate = dEnd.toLocaleDateString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    const eTime = dEnd.toLocaleTimeString('hu-HU', { timeZone: APP_TIME_ZONE, hour: '2-digit', minute: '2-digit' })
+    const eDate = dEnd.toLocaleDateString('hu-HU', { timeZone: APP_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' })
     return eDate === sDate ? `${sDate} ${sTime} – ${eTime}` : `${sDate} ${sTime} – ${eDate} ${eTime}`
   } catch {
     return `${start} – ${end || ''}`
@@ -61,6 +61,7 @@ function formatDateRange(start?: string, end?: string): string {
 }
 
 export default function MaintenancePage() {
+  const confirm = useConfirm()
   const [items, setItems] = useState<MaintenanceItem[]>([])
   const [rooms, setRooms] = useState<RoomOption[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -118,7 +119,7 @@ export default function MaintenancePage() {
       setModalError('Kérjük töltsd ki az összes kötelező mezőt!')
       return
     }
-    if (new Date(`${endDate}T${endTime}:00`) <= new Date(`${startDate}T${startTime}:00`)) {
+    if (new Date(localDateTimeToIso(endDate, endTime)) <= new Date(localDateTimeToIso(startDate, startTime))) {
       setModalError('A befejezésnek a kezdés után kell lennie.')
       return
     }
@@ -170,7 +171,7 @@ export default function MaintenancePage() {
     setConflicts(newConflicts)
     setConflictActions(Object.fromEntries(newConflicts.map((item) => [item.foglalasId, ''])))
     setMoveStartTimes(Object.fromEntries(newConflicts.map((item) => {
-      const maintenanceEnd = new Date(`${endDate}T${endTime}:00`)
+      const maintenanceEnd = new Date(localDateTimeToIso(endDate, endTime))
       const bookingEnd = new Date(item.endTime)
       const proposed = maintenanceEnd > bookingEnd ? maintenanceEnd : bookingEnd
       return [item.foglalasId, toLocalDateTimeInput(proposed.toISOString())]
@@ -207,9 +208,10 @@ export default function MaintenancePage() {
         }
 
         const start = moveStartTimes[booking.foglalasId]
-        const startDateTime = new Date(start)
+        // A mező budapesti idő; ebből UTC-t képzünk, és ahhoz adjuk a foglalás hosszát.
+        const startIso = localInputToIso(start)
         const duration = (new Date(booking.endTime).getTime() - new Date(booking.startTime).getTime()) / 60000
-        const end = addMinutes(startDateTime.toISOString(), duration)
+        const end = addMinutes(startIso, duration)
         await client.put(`/bookings/${booking.foglalasId}`, {
           teremId: Number(moveRoomIds[booking.foglalasId]),
           startTime: localInputToIso(start),
@@ -259,7 +261,7 @@ export default function MaintenancePage() {
   }
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Biztosan törölni szeretnéd ezt a karbantartást?')) return
+    if (!(await confirm({ title: 'Karbantartás törlése', message: 'Biztosan törlöd ezt a karbantartást?', confirmLabel: 'Törlés', danger: true }))) return
     try {
       await client.delete(`/maintenance/${id}`)
       setItems((prev) => prev.filter((item) => item.id !== id))
@@ -378,7 +380,8 @@ export default function MaintenancePage() {
       {/* Új karbantartás modál */}
       {showModal && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false) }}>
-          <div className="modal" style={{ maxWidth: 460 }}>
+          <DialogKeyboard onClose={() => setShowModal(false)} />
+          <div className="modal" style={{ maxWidth: 460 }} role="dialog" aria-modal="true">
             <div className="modal-header">
               <div>
                 <h2 className="modal-title">{editingId !== null ? 'Karbantartás módosítása' : 'Karbantartás ütemezése'}</h2>
@@ -405,8 +408,9 @@ export default function MaintenancePage() {
 
             <form onSubmit={handleCreate}>
               <div className="form-group">
-                <label className="form-label">Érintett terem *</label>
+                <label className="form-label" htmlFor="maintenance-room">Érintett terem *</label>
                 <select
+                  id="maintenance-room"
                   className="form-select"
                   value={teremId}
                   onChange={(e) => setTeremId(e.target.value)}

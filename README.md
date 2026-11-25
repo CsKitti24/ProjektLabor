@@ -27,7 +27,7 @@ A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikál
 | **ORM / Migráció** | Entity Framework Core 8 | Code-first megközelítés, automatikus séma-migrációk indításkor. |
 | **Hitelesítés** | JSON Web Token HttpOnly sütiben + BCrypt | A token JavaScriptből nem olvasható; minden kérésnél adatbázis-ellenőrzés (aktív felhasználó, egyező szerepkör), bejelentkezési kéréskorlát, PIN-zárolás. |
 | **Dokumentáció** | Swagger / OpenAPI v1 | Fejlesztői módban interaktív tesztelő felület (`/swagger`). |
-| **Tesztelés & CI** | xUnit, WebApplicationFactory, Vitest, GitHub Actions | 198 backend teszt (valódi SQL Serveren is) és 52 frontend teszt, linting, Docker-build ellenőrzés. |
+| **Tesztelés & CI** | xUnit, WebApplicationFactory, Vitest, GitHub Actions | 198 backend teszt (valódi SQL Serveren is) és 69 frontend teszt, linting, Docker-build ellenőrzés. |
 
 ---
 

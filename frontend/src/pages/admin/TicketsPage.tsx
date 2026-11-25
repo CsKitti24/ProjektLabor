@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { FileText, Plus, X, AlertCircle, Check, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
+import DialogKeyboard from '../../components/DialogKeyboard'
+import { APP_TIME_ZONE } from '../../utils/dateTime'
 import { useAuth } from '../../auth/AuthContext'
 import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
 
@@ -28,6 +30,7 @@ function formatDate(isoString?: string): string {
   try {
     const d = new Date(isoString)
     return d.toLocaleDateString('hu-HU', {
+      timeZone: APP_TIME_ZONE,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -353,7 +356,8 @@ export default function TicketsPage() {
       {/* Új hibajegy felugró ablak */}
       {showModal && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false) }}>
-          <div className="modal" style={{ maxWidth: 460 }}>
+          <DialogKeyboard onClose={() => setShowModal(false)} />
+          <div className="modal" style={{ maxWidth: 460 }} role="dialog" aria-modal="true">
             <div className="modal-header">
               <div>
                 <h2 className="modal-title">Új hibajegy beküldése</h2>
@@ -380,7 +384,7 @@ export default function TicketsPage() {
 
             <form onSubmit={handleSubmit}>
               <div className="form-group">
-                <label className="form-label">Érintett terem *</label>
+                <label className="form-label" htmlFor="ticket-room">Érintett terem *</label>
                 {roomsError && (
                   <div className="alert alert-error" role="alert">
                     <span>{roomsError}</span>
@@ -391,6 +395,7 @@ export default function TicketsPage() {
                   </div>
                 )}
                 <select
+                  id="ticket-room"
                   className="form-select"
                   value={selectedRoomId}
                   onChange={(e) => setSelectedRoomId(e.target.value)}
@@ -406,8 +411,9 @@ export default function TicketsPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Hiba kategóriája *</label>
+                <label className="form-label" htmlFor="ticket-category">Hiba kategóriája *</label>
                 <select
+                  id="ticket-category"
                   className="form-select"
                   value={kategoria}
                   onChange={(e) => setKategoria(e.target.value)}
@@ -421,8 +427,9 @@ export default function TicketsPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Hiba részletes leírása *</label>
+                <label className="form-label" htmlFor="ticket-description">Hiba részletes leírása *</label>
                 <textarea
+                  id="ticket-description"
                   className="form-textarea"
                   rows={4}
                   placeholder="Kérjük, írd le pontosan a tapasztalt hibát..."

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { List, AlertCircle, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
+import { APP_TIME_ZONE, addDays, localDateTimeToIso } from '../../utils/dateTime'
 import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
 
 interface KeyMovement {
@@ -24,6 +25,7 @@ function formatDate(isoString?: string): string {
   try {
     const d = new Date(isoString)
     return d.toLocaleString('hu-HU', {
+      timeZone: APP_TIME_ZONE,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -35,39 +37,55 @@ function formatDate(isoString?: string): string {
   }
 }
 
+interface KeyOption {
+  id: number
+  szam?: string
+  teremNev?: string
+}
+
 export default function KeyMovementsPage() {
   const [movements, setMovements] = useState<KeyMovement[]>([])
   const [page, setPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+  // Szűrés kulcsra (= egy kulcs előzményei), mozgástípusra és időszakra (budapesti napok).
+  const [keys, setKeys] = useState<KeyOption[]>([])
+  const [keyFilter, setKeyFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
 
   const fetchMovements = () => {
     setIsLoading(true)
-    client
-      .get<{ items?: KeyMovement[]; totalCount?: number } | KeyMovement[]>('/key-movements', {
-        params: { page, pageSize: DEFAULT_PAGE_SIZE },
-      })
-      .then((r) => {
-        const list = Array.isArray(r.data) ? r.data : (r.data?.items ?? [])
-        setMovements(list)
-        setTotalCount(Array.isArray(r.data) ? list.length : (r.data?.totalCount ?? list.length))
-        setError('')
-      })
-      .catch((err: unknown) => {
-        const axErr = err as { response?: { data?: { message?: string } } }
-        setError(axErr.response?.data?.message || 'Nem sikerült betölteni a kulcsmozgásokat.')
-      })
-      .finally(() => {
-        setIsLoading(false)
-      })
+    setReloadKey((key) => key + 1)
   }
+
+  useEffect(() => {
+    let ignore = false
+    client.get<KeyOption[]>('/keys')
+      .then((response) => {
+        if (!ignore && Array.isArray(response.data)) setKeys(response.data)
+      })
+      .catch(() => {})
+    return () => {
+      ignore = true
+    }
+  }, [])
 
   useEffect(() => {
     let ignore = false
     client
       .get<{ items?: KeyMovement[]; totalCount?: number } | KeyMovement[]>('/key-movements', {
-        params: { page, pageSize: DEFAULT_PAGE_SIZE },
+        params: {
+          page,
+          pageSize: DEFAULT_PAGE_SIZE,
+          kulcsId: keyFilter || undefined,
+          mozgasTipus: typeFilter || undefined,
+          tol: fromDate ? localDateTimeToIso(fromDate, '00:00') : undefined,
+          ig: toDate ? localDateTimeToIso(addDays(toDate, 1), '00:00') : undefined,
+        },
       })
       .then((r) => {
         if (!ignore) {
@@ -91,7 +109,12 @@ export default function KeyMovementsPage() {
     return () => {
       ignore = true
     }
-  }, [page])
+  }, [page, keyFilter, typeFilter, fromDate, toDate, reloadKey])
+
+  const changeFilter = (setter: (value: string) => void) => (value: string) => {
+    setter(value)
+    setPage(1)
+  }
 
   return (
     <div>
@@ -108,6 +131,38 @@ export default function KeyMovementsPage() {
           <RefreshCw size={13} strokeWidth={1.5} />
           <span>Frissítés</span>
         </button>
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16, alignItems: 'flex-end' }}>
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="form-label" htmlFor="movements-key">Kulcs</label>
+          <select id="movements-key" className="form-select" value={keyFilter}
+            onChange={(e) => changeFilter(setKeyFilter)(e.target.value)}>
+            <option value="">Minden kulcs</option>
+            {keys.map((key) => (
+              <option key={key.id} value={key.id}>{key.szam}{key.teremNev ? ` – ${key.teremNev}` : ''}</option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="form-label" htmlFor="movements-type">Mozgás</label>
+          <select id="movements-type" className="form-select" value={typeFilter}
+            onChange={(e) => changeFilter(setTypeFilter)(e.target.value)}>
+            <option value="">Kiadás és visszavétel</option>
+            <option value="Kiadás">Csak kiadás</option>
+            <option value="Visszavétel">Csak visszavétel</option>
+          </select>
+        </div>
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="form-label" htmlFor="movements-from">Naptól</label>
+          <input id="movements-from" type="date" className="form-input" value={fromDate}
+            onChange={(e) => changeFilter(setFromDate)(e.target.value)} />
+        </div>
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="form-label" htmlFor="movements-to">Napig</label>
+          <input id="movements-to" type="date" className="form-input" min={fromDate || undefined} value={toDate}
+            onChange={(e) => changeFilter(setToDate)(e.target.value)} />
+        </div>
       </div>
 
       {error && (

@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarDays, Trash2, Plus, AlertCircle } from 'lucide-react'
+import { CalendarDays, Trash2, Plus, AlertCircle, CalendarClock, Check } from 'lucide-react'
 import client from '../../api/client'
+import { APP_TIME_ZONE } from '../../utils/dateTime'
+import { useConfirm } from '../../components/confirmContext'
+import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
+import RescheduleBookingModal, { type ReschedulableBooking } from '../../components/RescheduleBookingModal'
 
 interface Booking {
   id: string | number
+  teremId?: number
   teremNev?: string
   roomName?: string
   room?: { name: string }
@@ -21,6 +26,7 @@ function formatDate(isoString?: string): string {
   try {
     const d = new Date(isoString)
     return d.toLocaleDateString('hu-HU', {
+      timeZone: APP_TIME_ZONE,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -34,10 +40,10 @@ function formatTimeRange(start?: string, end?: string): string {
   if (!start) return '—'
   try {
     const dStart = new Date(start)
-    const startStr = dStart.toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' })
+    const startStr = dStart.toLocaleTimeString('hu-HU', { timeZone: APP_TIME_ZONE, hour: '2-digit', minute: '2-digit' })
     if (!end) return startStr
     const dEnd = new Date(end)
-    const endStr = dEnd.toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' })
+    const endStr = dEnd.toLocaleTimeString('hu-HU', { timeZone: APP_TIME_ZONE, hour: '2-digit', minute: '2-digit' })
     return `${startStr} – ${endStr}`
   } catch {
     return `${start} – ${end || ''}`
@@ -65,18 +71,27 @@ function getStatusBadge(status: string | undefined) {
 }
 
 export default function MyBookingsPage() {
+  const confirm = useConfirm()
   const [bookings, setBookings] = useState<Booking[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   // A betöltés pillanata: ehhez képest döntjük el, mely foglalás kezdődött már el.
   const [loadedAt, setLoadedAt] = useState(0)
+  // Lapozás: a backend a legújabbakat adja elöl, az összes foglalás számát az X-Total-Count fejlécben.
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [rescheduling, setRescheduling] = useState<ReschedulableBooking | null>(null)
+  const [successMsg, setSuccessMsg] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
     client
-      .get<Booking[]>('/bookings/my', { signal: controller.signal })
+      .get<Booking[]>('/bookings/my', { signal: controller.signal, params: { page, pageSize: DEFAULT_PAGE_SIZE } })
       .then((r) => {
         setBookings(r.data)
+        const total = Number(r.headers?.['x-total-count'])
+        setTotalCount(Number.isFinite(total) ? total : r.data.length)
         setLoadedAt(Date.now())
         setIsLoading(false)
       })
@@ -87,10 +102,10 @@ export default function MyBookingsPage() {
         }
       })
     return () => controller.abort()
-  }, [])
+  }, [page, reloadKey])
 
   const handleDelete = async (id: string | number) => {
-    if (!window.confirm('Biztosan vissza szeretnéd vonni ezt a foglalást?')) return
+    if (!(await confirm({ title: 'Foglalás lemondása', message: 'Biztosan lemondod ezt a foglalást?', confirmLabel: 'Lemondás', danger: true }))) return
     try {
       await client.delete(`/bookings/${id}`)
       // A lemondott foglalás nem tűnik el: "Megszüntetve" állapotban marad a listában, ahogy újratöltés után is.
@@ -124,6 +139,27 @@ export default function MyBookingsPage() {
           <AlertCircle size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
           <span>{error}</span>
         </div>
+      )}
+
+      {successMsg && (
+        <div className="alert alert-success" role="status">
+          <Check size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
+      {rescheduling && (
+        <RescheduleBookingModal
+          booking={rescheduling}
+          allowRoomChange={false}
+          onClose={() => setRescheduling(null)}
+          onSaved={() => {
+            setRescheduling(null)
+            setReloadKey((key) => key + 1)
+            setSuccessMsg('A foglalás áthelyezve.')
+            setTimeout(() => setSuccessMsg(''), 4000)
+          }}
+        />
       )}
 
       {isLoading ? (
@@ -174,7 +210,19 @@ export default function MyBookingsPage() {
                         )}
                       </td>
                       <td>{getStatusBadge(b.status)}</td>
-                      <td style={{ textAlign: 'right' }}>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {isCancelable && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setRescheduling({ ...b, teremNev: roomName })}
+                            aria-label={`${roomName} ${dateStr} foglalás áthelyezése`}
+                            title="Foglalás áthelyezése másik időpontra"
+                          >
+                            <CalendarClock size={14} strokeWidth={1.5} />
+                            <span>Áthelyezés</span>
+                          </button>
+                        )}
                         {isCancelable && (
                           <button
                             type="button"
@@ -196,6 +244,7 @@ export default function MyBookingsPage() {
           </table>
         </div>
       )}
+      <Pagination page={page} pageSize={DEFAULT_PAGE_SIZE} totalCount={totalCount} onPageChange={setPage} />
     </div>
   )
 }
