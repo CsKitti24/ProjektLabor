@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 
 import { AxiosHeaders, type AxiosResponse } from 'axios'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import client from '../../api/client'
+import { addDays, isWeekendDate, localDateInputValue, localDateTimeToIso } from '../../utils/dateTime'
 import MyBookingsPage from './MyBookingsPage'
 
 vi.mock('../../api/client', () => ({
   default: {
     get: vi.fn(),
+    put: vi.fn(),
     delete: vi.fn(),
   },
 }))
@@ -66,5 +68,31 @@ describe('MyBookingsPage', () => {
     render(<MemoryRouter><MyBookingsPage /></MemoryRouter>)
     fireEvent.click(await screen.findByRole('button', { name: /Visszavonás/ }))
     expect(await screen.findByText('Már megkezdődött foglalás nem mondható le.')).toBeTruthy()
+  })
+
+  it('reschedules an upcoming booking and pages through the list', async () => {
+    let workday = addDays(localDateInputValue(), 3)
+    while (isWeekendDate(workday)) workday = addDays(workday, 1)
+    const start = localDateTimeToIso(workday, '09:30')
+    const end = localDateTimeToIso(workday, '10:15')
+    vi.mocked(client.get).mockImplementation((url) => {
+      if (String(url).endsWith('/availability')) {
+        return Promise.resolve(axiosResponse({ szabad: [], foglalt: [], karbantartas: [] }))
+      }
+      return Promise.resolve(axiosResponse([
+        { id: 1, teremId: 3, teremNev: 'Jövőbeli terem', startTime: start, endTime: end, status: 'Aktiv' },
+      ]))
+    })
+    vi.mocked(client.put).mockResolvedValue(axiosResponse({}))
+    render(<MemoryRouter><MyBookingsPage /></MemoryRouter>)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Jövőbeli terem .* foglalás áthelyezése/ }))
+    fireEvent.change(screen.getByLabelText('Kezdés'), { target: { value: '14:00' } })
+    fireEvent.change(screen.getByLabelText('Befejezés'), { target: { value: '14:45' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Áthelyezés mentése' }))
+
+    await waitFor(() => expect(client.put).toHaveBeenCalledWith('/bookings/1', expect.objectContaining({ teremId: undefined })))
+    expect(await screen.findByText('A foglalás áthelyezve.')).toBeTruthy()
+    expect(client.get).toHaveBeenCalledWith('/bookings/my', expect.objectContaining({ params: { page: 1, pageSize: 50 } }))
   })
 })

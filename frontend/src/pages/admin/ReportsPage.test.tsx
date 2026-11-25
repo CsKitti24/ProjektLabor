@@ -9,7 +9,12 @@ import ReportsPage from './ReportsPage'
 vi.mock('../../api/client', () => ({
   default: {
     get: vi.fn(),
+    post: vi.fn(),
   },
+}))
+
+vi.mock('../../auth/AuthContext', () => ({
+  useAuth: () => ({ user: { userId: 1, username: 'admin', role: 'Adminisztrator' } }),
 }))
 
 function axiosResponse<T>(data: T): AxiosResponse<T> {
@@ -33,6 +38,12 @@ describe('ReportsPage reliability tab', () => {
           atlagosPontszam: 50,
           esemenytipusok: [],
         }))
+      }
+      if (url === '/reliability/users/10/events') {
+        return Promise.resolve(axiosResponse([
+          { id: 1, esemenyTipus: 'LeNemAdott', pont: 3, esemenyIdopontja: '2026-11-10T21:00:00Z', tanev: '2026/2027', indoklas: 'A kulcs a napi zárási időpontig nem került vissza.' },
+          { id: 2, esemenyTipus: 'LeNemAdott', pont: 3, esemenyIdopontja: '2025-11-10T21:00:00Z', tanev: '2025/2026', indoklas: 'Régi esemény' },
+        ]))
       }
       if (url === '/reliability/users') {
         return Promise.resolve(axiosResponse({
@@ -62,6 +73,24 @@ describe('ReportsPage reliability tab', () => {
     expect(within(rows[0]).getByText('100 / 100')).toBeTruthy()
     expect(within(rows[1]).getByText('Jó Pont')).toBeTruthy()
     expect(client.get).toHaveBeenCalledWith('/reliability/users')
+  })
+
+  it('shows the reasons of the points and records a manual correction', async () => {
+    vi.mocked(client.post).mockResolvedValue(axiosResponse({}))
+    render(<ReportsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /Megbízhatóság/ }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rossz Pont pontjainak részletei' }))
+    const events = await screen.findByRole('table', { name: 'Megbízhatósági események' })
+    expect(within(events).getAllByText('A kulcs a napi zárásig nem került vissza')).toHaveLength(1)
+    expect(within(events).queryByText('Régi esemény')).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Pont (±)'), { target: { value: '-3' } })
+    fireEvent.change(screen.getByLabelText('Indoklás'), { target: { value: 'Igazolt technikai hiba' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Korrekció rögzítése' }))
+
+    expect(await screen.findByText('A korrekció rögzítve.')).toBeTruthy()
+    expect(client.post).toHaveBeenCalledWith('/reliability/correction', { userId: 10, pont: -3, indoklas: 'Igazolt technikai hiba' })
   })
 })
 

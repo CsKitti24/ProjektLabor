@@ -1,6 +1,9 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
+import ErrorBoundary from './components/ErrorBoundary'
+import { ConfirmProvider } from './components/ConfirmDialog'
+import NotFoundPage from './pages/NotFoundPage'
 
 import WelcomePage from './pages/WelcomePage'
 import LoginPage from './pages/LoginPage'
@@ -27,7 +30,9 @@ import ParametersPage from './pages/admin/ParametersPage'
 export default function App() {
   return (
     <BrowserRouter>
+      <ErrorBoundary>
       <AuthProvider>
+      <ConfirmProvider>
         <Routes>
           {/* Public */}
           <Route path="/" element={<WelcomePage />} />
@@ -134,7 +139,7 @@ export default function App() {
             <Route
               path="bookings"
               element={
-                <ProtectedRoute allowedRoles={['Adminisztrator']}>
+                <ProtectedRoute allowedRoles={['Adminisztrator', 'Portas', 'UzemeltetesiIgazgato']}>
                   <BookingsPage />
                 </ProtectedRoute>
               }
@@ -173,10 +178,12 @@ export default function App() {
             />
           </Route>
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* Ismeretlen cím: olvasható 404-es oldal (átirányítás helyett) */}
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
+      </ConfirmProvider>
       </AuthProvider>
+      </ErrorBoundary>
     </BrowserRouter>
   )
 }

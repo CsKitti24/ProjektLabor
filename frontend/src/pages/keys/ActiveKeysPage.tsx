@@ -78,6 +78,24 @@ export default function ActiveKeysPage() {
     }
   }, [])
 
+  // A portás egész nap nyitva tartja: a lista percenként, csendben (töltésjelző nélkül) frissül.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      Promise.all([
+        client.get<KeyItem[]>('/keys'),
+        client.get<OverdueKey[]>('/key-movements/overdue'),
+      ])
+        .then(([keysRes, overdueRes]) => {
+          setKeys(keysRes.data)
+          setOverdueKeys(overdueRes.data)
+        })
+        .catch(() => {
+          // Háttérfrissítési hiba: a meglévő lista marad, a következő körben újra próbáljuk.
+        })
+    }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   const issuedKeys = keys.filter((k) => k.jelenlegiAllapot === 'Kiadva')
 
   return (

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { AlertCircle, UserPlus, X } from 'lucide-react'
 import client from '../../api/client'
+import DialogKeyboard from '../../components/DialogKeyboard'
 
 const ROLE_OPTIONS = [
   { value: 'Oktato', label: 'Oktató' },
@@ -86,6 +87,7 @@ export default function CreateUserModal({ onClose, onCreated }: CreateUserModalP
 
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <DialogKeyboard onClose={() => onClose()} />
       <div className="modal" style={{ maxWidth: 480 }} role="dialog" aria-modal="true" aria-labelledby="create-user-title">
         <div className="modal-header">
           <div>

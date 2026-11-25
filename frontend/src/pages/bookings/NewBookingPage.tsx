@@ -4,7 +4,7 @@ import { PlusCircle, ArrowLeft, Check, AlertCircle, Calendar, Filter, Sparkles, 
 import client from '../../api/client'
 import { fetchAllUsers, type UserListItem } from '../../api/users'
 import { useAuth } from '../../auth/AuthContext'
-import { localDateInputValue, localDateTimeToIso } from '../../utils/dateTime'
+import { localDateInputValue, localDateTimeToIso, APP_TIME_ZONE, isWeekendDate } from '../../utils/dateTime'
 
 interface TimeRange {
   startTime: string
@@ -18,12 +18,11 @@ interface RoomAvailability {
 }
 
 function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' })
+  return new Date(iso).toLocaleTimeString('hu-HU', { timeZone: APP_TIME_ZONE, hour: '2-digit', minute: '2-digit' })
 }
 
 function isWeekend(date: string): boolean {
-  const day = new Date(`${date}T12:00:00`).getDay()
-  return day === 0 || day === 6
+  return Boolean(date) && isWeekendDate(date)
 }
 
 interface Room {
@@ -162,8 +161,8 @@ export default function NewBookingPage() {
 
   const isSlotBusy = (start: string, end: string): boolean => {
     if (!availability) return false
-    const slotStart = new Date(`${date}T${start}:00`).getTime()
-    const slotEnd = new Date(`${date}T${end}:00`).getTime()
+    const slotStart = new Date(localDateTimeToIso(date, start)).getTime()
+    const slotEnd = new Date(localDateTimeToIso(date, end)).getTime()
     return [...availability.foglalt, ...availability.karbantartas].some((busy) =>
       new Date(busy.startTime).getTime() < slotEnd && new Date(busy.endTime).getTime() > slotStart)
   }
@@ -203,6 +202,10 @@ export default function NewBookingPage() {
 
     if (start >= end) {
       setError('A befejezési időpontnak a kezdési időpont után kell lennie.')
+      return
+    }
+    if (isSlotBusy(start, end)) {
+      setError('A választott idősáv ütközik egy meglévő foglalással vagy karbantartással.')
       return
     }
 
@@ -408,7 +411,7 @@ export default function NewBookingPage() {
 
           <div className="form-group">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <label className="form-label">Idősáv megadása *</label>
+              <label className="form-label" htmlFor="booking-slot">Idősáv megadása *</label>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -421,6 +424,7 @@ export default function NewBookingPage() {
 
             {!useCustomTime ? (
               <select
+                id="booking-slot"
                 className="form-select"
                 value={selectedSlotIndex}
                 onChange={(e) => setSelectedSlotIndex(Number(e.target.value))}
@@ -434,10 +438,11 @@ export default function NewBookingPage() {
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label className="form-label" style={{ fontSize: 11.5, color: 'var(--color-gray-500)' }}>
+                  <label className="form-label" htmlFor="booking-custom-start" style={{ fontSize: 11.5, color: 'var(--color-gray-500)' }}>
                     Kezdés
                   </label>
                   <input
+                    id="booking-custom-start"
                     type="time"
                     className="form-input"
                     value={customStart}
@@ -449,10 +454,11 @@ export default function NewBookingPage() {
                   />
                 </div>
                 <div>
-                  <label className="form-label" style={{ fontSize: 11.5, color: 'var(--color-gray-500)' }}>
+                  <label className="form-label" htmlFor="booking-custom-end" style={{ fontSize: 11.5, color: 'var(--color-gray-500)' }}>
                     Befejezés
                   </label>
                   <input
+                    id="booking-custom-end"
                     type="time"
                     className="form-input"
                     value={customEnd}
@@ -463,6 +469,11 @@ export default function NewBookingPage() {
                     required
                   />
                 </div>
+              </div>
+            )}
+            {useCustomTime && customStart < customEnd && isSlotBusy(customStart, customEnd) && (
+              <div className="alert alert-error" role="status" style={{ marginTop: 8 }}>
+                Ez az egyéni idősáv ütközik egy meglévő foglalással vagy karbantartással.
               </div>
             )}
           </div>

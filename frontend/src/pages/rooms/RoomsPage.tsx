@@ -2,7 +2,9 @@ import { useState, useEffect, type FormEvent } from 'react'
 import { Search, DoorOpen, Plus, AlertCircle, Check, X, Filter, Pencil, RotateCcw } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import client from '../../api/client'
+import DialogKeyboard from '../../components/DialogKeyboard'
 import { useAuth } from '../../auth/AuthContext'
+import { useConfirm } from '../../components/confirmContext'
 
 interface Room {
   id: number | string
@@ -19,6 +21,7 @@ interface Room {
 }
 
 export default function RoomsPage() {
+  const confirm = useConfirm()
   const { user } = useAuth()
   const isAdmin = user?.role === 'Adminisztrator'
 
@@ -175,7 +178,7 @@ export default function RoomsPage() {
   }
 
   const handleDeleteRoom = async (id: number | string, name: string) => {
-    if (!window.confirm(`Biztosan deaktiválod a(z) "${name}" termet? Az előzményei megmaradnak, és később újraaktiválható.`)) return
+    if (!(await confirm({ title: 'Terem deaktiválása', message: `Biztosan deaktiválod a(z) "${name}" termet? Az előzményei megmaradnak, és később újraaktiválható.`, confirmLabel: 'Deaktiválás', danger: true }))) return
 
     // A törlés valójában deaktiválás: a terem a listában marad "Inaktív" jelöléssel.
     const removeRoom = (message: string) => {
@@ -191,17 +194,17 @@ export default function RoomsPage() {
       const futureCount = axErr.response?.data?.jovobeliFoglalasok
       if (axErr.response?.status === 409 && futureCount) {
         // A teremnek jövőbeli foglalásai vannak: csak kifejezett megerősítésre mondjuk le őket.
-        if (!window.confirm(`${axErr.response?.data?.message}\n\nLemondod mind a(z) ${futureCount} foglalást (az oktatók értesítést kapnak), és deaktiválod a termet?`)) return
+        if (!(await confirm({ title: 'Jövőbeli foglalások', message: `${axErr.response?.data?.message}\n\nLemondod mind a(z) ${futureCount} foglalást (az oktatók értesítést kapnak), és deaktiválod a termet?`, confirmLabel: 'Lemondás és deaktiválás', danger: true }))) return
         try {
           await client.delete(`/rooms/${id}`, { params: { foglalasokLemondasa: true } })
           removeRoom(`A terem deaktiválva, ${futureCount} jövőbeli foglalás lemondva.`)
         } catch (retryErr: unknown) {
           const retryAxErr = retryErr as { response?: { data?: { message?: string } } }
-          alert(retryAxErr.response?.data?.message || 'A terem törlése sikertelen.')
+          setError(retryAxErr.response?.data?.message || 'A terem deaktiválása sikertelen.')
         }
         return
       }
-      alert(axErr.response?.data?.message || 'A terem törlése sikertelen.')
+      setError(axErr.response?.data?.message || 'A terem deaktiválása sikertelen.')
     }
   }
 
@@ -403,7 +406,8 @@ export default function RoomsPage() {
       {/* Új terem modál (Adminisztrátornak) */}
       {showAddModal && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowAddModal(false) }}>
-          <div className="modal" style={{ maxWidth: 460 }}>
+          <DialogKeyboard onClose={() => setShowAddModal(false)} />
+          <div className="modal" style={{ maxWidth: 460 }} role="dialog" aria-modal="true">
             <div className="modal-header">
               <div>
                 <h2 className="modal-title">{editingRoom ? 'Terem szerkesztése' : 'Új terem rögzítése'}</h2>
@@ -458,8 +462,9 @@ export default function RoomsPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Felszereltség</label>
+                <label className="form-label" htmlFor="room-equipment">Felszereltség</label>
                 <input
+                  id="room-equipment"
                   type="text"
                   className="form-input"
                   placeholder="pl. Projektor, 30 PC, Labor, Hangosítás..."
@@ -469,8 +474,9 @@ export default function RoomsPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Leírás / Megjegyzés</label>
+                <label className="form-label" htmlFor="room-description">Leírás / Megjegyzés</label>
                 <textarea
+                  id="room-description"
                   className="form-input"
                   rows={3}
                   placeholder="pl. Északi szárny 2. emelet..."

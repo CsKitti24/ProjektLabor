@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import client from '../../api/client'
+import { addDays, dayOfWeek, isWeekendDate, localDateInputValue, localDateTimeToIso } from '../../utils/dateTime'
 import NewBookingPage from './NewBookingPage'
 
 vi.mock('../../api/client', () => ({
@@ -21,11 +22,11 @@ vi.mock('../../auth/AuthContext', () => ({
 }))
 
 function nextWeekday(): string {
-  const date = new Date()
+  let date = localDateInputValue()
   do {
-    date.setDate(date.getDate() + 1)
-  } while (date.getDay() === 0 || date.getDay() === 6)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    date = addDays(date, 1)
+  } while (isWeekendDate(date))
+  return date
 }
 
 function axiosResponse<T>(data: T): AxiosResponse<T> {
@@ -105,8 +106,8 @@ describe('NewBookingPage time slots', () => {
     vi.mocked(client.get).mockImplementation((url) => {
       if (String(url).endsWith('/availability')) {
         return Promise.resolve(axiosResponse({
-          szabad: [{ startTime: new Date(`${day}T09:30:00`).toISOString(), endTime: new Date(`${day}T20:00:00`).toISOString() }],
-          foglalt: [{ startTime: new Date(`${day}T08:00:00`).toISOString(), endTime: new Date(`${day}T09:30:00`).toISOString() }],
+          szabad: [{ startTime: localDateTimeToIso(day, '09:30'), endTime: localDateTimeToIso(day, '20:00') }],
+          foglalt: [{ startTime: localDateTimeToIso(day, '08:00'), endTime: localDateTimeToIso(day, '09:30') }],
           karbantartas: [],
         }))
       }
@@ -151,9 +152,8 @@ describe('NewBookingPage time slots', () => {
   })
 
   it('warns about weekends before submitting', async () => {
-    const date = new Date()
-    while (date.getDay() !== 6) date.setDate(date.getDate() + 1)
-    const saturday = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    let saturday = addDays(localDateInputValue(), 1)
+    while (dayOfWeek(saturday) !== 6) saturday = addDays(saturday, 1)
     render(<MemoryRouter><NewBookingPage /></MemoryRouter>)
     await screen.findByRole('option', { name: /Tesztterem/ })
 

@@ -1,12 +1,15 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Search, User as UserIcon, LogOut } from 'lucide-react'
+import { Search, User as UserIcon, LogOut, Menu, X } from 'lucide-react'
 import { useAuth, type UserRole } from '../auth/AuthContext'
 import LoginModal from './LoginModal'
 import { getNavItems } from './navItems'
 
 interface NavbarProps {
   onLoginClick?: () => void
+  // Keskeny képernyőn (telefon, tablet) az oldalsáv menügombbal nyitható.
+  onMenuToggle?: () => void
+  isMenuOpen?: boolean
 }
 
 function getRoleLabel(role: UserRole): string {
@@ -24,7 +27,7 @@ function getRoleLabel(role: UserRole): string {
   }
 }
 
-export default function Navbar({ onLoginClick }: NavbarProps) {
+export default function Navbar({ onLoginClick, onMenuToggle, isMenuOpen = false }: NavbarProps) {
   const { user, logout } = useAuth()
   const [showLoginModal, setShowLoginModal] = useState(false)
   const navigate = useNavigate()
@@ -63,6 +66,17 @@ export default function Navbar({ onLoginClick }: NavbarProps) {
   return (
     <>
       <header className="navbar">
+        {onMenuToggle && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm navbar-menu-btn"
+            onClick={onMenuToggle}
+            aria-label={isMenuOpen ? 'Menü bezárása' : 'Menü megnyitása'}
+            aria-expanded={isMenuOpen}
+          >
+            {isMenuOpen ? <X size={18} strokeWidth={1.5} /> : <Menu size={18} strokeWidth={1.5} />}
+          </button>
+        )}
         {/* Bal oldal: Rendszer neve és logó */}
         <Link to={user ? '#' : '/'} className="navbar-brand-container">
           <div className="navbar-logo-badge">
@@ -322,6 +336,35 @@ export default function Navbar({ onLoginClick }: NavbarProps) {
         .navbar-logout-btn:hover {
           color: var(--color-danger);
           background-color: var(--color-danger-bg);
+        }
+      
+        .navbar-menu-btn {
+          display: none;
+          margin-right: 8px;
+        }
+
+        /* Tablet és telefon: menügomb, a kereső és a hosszú feliratok elrejtve */
+        @media (max-width: 900px) {
+          .navbar {
+            padding: 0 12px;
+          }
+          .navbar-menu-btn {
+            display: inline-flex;
+          }
+          .navbar-brand-container,
+          .navbar-right {
+            min-width: 0;
+          }
+        }
+
+        @media (max-width: 700px) {
+          .navbar-center {
+            display: none;
+          }
+          .navbar-title,
+          .navbar-user-text {
+            display: none;
+          }
         }
       `}</style>
     </>

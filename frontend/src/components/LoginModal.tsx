@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { X, Lock, User, AlertCircle, ArrowRight } from 'lucide-react'
 import { useAuth, type UserRole } from '../auth/AuthContext'
+import DialogKeyboard from './DialogKeyboard'
 
 interface LoginModalProps {
   onClose: () => void
@@ -60,6 +61,7 @@ export default function LoginModal({ onClose }: LoginModalProps) {
         if (e.target === e.currentTarget) onClose()
       }}
     >
+      <DialogKeyboard onClose={onClose} />
       <div className="modal login-modal-card" role="dialog" aria-modal="true">
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

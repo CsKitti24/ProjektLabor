@@ -12,6 +12,7 @@ import {
   Bell,
 } from 'lucide-react'
 import client from '../../api/client'
+import { addDays, localDateInputValue, localDateTimeToIso } from '../../utils/dateTime'
 import { useAuth } from '../../auth/AuthContext'
 
 interface Stats {
@@ -85,10 +86,10 @@ export default function AdminDashboard() {
     setStats(null)
 
     try {
-      // A "mai nap" a böngésző helyi naptári napja (nem az UTC szerinti nap).
-      const now = new Date()
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      // A "mai nap" az intézmény (budapesti) naptári napja, a böngésző időzónájától függetlenül.
+      const today = localDateInputValue()
+      const startOfDay = new Date(localDateTimeToIso(today, '00:00'))
+      const endOfDay = new Date(localDateTimeToIso(addDays(today, 1), '00:00'))
       // Mai foglalásnak csak az aktív és a lezajlott (Kész) számít; a lemondott és a no-show nem.
       const countTodayBookings = (status: string) =>
         client.get<BookingListResponse>('/bookings', {
