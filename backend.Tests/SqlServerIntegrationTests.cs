@@ -475,7 +475,7 @@ public sealed class SqlServerIntegrationTests
         using var instructorClient = factory.CreateClient();
         instructorClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer", authService.GenerateJwtToken(instructorUser));
-        var bookingDate = TestTime.LocalToday.AddDays(1);
+        var bookingDate = TestTime.LocalWorkday(1);
         while (bookingDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
         {
             bookingDate = bookingDate.AddDays(1);
@@ -989,6 +989,148 @@ public sealed class SqlServerIntegrationTests
             db.Termek.Add(new Terem { Nev = "b-101", Kapacitas = 1 });
             var duplicate = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
             Assert.True(SqlServerLocking.IsUniqueConstraintViolation(duplicate));
+        }
+        finally
+        {
+            await DropIsolatedDatabaseAsync(databaseName);
+        }
+    }
+
+    [SqlServerFact]
+    public async Task SqlServer_KeyAndBookingRules_WorkAgainstRealDatabase()
+    {
+        var databaseName = $"ProjektLaborRulesB_{Guid.NewGuid():N}";
+        var connectionString = await CreateIsolatedDatabaseAsync(databaseName);
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlServer(connectionString).Options;
+            int roomId, keyId, instructorId;
+            Felhasznalo admin, porter, instructor;
+            await using (var db = new AppDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+                admin = CreateUser(RoleNames.Adminisztrator);
+                porter = CreateUser(RoleNames.Portas);
+                instructor = CreateUser(RoleNames.Oktato);
+                var room = new Terem { Nev = $"SQL-B {Guid.NewGuid():N}"[..30], Kapacitas = 10 };
+                db.AddRange(admin, porter, instructor, room);
+                await db.SaveChangesAsync();
+                var key = new Kulcs { Szam = $"SB-{Guid.NewGuid():N}"[..20], Tipus = "Osztalykulcs", TeremId = room.Id };
+                db.Kulcsok.Add(key);
+                await db.SaveChangesAsync();
+                roomId = room.Id;
+                keyId = key.Id;
+                instructorId = instructor.Id;
+            }
+
+            using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IHostedService>();
+                    services.RemoveAppDbContextConfiguration();
+                    services.AddDbContext<AppDbContext>(dbOptions => dbOptions.UseSqlServer(connectionString));
+                });
+            });
+            HttpClient Client(Felhasznalo user)
+            {
+                using var scope = factory.Services.CreateScope();
+                var client = factory.CreateClient();
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                    "Bearer", scope.ServiceProvider.GetRequiredService<AuthService>().GenerateJwtToken(user));
+                return client;
+            }
+
+            using var adminClient = Client(admin);
+            using var porterClient = Client(porter);
+            using var instructorClient = Client(instructor);
+
+            // Túl nagy oldalszám: valódi SQL Serveren korábban negatív OFFSET miatt 500-at adott.
+            foreach (var url in new[] { "/api/users?page=2147483647", "/api/bookings?page=2147483647",
+                         "/api/key-movements?page=2147483647", "/api/notifications/pending?page=2147483647" })
+            {
+                Assert.Equal(HttpStatusCode.OK, (await adminClient.GetAsync(url)).StatusCode);
+            }
+            Assert.Equal(HttpStatusCode.OK, (await instructorClient.GetAsync("/api/bookings/my?page=2147483647")).StatusCode);
+
+            var wrongPin = await porterClient.PostAsJsonAsync("/api/key-movements/issue",
+                new { kulcsId = keyId, atvevoFelhasznaloId = instructorId, pin = "9999", teremAllapot = "Rendben" });
+            Assert.Equal(HttpStatusCode.Forbidden, wrongPin.StatusCode);
+            Assert.Contains("Hibás PIN-kód", await wrongPin.Content.ReadAsStringAsync());
+
+            var issued = await porterClient.PostAsJsonAsync("/api/key-movements/issue",
+                new { kulcsId = keyId, atvevoFelhasznaloId = instructorId, pin = "1234", teremAllapot = "Rendben" });
+            Assert.Equal(HttpStatusCode.Created, issued.StatusCode);
+
+            // A kulcslista csak a legutolsó mozgást kéri le (al-lekérdezés SQL Serveren).
+            var keys = await porterClient.GetFromJsonAsync<List<ProjektLabor.DTOs.Keys.KeyDto>>("/api/keys");
+            Assert.Equal("Kiadva", keys!.Single(key => key.Id == keyId).JelenlegiAllapot);
+
+            Assert.Equal(HttpStatusCode.Conflict, (await adminClient.DeleteAsync($"/api/rooms/{roomId}")).StatusCode);
+
+            var forced = await porterClient.PostAsJsonAsync("/api/key-movements/force-return",
+                new { kulcsId = keyId, teremAllapot = "Rendben", indoklas = "Kolléga hozta vissza" });
+            Assert.Equal(HttpStatusCode.OK, forced.StatusCode);
+            keys = await porterClient.GetFromJsonAsync<List<ProjektLabor.DTOs.Keys.KeyDto>>("/api/keys");
+            Assert.Equal("Szabad", keys!.Single(key => key.Id == keyId).JelenlegiAllapot);
+
+            // Egymás utáni foglalások megtartott kulccsal: a második sem NoShow (tranzakcióban, zárral fut).
+            var day = AppTime.LocalDate(DateTime.UtcNow).AddDays(-7);
+            var firstStart = AppTime.LocalToUtc(day, new TimeOnly(9, 0));
+            int secondId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var first = new Foglalas { FelhasznaloId = instructorId, TeremId = roomId, StartTime = firstStart, EndTime = firstStart.AddMinutes(45), Status = BookingRules.ActiveStatus };
+                var second = new Foglalas { FelhasznaloId = instructorId, TeremId = roomId, StartTime = firstStart.AddMinutes(45), EndTime = firstStart.AddMinutes(90), Status = BookingRules.ActiveStatus };
+                db.Foglalasok.AddRange(first, second);
+                await db.SaveChangesAsync();
+                secondId = second.Id;
+                db.Kulcsmozgasok.Add(new Kulcsmozgas
+                {
+                    KulcsId = keyId, FoglalasId = first.Id, TeremId = roomId, AtvevoFelhasznaloId = instructorId,
+                    MozgasTipus = KeyMovementTypes.Issue, Idopont = firstStart.AddMinutes(-5), OperátorId = porter.Id
+                });
+                await db.SaveChangesAsync();
+                await scope.ServiceProvider.GetRequiredService<NoShowProcessor>()
+                    .ProcessAsync(firstStart.AddMinutes(85), default);
+            }
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                Assert.Equal(BookingRules.ActiveStatus, await db.Foglalasok.Where(item => item.Id == secondId).Select(item => item.Status).SingleAsync());
+            }
+
+            // Karbantartás: az ütköző foglalás lemondása és a karbantartás egy tranzakcióban, értesítéssel.
+            var maintenanceDay = TestTime.LocalWorkday(2);
+            int futureBookingId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var start = AppTime.ToUtc(maintenanceDay.AddHours(10));
+                var future = new Foglalas { FelhasznaloId = instructorId, TeremId = roomId, StartTime = start, EndTime = start.AddMinutes(45), Status = BookingRules.ActiveStatus };
+                db.Foglalasok.Add(future);
+                await db.SaveChangesAsync();
+                futureBookingId = future.Id;
+            }
+
+            var maintenance = await adminClient.PostAsJsonAsync("/api/maintenance", new
+            {
+                teremId = roomId,
+                startTime = AppTime.ToUtc(maintenanceDay.AddHours(8)),
+                endTime = AppTime.ToUtc(maintenanceDay.AddHours(12)),
+                leiras = "Festés",
+                lemondandoFoglalasIds = new[] { futureBookingId }
+            });
+            Assert.Equal(HttpStatusCode.Created, maintenance.StatusCode);
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                Assert.Equal(BookingRules.CancelledStatus, await db.Foglalasok.Where(item => item.Id == futureBookingId).Select(item => item.Status).SingleAsync());
+                Assert.True(await db.Ertesitesek.AnyAsync(item => item.FoglalasId == futureBookingId && item.Uzenet != null));
+            }
         }
         finally
         {

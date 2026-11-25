@@ -32,6 +32,10 @@ namespace ProjektLabor.Models
         [Required, MaxLength(50)]
         public string Allapot { get; set; } = string.Empty; // Kesz, KuldesAlatt, Hiba
 
+        // Szöveges magyarázat (pl. a lemondás oka); a régi értesítéseknél üres.
+        [MaxLength(500)]
+        public string? Uzenet { get; set; }
+
         [MaxLength(100)]
         public string? AutomationKey { get; set; }
 

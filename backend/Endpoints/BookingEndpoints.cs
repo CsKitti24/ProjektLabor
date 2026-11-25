@@ -10,6 +10,9 @@ namespace ProjektLabor.Endpoints
 {
     public static class BookingEndpoints
     {
+        // A /my végpont egy kérésben ennyi foglalást ad vissza (a legújabbak elöl).
+        private const int MyBookingsMaxPageSize = 500;
+
         private static readonly HashSet<string> AllowedStatuses = new(StringComparer.OrdinalIgnoreCase)
         {
             BookingRules.ActiveStatus,
@@ -47,13 +50,23 @@ namespace ProjektLabor.Endpoints
             // B6 – GET /api/bookings/my (Regisztráljuk az /{id} előtt!)
             group.MapGet("/my", async (
                 string? status,
+                int? page,
+                int? pageSize,
                 AppDbContext db,
+                HttpContext httpContext,
                 ClaimsPrincipal caller) =>
             {
                 if (GetCallerId(caller) is not { } userId)
                 {
                     return Results.Unauthorized();
                 }
+
+                // A válasz lista marad (a legújabbak elöl); egyszerre legfeljebb MyBookingsMaxPageSize elem,
+                // az összes elem számát az X-Total-Count fejléc adja, régebbiek a page paraméterrel érhetők el.
+                var normalizedPage = Pagination.NormalizePage(page);
+                var normalizedPageSize = pageSize is > 0
+                    ? Math.Min(pageSize.Value, MyBookingsMaxPageSize)
+                    : MyBookingsMaxPageSize;
 
                 var query = db.Foglalasok
                     .AsNoTracking()
@@ -64,11 +77,16 @@ namespace ProjektLabor.Endpoints
                     query = query.Where(f => f.Status == status);
                 }
 
+                var totalCount = await query.CountAsync();
                 var list = await query
                     .OrderByDescending(f => f.StartTime)
+                    .ThenByDescending(f => f.Id)
+                    .Skip((normalizedPage - 1) * normalizedPageSize)
+                    .Take(normalizedPageSize)
                     .Select(ToDtoExpression)
                     .ToListAsync();
 
+                httpContext.Response.Headers["X-Total-Count"] = totalCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 return Results.Ok(list);
             })
             .WithName("GetMyBookings")
@@ -88,8 +106,7 @@ namespace ProjektLabor.Endpoints
                 int? pageSize,
                 AppDbContext db) =>
             {
-                var normalizedPage = page.GetValueOrDefault(1);
-                normalizedPage = normalizedPage <= 0 ? 1 : normalizedPage;
+                var normalizedPage = Pagination.NormalizePage(page);
                 var normalizedPageSize = pageSize.GetValueOrDefault(20);
                 normalizedPageSize = normalizedPageSize <= 0 ? 20 : Math.Min(normalizedPageSize, 100);
 
@@ -203,6 +220,12 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = "Múltbeli vagy már megkezdődött időpontra nem lehet foglalni." });
                 }
 
+                var windowError = BookingRules.ValidateBookingWindow(startUtc, timeProvider.GetUtcNow().UtcDateTime);
+                if (windowError is not null)
+                {
+                    return Results.BadRequest(new { message = windowError });
+                }
+
                 if (GetCallerId(caller) is not { } callerId)
                 {
                     return Results.Unauthorized();
@@ -247,6 +270,13 @@ namespace ProjektLabor.Endpoints
                 if (validationError is not null)
                 {
                     return Results.Conflict(new { message = validationError });
+                }
+
+                var quotaError = await BookingRules.ValidateInstructorQuotaAsync(
+                    db, targetUserId, timeProvider.GetUtcNow().UtcDateTime);
+                if (quotaError is not null)
+                {
+                    return Results.Conflict(new { message = quotaError });
                 }
 
                 var booking = new Foglalas
@@ -382,6 +412,8 @@ namespace ProjektLabor.Endpoints
                     newRoomId != booking.TeremId;
                 var resultingStatus = requestedStatus ?? booking.Status;
                 var statusChanges = !string.Equals(resultingStatus, booking.Status, StringComparison.Ordinal);
+                var previousStart = booking.StartTime;
+                var previousRoomName = booking.Terem.Nev;
 
                 if (statusChanges &&
                     !BookingRules.IsUserStatusChangeAllowed(booking.Status, resultingStatus, isAdmin))
@@ -426,7 +458,8 @@ namespace ProjektLabor.Endpoints
                         return Results.BadRequest(new { message = "Deaktivált teremre nem lehet foglalást rögzíteni." });
                     }
 
-                    var timeError = BookingRules.ValidateTimeRange(newStart, newEnd);
+                    var timeError = BookingRules.ValidateTimeRange(newStart, newEnd)
+                        ?? BookingRules.ValidateBookingWindow(newStart, timeProvider.GetUtcNow().UtcDateTime);
                     if (timeError is not null)
                     {
                         return Results.BadRequest(new { message = timeError });
@@ -451,6 +484,26 @@ namespace ProjektLabor.Endpoints
                     booking.SpecialisIgenyek = string.IsNullOrWhiteSpace(request.SpecialisIgenyek) ? null : request.SpecialisIgenyek.Trim();
                 }
                 booking.UpdatedAt = DateTime.UtcNow;
+
+                // Ha nem a foglaló oktató módosította (hanem pl. az adminisztrátor), értesítést kap róla.
+                if (booking.FelhasznaloId != callerId)
+                {
+                    var originalDescription = $"{previousRoomName}, {AppTime.ToLocal(previousStart):yyyy.MM.dd. HH:mm}";
+                    if (statusChanges && booking.Status == BookingRules.CancelledStatus)
+                    {
+                        BookingNotifications.AddCancelled(
+                            db, booking, $"Az adminisztrátor lemondta a foglalásodat ({originalDescription}).", now);
+                    }
+                    else if (changesSchedule)
+                    {
+                        BookingNotifications.AddChanged(
+                            db,
+                            booking,
+                            $"Az adminisztrátor módosította a foglalásodat ({originalDescription}). Új időpont: " +
+                            $"{booking.Terem.Nev}, {AppTime.ToLocal(booking.StartTime):yyyy.MM.dd. HH:mm}–{AppTime.ToLocal(booking.EndTime):HH:mm}.",
+                            now);
+                    }
+                }
 
                 try
                 {
@@ -525,6 +578,15 @@ namespace ProjektLabor.Endpoints
 
                 booking.Status = BookingRules.CancelledStatus;
                 booking.UpdatedAt = DateTime.UtcNow;
+                if (booking.FelhasznaloId != callerId)
+                {
+                    var roomName = await db.Termek.Where(room => room.Id == booking.TeremId).Select(room => room.Nev).SingleAsync();
+                    BookingNotifications.AddCancelled(
+                        db,
+                        booking,
+                        $"Az adminisztrátor lemondta a foglalásodat ({roomName}, {AppTime.ToLocal(booking.StartTime):yyyy.MM.dd. HH:mm}).",
+                        timeProvider.GetUtcNow().UtcDateTime);
+                }
 
                 await db.SaveChangesAsync();
 
@@ -556,7 +618,6 @@ namespace ProjektLabor.Endpoints
         }
 
         private static bool IsOverlapException(InvalidOperationException exception) =>
-            exception.Message.Contains("overlaps with an existing booking") ||
-            exception.Message.Contains("overlaps with a maintenance period");
+            exception is BookingConflictException;
     }
 }

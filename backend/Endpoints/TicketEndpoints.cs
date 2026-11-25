@@ -55,9 +55,8 @@ namespace ProjektLabor.Endpoints
                 AppDbContext db,
                 ClaimsPrincipal caller) =>
             {
-                var normalizedPage = page.GetValueOrDefault(1);
+                var normalizedPage = Pagination.NormalizePage(page);
                 var normalizedPageSize = pageSize.GetValueOrDefault(20);
-                normalizedPage = normalizedPage <= 0 ? 1 : normalizedPage;
                 normalizedPageSize = normalizedPageSize <= 0 ? 20 : Math.Min(normalizedPageSize, 100);
 
                 var query = db.Hibajegyek

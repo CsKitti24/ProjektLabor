@@ -207,10 +207,10 @@ namespace ProjektLabor.Data
                     end > m.StartTime, cancellationToken);
                 if (conflict || maintenanceConflict)
                 {
-                    throw new InvalidOperationException(
+                    throw new Services.BookingConflictException(
                         conflict
-                            ? "Booking for the room overlaps with an existing booking."
-                            : "Booking overlaps with a maintenance period.");
+                            ? Services.BookingRules.OverlapMessage
+                            : Services.BookingRules.MaintenanceOverlapMessage);
                 }
             }
         }

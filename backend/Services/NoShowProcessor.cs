@@ -15,7 +15,27 @@ public sealed class NoShowProcessor
         _logger = logger;
     }
 
-    public async Task<int> ProcessAsync(DateTime nowUtc, CancellationToken cancellationToken)
+    public Task<int> ProcessAsync(DateTime nowUtc, CancellationToken cancellationToken) =>
+        // Egy tranzakcióban (Serializable) dolgozunk: ha közben a portán kiadják a kulcsot egy jelölendő
+        // foglaláshoz, a két művelet nem fut egymásba (az egyik megvárja vagy újrapróbálja a másikat),
+        // így nem lesz NoShow az a foglalás, amelyhez épp most vették fel a kulcsot.
+        SqlServerLocking.ExecuteWithRetryAsync(_db, async () =>
+        {
+            await using var transaction = _db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                ? null
+                : await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            await SqlServerLocking.AcquireAsync(_db, "automation:no-show", cancellationToken);
+
+            var updatedCount = await ProcessInTransactionAsync(nowUtc, cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return updatedCount;
+        });
+
+    private async Task<int> ProcessInTransactionAsync(DateTime nowUtc, CancellationToken cancellationToken)
     {
         var limitMinutes = await AutomationParameterReader.GetNoShowLimitMinutesAsync(
             _db, _logger, cancellationToken);

@@ -299,10 +299,30 @@ namespace ProjektLabor.Endpoints
                 ClaimsPrincipal caller,
                 TimeProvider timeProvider) =>
             {
+                // Ugyanazzal a zárral, mint a foglalás: deaktiválás közben nem jöhet létre új foglalás a teremre.
+                return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+                {
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                await SqlServerLocking.AcquireAsync(db, $"room-booking:{id}");
+
                 var room = await db.Termek.FindAsync(id);
                 if (room is null)
                 {
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú terem nem található." });
+                }
+
+                if (!room.Aktivalva)
+                {
+                    return Results.Conflict(new { message = "A terem már deaktivált." });
+                }
+
+                // Amíg a terem kulcsa (vagy egy erre a teremre kiadott mesterkulcs) kint van, a terem nem
+                // deaktiválható: előbb vissza kell venni, különben a kulcs "elveszne" a nyilvántartásból.
+                if (await IsRoomKeyIssuedAsync(db, id))
+                {
+                    return Results.Conflict(new { message = "A terem kulcsa jelenleg ki van adva. Deaktiválás előtt vedd vissza a kulcsot." });
                 }
 
                 // A még le nem zajlott aktív foglalások nem maradhatnak egy deaktivált teremben:
@@ -327,6 +347,11 @@ namespace ProjektLabor.Endpoints
                 {
                     booking.Status = BookingRules.CancelledStatus;
                     booking.UpdatedAt = now;
+                    BookingNotifications.AddCancelled(
+                        db,
+                        booking,
+                        $"A(z) {room.Nev} terem foglalását lemondtuk, mert a terem megszűnt vagy nem használható.",
+                        now);
                 }
 
                 // Soft delete: deactivation
@@ -351,7 +376,13 @@ namespace ProjektLabor.Endpoints
                     entitasId: id.ToString(),
                     ujErtek: "Aktivalva: false");
 
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
+
                 return Results.Ok(new { message = $"A(z) {id} azonosítójú terem sikeresen deaktiválva lett." });
+                });
             })
             .WithName("DeleteRoom")
             .Produces(StatusCodes.Status409Conflict)
@@ -535,6 +566,19 @@ namespace ProjektLabor.Endpoints
 
             return group;
         }
+
+        // Ki van-e adva most a terem saját kulcsa, vagy egy erre a teremre kiadott mesterkulcs.
+        private static Task<bool> IsRoomKeyIssuedAsync(AppDbContext db, int roomId) =>
+            db.Kulcsmozgasok
+                .Where(movement =>
+                    (movement.TeremId == roomId || (movement.TeremId == null && movement.Kulcs.TeremId == roomId)) &&
+                    !db.Kulcsmozgasok.Any(newer =>
+                        newer.KulcsId == movement.KulcsId &&
+                        (newer.Idopont > movement.Idopont ||
+                         (newer.Idopont == movement.Idopont && newer.Id > movement.Id))))
+                .AnyAsync(movement =>
+                    movement.MozgasTipus == KeyMovementTypes.Issue ||
+                    movement.MozgasTipus == KeyMovementTypes.LegacyIssue);
 
         // A teremnév egyedi (kis- és nagybetűtől függetlenül), az inaktív termeket is beleértve.
         private static Task<bool> RoomNameTakenAsync(AppDbContext db, string name, int? exceptRoomId)

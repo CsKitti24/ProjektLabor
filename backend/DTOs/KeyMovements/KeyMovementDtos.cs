@@ -51,6 +51,28 @@ namespace ProjektLabor.DTOs.KeyMovements
         public string? Megjegyzes { get; set; }
     }
 
+    public class ForceReturnKeyRequestDto
+    {
+        [Required(ErrorMessage = "A kulcs azonosítójának megadása kötelező.")]
+        public int KulcsId { get; set; }
+
+        // Csak régi, teremadat nélküli mesterkulcs-kiadásnál kell megadni.
+        public int? TeremId { get; set; }
+
+        [Required(ErrorMessage = "A terem állapotának megadása kötelező."), MaxLength(500)]
+        public string TeremAllapot { get; set; } = string.Empty;
+
+        [MaxLength(1000)]
+        public string? SerulesLeiras { get; set; }
+
+        [MaxLength(500, ErrorMessage = "A megjegyzés legfeljebb 500 karakter lehet.")]
+        public string? Megjegyzes { get; set; }
+
+        [Required(ErrorMessage = "A kényszerített visszavétel indoklása kötelező.")]
+        [MaxLength(400, ErrorMessage = "Az indoklás legfeljebb 400 karakter lehet.")]
+        public string Indoklas { get; set; } = string.Empty;
+    }
+
     public class KeyMovementListDto
     {
         public List<KeyMovementItemDto> Items { get; set; } = new();

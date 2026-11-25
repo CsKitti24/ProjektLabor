@@ -168,6 +168,7 @@ public static class ReportEndpoints
             })
             .ToListAsync(cancellationToken);
 
+        var bookableHoursInRange = BookableHoursWithin(start, end, startDay, endDay);
         var roomReports = rooms.Select(room =>
         {
             var bookedHours = bookings
@@ -179,19 +180,12 @@ public static class ReportEndpoints
                     return Math.Max(0, (overlapEnd - overlapStart).TotalHours);
                 });
 
+            // A karbantartásból csak a foglalható idő (munkanapokon 08:00–20:00) számít, különben egy
+            // éjszakán át tartó karbantartás 24 órát vonna le egy 12 órás napból.
             var maintenanceHours = maintenances
                 .Where(maintenance => maintenance.TeremId == room.Id)
-                .Sum(maintenance =>
-                {
-                    var overlapStart = maintenance.StartTime > start ? maintenance.StartTime : start;
-                    var overlapEnd = maintenance.EndTime < end ? maintenance.EndTime : end;
-                    return Math.Max(0, (overlapEnd - overlapStart).TotalHours);
-                });
-            var availableHours = Math.Max(
-                0,
-                (endDay.DayNumber - startDay.DayNumber + 1) *
-                (BookingRules.ClosingTime - BookingRules.OpeningTime).TotalHours -
-                maintenanceHours);
+                .Sum(maintenance => BookableHoursWithin(maintenance.StartTime, maintenance.EndTime, startDay, endDay));
+            var availableHours = Math.Max(0, bookableHoursInRange - maintenanceHours);
             var utilization = availableHours == 0
                 ? 0
                 : Math.Clamp(bookedHours / availableHours * 100, 0, 100);
@@ -217,6 +211,33 @@ public static class ReportEndpoints
             Math.Round(totalBookedHours, 2),
             Math.Round(totalAvailableHours, 2),
             Math.Round(totalUtilization, 2)));
+    }
+
+    /// <summary>
+    /// A [fromUtc, toUtc) időszakból a foglalható időre (munkanapokon a nyitvatartás, 08:00–20:00 helyi idő)
+    /// eső órák száma a megadott napokon belül.
+    /// </summary>
+    private static double BookableHoursWithin(DateTime fromUtc, DateTime toUtc, DateOnly startDay, DateOnly endDay)
+    {
+        var total = 0d;
+        for (var day = startDay; day <= endDay; day = day.AddDays(1))
+        {
+            if (day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+            {
+                continue;
+            }
+
+            var open = AppTime.LocalToUtc(day, TimeOnly.FromTimeSpan(BookingRules.OpeningTime));
+            var close = AppTime.LocalToUtc(day, TimeOnly.FromTimeSpan(BookingRules.ClosingTime));
+            var overlapStart = fromUtc > open ? fromUtc : open;
+            var overlapEnd = toUtc < close ? toUtc : close;
+            if (overlapEnd > overlapStart)
+            {
+                total += (overlapEnd - overlapStart).TotalHours;
+            }
+        }
+
+        return total;
     }
 
     private static async Task<IResult> GetKeyTrafficAsync(

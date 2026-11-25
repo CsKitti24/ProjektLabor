@@ -126,7 +126,9 @@ export default function MaintenancePage() {
     }
   }
 
-  const createMaintenance = async () => {
+  // A lemondandó ütköző foglalásokat a backend a karbantartással egy tranzakcióban mondja le:
+  // ha a karbantartás nem jön létre, a foglalások sem szűnnek meg.
+  const createMaintenance = async (lemondandoFoglalasIds: number[] = []) => {
     const startIso = localDateTimeToIso(startDate, startTime)
     const endIso = localDateTimeToIso(startDate, endTime)
     await client.post('/maintenance', {
@@ -134,6 +136,7 @@ export default function MaintenancePage() {
       startTime: startIso,
       endTime: endIso,
       leiras: leiras.trim() || undefined,
+      lemondandoFoglalasIds: lemondandoFoglalasIds.length > 0 ? lemondandoFoglalasIds : undefined,
     })
     setShowModal(false)
     setConflicts([])
@@ -178,11 +181,12 @@ export default function MaintenancePage() {
     setIsSaving(true)
     setModalError('')
     try {
+      const cancelIds = conflicts
+        .filter((item) => conflictActions[item.foglalasId] === 'cancel')
+        .map((item) => item.foglalasId)
       for (const booking of conflicts) {
         const action = conflictActions[booking.foglalasId]
         if (action === 'cancel') {
-          await client.put(`/bookings/${booking.foglalasId}`, { status: 'Megszuntetve' })
-          setConflicts((current) => current.filter((item) => item.foglalasId !== booking.foglalasId))
           continue
         }
 
@@ -197,13 +201,13 @@ export default function MaintenancePage() {
         })
         setConflicts((current) => current.filter((item) => item.foglalasId !== booking.foglalasId))
       }
-      await createMaintenance()
+      await createMaintenance(cancelIds)
     } catch (err: unknown) {
       const axErr = err as { response?: { data?: { message?: string; conflicts?: BookingConflict[] } } }
       if (axErr.response?.data?.conflicts) {
         showCreateError(err)
       } else {
-        setModalError(`${axErr.response?.data?.message || 'A döntés feldolgozása sikertelen.'} A korábbi módosítások részben már mentődhettek; ellenőrizd a foglalásokat.`)
+        setModalError(`${axErr.response?.data?.message || 'A döntés feldolgozása sikertelen.'} A lemondások nem történtek meg; az esetleges áthelyezések már mentődhettek, ellenőrizd a foglalásokat.`)
       }
     } finally {
       setIsSaving(false)

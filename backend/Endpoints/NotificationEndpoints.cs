@@ -1,3 +1,4 @@
+using ProjektLabor.Services;
 using System.Globalization;
 using System.Linq.Expressions;
 using System.Security.Claims;
@@ -37,7 +38,8 @@ public static class NotificationEndpoints
                             : notification.Kulcsmozgas.Kulcs.TeremId)))
                     .Select(room => room.Nev)
                     .FirstOrDefault(),
-            notification.Hatarido);
+            notification.Hatarido,
+            notification.Uzenet);
 
     public static IEndpointRouteBuilder MapNotificationEndpoints(this IEndpointRouteBuilder endpoints)
     {
@@ -68,7 +70,7 @@ public static class NotificationEndpoints
         CancellationToken cancellationToken)
     {
         // Lapozás: a válasz továbbra is lista, az összes elem számát az X-Total-Count fejléc adja.
-        var normalizedPage = Math.Max(1, page.GetValueOrDefault(1));
+        var normalizedPage = Pagination.NormalizePage(page);
         var normalizedPageSize = pageSize is > 0 ? Math.Min(pageSize.Value, MaximumPageSize) : DefaultPageSize;
 
         var sub = principal.FindFirstValue("sub") ??
@@ -158,17 +160,29 @@ public static class NotificationEndpoints
 
     private static async Task<IResult> GetPendingNotificationsAsync(
         AppDbContext db,
+        HttpContext httpContext,
+        int? page,
+        int? pageSize,
         CancellationToken cancellationToken)
     {
-        var items = await db.Ertesitesek
+        // Lapozás, mint a /my végpontnál: a válasz lista, az összes elem száma az X-Total-Count fejlécben.
+        var normalizedPage = Pagination.NormalizePage(page);
+        var normalizedPageSize = pageSize is > 0 ? Math.Min(pageSize.Value, MaximumPageSize) : DefaultPageSize;
+
+        var query = db.Ertesitesek
             .AsNoTracking()
             // Függő: még el nem olvasott, vagy (külső csatornánál) küldés alatt álló értesítés.
-            .Where(notification => !notification.Olvasva || notification.Allapot == PendingState)
+            .Where(notification => !notification.Olvasva || notification.Allapot == PendingState);
+        var totalCount = await query.CountAsync(cancellationToken);
+        var items = await query
             .OrderBy(notification => notification.CreatedAt)
             .ThenBy(notification => notification.Id)
+            .Skip((normalizedPage - 1) * normalizedPageSize)
+            .Take(normalizedPageSize)
             .Select(ToResponse(db))
             .ToListAsync(cancellationToken);
 
+        httpContext.Response.Headers["X-Total-Count"] = totalCount.ToString(CultureInfo.InvariantCulture);
         return Results.Ok(items);
     }
 
@@ -184,5 +198,6 @@ public static class NotificationEndpoints
         bool Olvasva,
         string? KulcsSzam,
         string? TeremNev,
-        DateTime? Hatarido);
+        DateTime? Hatarido,
+        string? Uzenet);
 }

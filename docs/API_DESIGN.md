@@ -39,15 +39,20 @@ Az API ASP.NET Core 10 Minimal API, JWT-hitelesítéssel és szerepkör-alapú p
 
 ### Foglalások
 
-- Létrehozás: múltbeli időpontra nem, deaktivált teremre nem, és **csak oktató nevére** (adminként a `felhasznaloId`-val oktatót kell megadni). Ütközés más aktív foglalással vagy karbantartással: `409`. Párhuzamos kérések közül teremszintű SQL Server-alkalmazászár és Serializable tranzakció mellett csak egy sikerül.
+- Létrehozás: múltbeli időpontra nem, hétvégére nem, legfeljebb 180 nappal előre, deaktivált teremre nem, és **csak oktató nevére** (adminként a `felhasznaloId`-val oktatót kell megadni). Egy oktatónak egyszerre legfeljebb 40 jövőbeli aktív foglalása lehet (`409`). Ütközés más aktív foglalással vagy karbantartással: `409` magyar üzenettel. Párhuzamos kérések közül teremszintű SQL Server-alkalmazászár és Serializable tranzakció mellett csak egy sikerül.
 - Lemondás (`DELETE` vagy `PUT` `status: "Megszuntetve"`): csak aktív foglalás; megkezdett foglalást oktató nem mondhat le, adminisztrátor igen.
 - Módosítás: megkezdett foglalás időpontja és terme nem módosítható; csak aktív foglalás helyezhető át.
+- **Értesítés:** ha a foglalást nem az oktató maga, hanem az adminisztrátor mondja le vagy helyezi át, illetve karbantartás vagy a terem deaktiválása miatt szűnik meg, az oktató `BookingCancelled` / `BookingChanged` típusú értesítést kap, az `uzenet` mezőben az okkal.
+- `GET /api/bookings/my`: a legújabbak elöl, kérésenként legfeljebb 500 foglalás (`page`, `pageSize`); az összes elem számát az `X-Total-Count` fejléc adja.
+- Terem deaktiválása (`DELETE /api/rooms/{id}`) a foglalással közös teremzár alatt fut; amíg a terem kulcsa (vagy erre a teremre kiadott mesterkulcs) kint van, `409`.
 - Státuszok: `Aktiv`, `Kesz` (lezajlott, kulcsfelvétellel – automatikus), `NoShow` (automatikus), `Megszuntetve`. A lemondott és a `NoShow` foglalás nem blokkol.
 
 ### Kulcsok és kulcsmozgások
 
 - Kiadás (`POST /api/key-movements/issue`) és visszavétel (`POST /api/key-movements/return`): `Portas` jogosultság, átvevői PIN és teremállapot. Sérülés leírásakor automatikus `Sérülés` hibajegy készül – mesterkulcsnál arra a teremre, amelyre a kulcsot kiadták (`Kulcsmozgas.TeremId`).
-- **PIN-zárolás:** 5 egymás utáni hibás PIN után a PIN 15 percre zárolódik (`429`).
+- **PIN-zárolás:** 5 egymás utáni hibás PIN után a PIN 15 percre zárolódik (`429`). Hibás PIN-nél és hiányzó mesterkulcs-jogosultságnál `403` magyar `message` mezővel (pl. hány próbálkozás van még hátra).
+- **Kényszerített visszavétel** (`POST /api/key-movements/force-return`, Portás vagy Adminisztrátor): ha a kulcs fizikailag visszakerült, de az átvevő nincs jelen, PIN nélkül, kötelező `indoklas` mezővel rögzíthető. A mozgás megjegyzése és az auditnapló (`KEY_FORCED_RETURN`) tartalmazza az indoklást.
+- Kulcs csak aktív teremhez rögzíthető vagy rendelhető; a kulcs módosítása és deaktiválása a kiadással közös kulcszár alatt fut. A kulcslista kulcsonként csak a legutolsó mozgást kérdezi le.
 - **Kiadás és foglalás:** foglaláshoz a kulcs legkorábban a kezdés előtt 2 órával, és legkésőbb a foglalás végéig adható ki. Ha a portás nem ad meg foglalást, a backend a kiadást az átvevő erre a teremre szóló, éppen esedékes aktív foglalásához köti; a válasz `foglalasId` mezője ezt jelzi.
 - Inaktivált felhasználó nem vehet át kulcsot, és nem kaphat mesterkulcs-jogosultságot.
 - Kint lévő kulcs nem deaktiválható, és típusa vagy terme nem módosítható (`409`); a kulcsszám ilyenkor is átírható. Kint lévő kulcs állapota mindig `Kiadva`.
@@ -56,7 +61,7 @@ Az API ASP.NET Core 10 Minimal API, JWT-hitelesítéssel és szerepkör-alapú p
 
 ### Automatizmusok (percenként futó háttérfeldolgozók)
 
-- **No-show:** ha a foglalás kezdete óta eltelt a türelmi idő (`no_show_idokorlat_perc`, 1–45 perc, alapból 15), és a foglaló nem vette fel a kulcsot, a foglalás `NoShow`. Kulcsfelvételnek számít a foglaláshoz kötött kiadás, illetve ha a foglaló a terem kulcsát az idősávban (legfeljebb 2 órával korábban) felvette. Amíg a terem kulcsa másnál van, a foglalás idején várunk; a foglalás vége után ilyenkor is `NoShow`.
+- **No-show:** ha a foglalás kezdete óta eltelt a türelmi idő (`no_show_idokorlat_perc`, 1–45 perc, alapból 15), és a foglaló nem vette fel a kulcsot, a foglalás `NoShow`. Kulcsfelvételnek számít a foglaláshoz kötött kiadás, ha a foglaló a terem kulcsát az idősávban (legfeljebb 2 órával korábban) felvette, illetve ha a kulcs a foglalás kezdetekor már nála volt (pl. egymás utáni foglalásoknál megtartotta). A feldolgozás Serializable tranzakcióban, zár alatt fut, így nem ütközik egy közben történő kulcskiadással. Amíg a terem kulcsa másnál van, a foglalás idején várunk; a foglalás vége után ilyenkor is `NoShow`.
 - **Foglalás lezárása:** a véget ért aktív foglalás kulcsfelvétel esetén `Kesz` állapotot kap.
 - **Napi kulcszárás:** a határidőig vissza nem hozott kulcsért `LeNemAdott` esemény (+3 büntetőpont) és minden aktív portásnak esti értesítés. Csak az utolsó 7 nap kiadásait és a még kint lévő kulcsokat dolgozza fel, kötegelt lekérdezésekkel.
 - **Foglalásvégi értesítés:** a foglalás vége előtt 10 perccel értesítés az oktatónak.
@@ -65,10 +70,12 @@ Az API ASP.NET Core 10 Minimal API, JWT-hitelesítéssel és szerepkör-alapú p
 ### Megbízhatóság, értesítések, riportok, paraméterek
 
 - Pontszám: a tanévi büntetőpontok időrendi összege 0 és 100 közé szorítva (a magasabb a rosszabb). `GET /api/reliability/users` – az összes aktív oktató pontszáma, a legrosszabb elöl (Adminisztrátor, Üzemeltetési Igazgató).
-- `GET /api/notifications/my`: lapozható (`page`, `pageSize`, alapból 50, legfeljebb 100); a válasz lista, az összes elem számát az `X-Total-Count` fejléc adja. A helyiség mesterkulcsnál a kiadás terme. `GET /api/notifications/pending`: az olvasatlan vagy küldés alatt álló értesítések.
+- `GET /api/notifications/my`: lapozható (`page`, `pageSize`, alapból 50, legfeljebb 100); a válasz lista, az összes elem számát az `X-Total-Count` fejléc adja. A helyiség mesterkulcsnál a kiadás terme. `GET /api/notifications/pending`: az olvasatlan vagy küldés alatt álló értesítések, ugyanígy lapozva. Az értesítések `uzenet` mezője szöveges magyarázatot adhat (pl. a lemondás oka).
 - Riportok: a napi/heti riport a `LeNemAdott` eseményeket késedelmes leadásként számolja; a termenkénti foglalásszámba a lemondott és a `NoShow` foglalás nem számít bele; mesterkulcsnál a kiadás terme számít.
+- Terem-kihasználtság: a rendelkezésre álló idő a munkanapok nyitvatartása (08:00–20:00); a karbantartásból csak az erre eső rész vonódik le.
+- Karbantartás: lezárult időszakra nem rögzíthető, legfeljebb 90 napos, a leírás legfeljebb 500 karakter; a már lezárult karbantartás nem módosítható és nem törölhető (`409`). Ütköző foglalásnál `409` a foglalások listájával; a kérés `lemondandoFoglalasIds` mezőjében megjelölt foglalásokat a backend a karbantartással **egy tranzakcióban** mondja le (értesítéssel), így részleges állapot nem maradhat.
 - Rendszerparaméterek: a zárási időpont `HH:mm` formátumú, és nem lehet korábbi 20:00-nál; a no-show időkorlát 1–45 perc.
-- Lapozás: `page=1`, `pageSize` legfeljebb 100; alapból 20 (foglalás, felhasználó, kulcsmozgás, hibajegy), illetve 50 (audit, saját értesítések). A válasz `totalCount` mezőt tartalmaz (az értesítéseknél az `X-Total-Count` fejlécet).
+- Lapozás: `page=1` (legfeljebb 100 000, a túl nagy érték nem okoz hibát), `pageSize` legfeljebb 100; alapból 20 (foglalás, felhasználó, kulcsmozgás, hibajegy), illetve 50 (audit, saját értesítések). A válasz `totalCount` mezőt tartalmaz (az értesítéseknél az `X-Total-Count` fejlécet).
 - Hibajegyek: kategória csak a rögzített listából (`Technikai hiba`, `Bútorzat / Felszerelés`, `Zár / Kulcs probléma`, `Takarítási igény`, `Egyéb észrevétel`, `Sérülés`); státuszváltás: `Nyitva` → `Folyamatban` / `Megoldva` / `Zarva`; `Folyamatban` → `Nyitva` / `Megoldva` / `Zarva`; `Megoldva` → `Nyitva` / `Zarva`; a `Zarva` végleges (`409`).
 
 ### Kezdő adatok
@@ -229,6 +236,7 @@ A végpontlista a 2026-11-19-i állapotra frissítve; a részletes viselkedést 
 |---|---|---|---|---|
 | KM1 | POST | `/api/key-movements/issue` | Kulcs kiadásának rögzítése | ✅ Kész |
 | KM2 | POST | `/api/key-movements/return` | Kulcs visszavételének rögzítése | ✅ Kész |
+| KM2b | POST | `/api/key-movements/force-return` | Kényszerített visszavétel PIN nélkül, indoklással | ✅ Kész |
 | KM3 | GET | `/api/key-movements` | Kulcsmozgások listázása (szűrőkkel) | ✅ Kész |
 | KM4 | GET | `/api/key-movements/{id}` | Egy kulcsmozgás részletei | ✅ Kész |
 | KM5 | GET | `/api/key-movements/overdue` | Lejárt / le nem adott kulcsok listája | ✅ Kész |
@@ -1283,6 +1291,7 @@ Nem saját vagy nem létező értesítés esetén `404 Not Found`.
 | **Kulcsmozgások** | | | | |
 | POST /api/key-movements/issue | ❌ | ✅ | ❌ | ❌ |
 | POST /api/key-movements/return | ❌ | ✅ | ❌ | ❌ |
+| POST /api/key-movements/force-return | ❌ | ✅ | ✅ | ❌ |
 | GET /api/key-movements | ❌ | ✅ | ✅ | ✅ |
 | GET /api/key-movements/{id} | ❌ | ✅ | ✅ | ✅ |
 | GET /api/key-movements/overdue | ❌ | ✅ | ✅ | ✅ |

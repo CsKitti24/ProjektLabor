@@ -24,8 +24,6 @@ namespace ProjektLabor.Endpoints
             {
                 var query = db.Kulcsok
                     .AsNoTracking()
-                    .Include(k => k.Terem)
-                    .Include(k => k.Kulcsmozgasok)
                     .AsQueryable();
 
                 if (teremId.HasValue)
@@ -45,17 +43,32 @@ namespace ProjektLabor.Endpoints
                     query = query.Where(k => k.Aktivalva == aktivalva.Value);
                 }
 
+                // Kulcsonként csak a legutolsó mozgást kérjük le (nem az összes előzményt), így a lista
+                // akkor is gyors marad, ha a kulcsoknak több ezer mozgása van.
                 var list = await query
                     .OrderBy(k => k.Szam)
+                    .Select(k => new
+                    {
+                        Key = k,
+                        TeremNev = k.Terem.Nev,
+                        LastMovement = k.Kulcsmozgasok
+                            .OrderByDescending(km => km.Idopont)
+                            .ThenByDescending(km => km.Id)
+                            .Select(km => new Kulcsmozgas
+                            {
+                                Id = km.Id,
+                                MozgasTipus = km.MozgasTipus,
+                                TeremId = km.TeremId,
+                                FoglalasId = km.FoglalasId
+                            })
+                            .FirstOrDefault()
+                    })
                     .ToListAsync();
 
-                var results = list.Select(k =>
+                var results = list.Select(item =>
                 {
-                    var lastMovement = k.Kulcsmozgasok?
-                        .OrderByDescending(km => km.Idopont)
-                        .ThenByDescending(km => km.Id)
-                        .FirstOrDefault();
-
+                    var k = item.Key;
+                    var lastMovement = item.LastMovement;
                     var allapot = GetState(k, lastMovement);
 
                     return new KeyDto
@@ -65,7 +78,7 @@ namespace ProjektLabor.Endpoints
                         Tipus = k.Tipus,
                         Aktivalva = k.Aktivalva,
                         TeremId = k.TeremId,
-                        TeremNev = k.Terem?.Nev ?? string.Empty,
+                        TeremNev = item.TeremNev ?? string.Empty,
                         JelenlegiAllapot = allapot,
                         KiadottTeremIsmeretlen = IsIssuedRoomUnknown(k, lastMovement, allapot)
                     };
@@ -135,10 +148,15 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = "A kulcsszám és típus megadása kötelező." });
                 }
 
-                bool roomExists = await db.Termek.AnyAsync(t => t.Id == request.TeremId);
-                if (!roomExists)
+                var targetRoom = await db.Termek.AsNoTracking().SingleOrDefaultAsync(t => t.Id == request.TeremId);
+                if (targetRoom is null)
                 {
                     return Results.NotFound(new { message = $"A(z) {request.TeremId} azonosítójú terem nem található." });
+                }
+
+                if (!targetRoom.Aktivalva)
+                {
+                    return Results.BadRequest(new { message = "Deaktivált teremhez nem rögzíthető kulcs." });
                 }
 
                 // Ugyanazzal a (levágott) értékkel ellenőrzünk, amelyet elmentünk.
@@ -203,6 +221,15 @@ namespace ProjektLabor.Endpoints
                 AuditService auditService,
                 ClaimsPrincipal caller) =>
             {
+                // A kulcskiadással közös zár: a "ki van-e adva" ellenőrzés és a módosítás között nem
+                // történhet kiadás.
+                return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+                {
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                await SqlServerLocking.AcquireAsync(db, $"key-issue:{id}");
+
                 var key = await db.Kulcsok
                     .Include(k => k.Terem)
                     .Include(k => k.KulcsTeremKapcsok)
@@ -249,10 +276,14 @@ namespace ProjektLabor.Endpoints
 
                 if (request.TeremId.HasValue && request.TeremId.Value != key.TeremId)
                 {
-                    bool roomExists = await db.Termek.AnyAsync(t => t.Id == request.TeremId.Value);
-                    if (!roomExists)
+                    var newRoom = await db.Termek.AsNoTracking().SingleOrDefaultAsync(t => t.Id == request.TeremId.Value);
+                    if (newRoom is null)
                     {
                         return Results.NotFound(new { message = $"A(z) {request.TeremId.Value} azonosítójú terem nem található." });
+                    }
+                    if (!newRoom.Aktivalva)
+                    {
+                        return Results.BadRequest(new { message = "Kulcs nem rendelhető deaktivált teremhez." });
                     }
                     changes.Add($"TeremId: {key.TeremId} -> {request.TeremId.Value}");
                     key.TeremId = request.TeremId.Value;
@@ -294,6 +325,11 @@ namespace ProjektLabor.Endpoints
                         ujErtek: string.Join("; ", changes));
                 }
 
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
+
                 var room = await db.Termek.FindAsync(key.TeremId);
 
                 var result = new KeyDto
@@ -308,6 +344,7 @@ namespace ProjektLabor.Endpoints
                 };
 
                 return Results.Ok(result);
+                });
             })
             .WithName("UpdateKey")
             .WithSummary("Kulcs adatainak módosítása")
@@ -326,6 +363,13 @@ namespace ProjektLabor.Endpoints
                 AuditService auditService,
                 ClaimsPrincipal caller) =>
             {
+                return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+                {
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                await SqlServerLocking.AcquireAsync(db, $"key-issue:{id}");
+
                 var key = await db.Kulcsok.FindAsync(id);
                 if (key is null)
                 {
@@ -347,7 +391,13 @@ namespace ProjektLabor.Endpoints
                     entitasId: id.ToString(),
                     ujErtek: "Aktivalva: false");
 
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
+
                 return Results.Ok(new { message = $"A(z) {id} azonosítójú kulcs sikeresen deaktiválva lett." });
+                });
             })
             .WithName("DeleteKey")
             .WithSummary("Kulcs deaktiválása")

@@ -152,7 +152,7 @@ public class SecurityHardeningTests : IClassFixture<WebApplicationFactory<Progra
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", auth.GenerateJwtToken(user));
         }
 
-        var start = TestTime.LocalToday.AddDays(3).AddHours(10).AddMinutes(15);
+        var start = TestTime.LocalWorkday(3).AddHours(10).AddMinutes(15);
         var response = await client.PostAsJsonAsync("/api/bookings", new
         {
             teremId = 1, startTime = start, endTime = start.AddMinutes(45)
