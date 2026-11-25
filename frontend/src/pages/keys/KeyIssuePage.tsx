@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
 import { ArrowUpRight, Check, AlertCircle, Key as KeyIcon } from 'lucide-react'
 import client from '../../api/client'
+import { formatTimeOnly } from '../../utils/dateTime'
 
 interface KeyItem {
   id: number
@@ -9,6 +10,7 @@ interface KeyItem {
   teremNev?: string
   jelenlegiAllapot?: string
   aktivalva?: boolean
+  teremAktiv?: boolean
 }
 
 interface UserOption {
@@ -16,6 +18,18 @@ interface UserOption {
   nev?: string
   username: string
   email?: string
+  hasPin?: boolean
+  // Ha az oktatónak most esedékes foglalása van a kulcs termére: a foglalás kezdete.
+  esedekesFoglalasKezdete?: string | null
+}
+
+interface DueBooking {
+  foglalasId: number
+  felhasznaloId: number
+  felhasznaloNev: string
+  teremNev: string
+  startTime: string
+  endTime: string
 }
 
 interface RoomOption {
@@ -36,6 +50,10 @@ export default function KeyIssuePage() {
   const [teremAllapot, setTeremAllapot] = useState('')
   const [serulesLeiras, setSerulesLeiras] = useState('')
   const [megjegyzes, setMegjegyzes] = useState('')
+  const [recipientSearch, setRecipientSearch] = useState('')
+  // Helyettesítő átvevő: a kulcsot nem a foglaló, hanem egy kolléga veszi fel ennek a foglalásnak.
+  const [dueBookings, setDueBookings] = useState<DueBooking[]>([])
+  const [substituteBookingId, setSubstituteBookingId] = useState('')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -47,13 +65,14 @@ export default function KeyIssuePage() {
       .get<KeyItem[]>('/keys')
       .then((r) => {
         // Csak a szabad és aktív kulcsokat listázzuk kiadásra
+        // Csak a szabad, aktív és aktív teremhez tartozó kulcsok adhatók ki.
         const available = r.data.filter(
-          (k) => k.aktivalva !== false && (k.jelenlegiAllapot === 'Szabad' || !k.jelenlegiAllapot)
+          (k) => k.aktivalva !== false && k.teremAktiv !== false &&
+            (k.jelenlegiAllapot === 'Szabad' || !k.jelenlegiAllapot)
         )
         setKeys(available)
-        if (available.length > 0) {
-          setKeyId((prev) => (prev ? prev : String(available[0].id)))
-        }
+        // Ha a korábban kiválasztott kulcs már nem adható ki (pl. épp most adtuk ki), az első szabadra váltunk.
+        setKeyId((prev) => (available.some((k) => String(k.id) === prev) ? prev : String(available[0]?.id ?? '')))
       })
       .catch((err: unknown) => {
         const axErr = err as { response?: { data?: { message?: string } } }
@@ -101,7 +120,11 @@ export default function KeyIssuePage() {
         if (!ignore) {
           setUsers(res.data)
           setRecipientsForKeyId(keyId)
-          setUserId(res.data.length > 0 ? String(res.data[0].id) : '')
+          setRecipientSearch('')
+          setSubstituteBookingId('')
+          // Alapértelmezett átvevő: aki most esedékes foglalással érkezik (és van PIN-je); egyébként választani kell.
+          const dueRecipient = res.data.find((user) => user.esedekesFoglalasKezdete && user.hasPin !== false)
+          setUserId(dueRecipient ? String(dueRecipient.id) : '')
         }
       })
       .catch((err: unknown) => {
@@ -114,6 +137,32 @@ export default function KeyIssuePage() {
       ignore = true
     }
   }, [keyId])
+
+  useEffect(() => {
+    if (!keyId) return
+    let ignore = false
+    client
+      .get<DueBooking[]>('/key-movements/due-bookings', { params: { kulcsId: Number(keyId) } })
+      .then((res) => {
+        if (!ignore) setDueBookings(Array.isArray(res.data) ? res.data : [])
+      })
+      .catch(() => {
+        if (!ignore) setDueBookings([])
+      })
+    return () => {
+      ignore = true
+    }
+  }, [keyId])
+
+  const searchTerm = recipientSearch.trim().toLocaleLowerCase('hu')
+  const visibleRecipients = recipientOptions.filter((user) =>
+    !searchTerm ||
+    String(user.id) === userId ||
+    `${user.nev ?? ''} ${user.username}`.toLocaleLowerCase('hu').includes(searchTerm))
+  // Helyettesítés akkor lehetséges, ha van esedékes foglalás, de a kiválasztott átvevő nem foglaló.
+  const substituteCandidates = userId
+    ? dueBookings.filter((booking) => String(booking.felhasznaloId) !== userId)
+    : []
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -131,6 +180,7 @@ export default function KeyIssuePage() {
       const response = await client.post<{ foglalasId?: number | null }>('/key-movements/issue', {
         kulcsId: Number(keyId),
         atvevoFelhasznaloId: Number(userId),
+        foglalasId: substituteBookingId ? Number(substituteBookingId) : undefined,
         teremId: selectedKey?.tipus === 'Mesterkulcs' ? Number(roomId) : undefined,
         pin,
         teremAllapot: teremAllapot.trim(),
@@ -148,6 +198,7 @@ export default function KeyIssuePage() {
       setTeremAllapot('')
       setSerulesLeiras('')
       setMegjegyzes('')
+      setSubstituteBookingId('')
       fetchKeys()
       setTimeout(() => setSuccess(''), 4000)
     } catch (err: unknown) {
@@ -240,19 +291,37 @@ export default function KeyIssuePage() {
               Jogosult átvevő *
             </label>
             {recipientOptions.length > 0 ? (
-              <select
-                id="issue-user"
-                className="form-select"
-                value={userId}
-                onChange={(e) => setUserId(e.target.value)}
-                required
-              >
-                {recipientOptions.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.nev ? `${u.nev} (${u.username})` : u.username}
-                  </option>
-                ))}
-              </select>
+              <>
+                {recipientOptions.length > 8 && (
+                  <input
+                    className="form-input"
+                    style={{ marginBottom: 6 }}
+                    aria-label="Átvevő keresése"
+                    placeholder="Keresés név vagy felhasználónév szerint…"
+                    value={recipientSearch}
+                    onChange={(e) => setRecipientSearch(e.target.value)}
+                  />
+                )}
+                <select
+                  id="issue-user"
+                  className="form-select"
+                  value={userId}
+                  onChange={(e) => {
+                    setUserId(e.target.value)
+                    setSubstituteBookingId('')
+                  }}
+                  required
+                >
+                  <option value="">Válassz átvevőt…</option>
+                  {visibleRecipients.map((u) => (
+                    <option key={u.id} value={u.id} disabled={u.hasPin === false}>
+                      {u.nev ? `${u.nev} (${u.username})` : u.username}
+                      {u.esedekesFoglalasKezdete ? ` – foglalása: ${formatTimeOnly(u.esedekesFoglalasKezdete)}` : ''}
+                      {u.hasPin === false ? ' – nincs PIN-kódja' : ''}
+                    </option>
+                  ))}
+                </select>
+              </>
             ) : (
               <p className="form-hint">
                 {keyId
@@ -261,6 +330,28 @@ export default function KeyIssuePage() {
               </p>
             )}
           </div>
+
+          {substituteCandidates.length > 0 && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="issue-substitute">Helyettesítőként veszi fel? (opcionális)</label>
+              <select
+                id="issue-substitute"
+                className="form-select"
+                value={substituteBookingId}
+                onChange={(e) => setSubstituteBookingId(e.target.value)}
+              >
+                <option value="">Nem, a saját nevén veszi fel</option>
+                {substituteCandidates.map((booking) => (
+                  <option key={booking.foglalasId} value={booking.foglalasId}>
+                    {booking.felhasznaloNev} foglalásához ({booking.teremNev}, {formatTimeOnly(booking.startTime)}–{formatTimeOnly(booking.endTime)})
+                  </option>
+                ))}
+              </select>
+              <p className="form-hint">
+                Helyettesítéskor a foglalás nem lesz NoShow, a késésért járó pont pedig a foglalót terheli.
+              </p>
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label" htmlFor="issue-pin">Az átvevő PIN-kódja *</label>

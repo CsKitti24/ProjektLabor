@@ -56,8 +56,10 @@ public sealed class DailyKeyClosingProcessor
                 movement.KulcsId,
                 movement.FoglalasId,
                 movement.Idopont,
-                RecipientId = movement.AtvevoFelhasznaloId ??
-                              (movement.Foglalas != null ? (int?)movement.Foglalas.FelhasznaloId : null)
+                // A pont a foglalót terheli akkor is, ha helyettesítő vette fel a kulcsot a foglalásához.
+                RecipientId = movement.Foglalas != null
+                    ? (int?)movement.Foglalas.FelhasznaloId
+                    : movement.AtvevoFelhasznaloId
             })
             .ToListAsync(cancellationToken);
         if (issuedMovements.Count == 0)

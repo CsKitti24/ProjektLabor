@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { ArrowDownLeft, Check, AlertCircle, Key as KeyIcon } from 'lucide-react'
 import client from '../../api/client'
+import { formatTimeOnly } from '../../utils/dateTime'
 
 interface KeyItem {
   id: number
@@ -10,6 +11,9 @@ interface KeyItem {
   jelenlegiAllapot?: string
   aktivalva?: boolean
   kiadottTeremIsmeretlen?: boolean
+  birtokosNev?: string | null
+  kiadasIdeje?: string | null
+  kiadottTeremNev?: string | null
 }
 
 interface KeyRoom {
@@ -182,7 +186,9 @@ export default function KeyReturnPage() {
               ) : (
                 issuedKeys.map((k) => (
                   <option key={k.id} value={k.id}>
-                    Kulcs #{k.szam || k.id} – {k.teremNev || 'Általános'} ({k.tipus || 'Osztálykulcs'})
+                    Kulcs #{k.szam || k.id} – {k.kiadottTeremNev || k.teremNev || 'Általános'}
+                    {k.birtokosNev ? ` – ${k.birtokosNev}` : ''}
+                    {k.kiadasIdeje ? ` (${formatTimeOnly(k.kiadasIdeje)} óta)` : ''}
                   </option>
                 ))
               )}
@@ -237,7 +243,9 @@ export default function KeyReturnPage() {
             </div>
           ) : (
             <div className="form-group">
-              <label className="form-label" htmlFor="return-pin">Az átvevő PIN-kódja *</label>
+              <label className="form-label" htmlFor="return-pin">
+                Az átvevő PIN-kódja *{selectedKey?.birtokosNev ? ` (${selectedKey.birtokosNev})` : ''}
+              </label>
               <input id="return-pin" className="form-input" type="password" inputMode="numeric"
                 pattern="[0-9]{4,8}" minLength={4} maxLength={8} autoComplete="off"
                 value={pin} onChange={(e) => setPin(e.target.value)} required />

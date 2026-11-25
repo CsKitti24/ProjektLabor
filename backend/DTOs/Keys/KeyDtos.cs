@@ -10,11 +10,20 @@ namespace ProjektLabor.DTOs.Keys
         public bool Aktivalva { get; set; }
         public int TeremId { get; set; }
         public string TeremNev { get; set; } = string.Empty;
+        // A kulcs (saját) termének állapota: deaktivált terem kulcsa nem adható ki.
+        public bool TeremAktiv { get; set; } = true;
         public string JelenlegiAllapot { get; set; } = string.Empty; // Szabad | Kiadva | Deaktivalt
 
         // Igaz, ha a kulcs egy régi, foglalás nélküli mesterkulcs-kiadás miatt van kint, és a kiadás
         // terme nem ismert. Ilyenkor visszavételkor meg kell adni a termet.
         public bool KiadottTeremIsmeretlen { get; set; }
+
+        // Kiadott kulcsnál: kinél van (átvevő), mióta, és melyik teremre adták ki (mesterkulcsnál ez eltérhet
+        // a kulcs saját termétől). Szabad kulcsnál null.
+        public int? BirtokosId { get; set; }
+        public string? BirtokosNev { get; set; }
+        public DateTime? KiadasIdeje { get; set; }
+        public string? KiadottTeremNev { get; set; }
     }
 
     public class CreateKeyRequestDto

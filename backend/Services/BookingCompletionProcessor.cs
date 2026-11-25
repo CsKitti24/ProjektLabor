@@ -19,7 +19,27 @@ public sealed class BookingCompletionProcessor
         _logger = logger;
     }
 
-    public async Task<int> ProcessAsync(DateTime nowUtc, CancellationToken cancellationToken)
+    public Task<int> ProcessAsync(DateTime nowUtc, CancellationToken cancellationToken) =>
+        // Ugyanúgy tranzakcióban és zár alatt, mint a NoShow-feldolgozó: a két automatizmus és a kulcskiadás
+        // nem írhatja felül egymás állapotváltását.
+        SqlServerLocking.ExecuteWithRetryAsync(_db, async () =>
+        {
+            await using var transaction = _db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                ? null
+                : await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            // Közös zár a NoShow-feldolgozóval, hogy ugyanazt a foglalást ne dolgozzák fel egyszerre.
+            await SqlServerLocking.AcquireAsync(_db, "automation:no-show", cancellationToken);
+
+            var completedCount = await ProcessInTransactionAsync(nowUtc, cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return completedCount;
+        });
+
+    private async Task<int> ProcessInTransactionAsync(DateTime nowUtc, CancellationToken cancellationToken)
     {
         var finishedBookings = await _db.Foglalasok
             .Where(booking => booking.Status == BookingRules.ActiveStatus && booking.EndTime <= nowUtc)

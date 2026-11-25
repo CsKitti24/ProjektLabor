@@ -12,6 +12,9 @@ namespace ProjektLabor.DTOs.Users
         public bool Aktiv { get; set; }
         // Van-e beállított PIN-kód (kulcsátvételhez szükséges); maga a PIN sosem kerül ki.
         public bool HasPin { get; set; }
+        // Foglalási jog felfüggesztése (null = nincs felfüggesztve).
+        public DateTime? FoglalasFelfuggesztveEddig { get; set; }
+        public string? FelfuggesztesOka { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }
@@ -63,6 +66,15 @@ namespace ProjektLabor.DTOs.Users
         [MinLength(12, ErrorMessage = "A jelszónak legalább 12 karakter hosszúnak kell lennie.")]
         public string? UjJelszo { get; set; }
 
+    }
+
+    public class BookingSuspensionRequestDto
+    {
+        // A felfüggesztés vége (UTC vagy helyi idő); null a felfüggesztés feloldása.
+        public DateTime? Eddig { get; set; }
+
+        [MaxLength(500, ErrorMessage = "Az indoklás legfeljebb 500 karakter lehet.")]
+        public string? Indoklas { get; set; }
     }
 
     public class ChangeRoleRequestDto

@@ -13,6 +13,8 @@ namespace ProjektLabor.Endpoints;
 public static class ReliabilityEndpoints
 {
     private const int MaximumScore = 100;
+    private const string ReadAccessDenied =
+        "A megbízhatósági adatokat csak az adminisztrátor és az üzemeltetési igazgató láthatja.";
 
     public static IEndpointRouteBuilder MapReliabilityEndpoints(this IEndpointRouteBuilder endpoints)
     {
@@ -27,6 +29,8 @@ public static class ReliabilityEndpoints
             .WithName("GetReliabilityEvents");
         reliability.MapGet("/my", GetMyScoreAsync)
             .WithName("GetMyReliabilityScore");
+        reliability.MapGet("/my/events", GetMyEventsAsync)
+            .WithName("GetMyReliabilityEvents");
         reliability.MapPost("/correction", CorrectScoreAsync)
             .WithName("CreateReliabilityCorrection");
 
@@ -42,7 +46,7 @@ public static class ReliabilityEndpoints
         var access = await GetReadAccessAsync(principal, db, cancellationToken);
         if (access is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ReadAccessDenied);
         }
 
         var instructor = await FindInstructorAsync(userId, db, cancellationToken);
@@ -68,7 +72,7 @@ public static class ReliabilityEndpoints
     {
         if (await GetReadAccessAsync(principal, db, cancellationToken) is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ReadAccessDenied);
         }
 
         var academicYear = AppTime.AcademicYear(DateTime.UtcNow);
@@ -115,6 +119,7 @@ public static class ReliabilityEndpoints
 
     private static async Task<IResult> GetEventsAsync(
         int userId,
+        string? tanev,
         ClaimsPrincipal principal,
         [FromServices] AppDbContext db,
         CancellationToken cancellationToken)
@@ -122,7 +127,7 @@ public static class ReliabilityEndpoints
         var access = await GetReadAccessAsync(principal, db, cancellationToken);
         if (access is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ReadAccessDenied);
         }
 
         if (await FindInstructorAsync(userId, db, cancellationToken) is null)
@@ -130,9 +135,45 @@ public static class ReliabilityEndpoints
             return Results.NotFound(new { message = "A megadott oktató nem található." });
         }
 
-        var events = await db.MegbizhatosagiEsemenyek
+        return Results.Ok(await LoadEventsAsync(db, userId, tanev, cancellationToken));
+    }
+
+    /// <summary>
+    /// Az oktató saját megbízhatósági eseményei (miért kapott pontot), alapból az aktuális tanévre,
+    /// mert a pontszám is arra vonatkozik. tanev=osszes esetén minden tanév.
+    /// </summary>
+    private static async Task<IResult> GetMyEventsAsync(
+        string? tanev,
+        ClaimsPrincipal principal,
+        [FromServices] AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var instructorId = await GetAuthenticatedUserIdAsync(principal, db, RoleNames.Oktato, cancellationToken);
+        if (instructorId is null)
+        {
+            return ApiErrors.Forbidden("Saját megbízhatósági eseményeket csak oktató kérhet le.");
+        }
+
+        return Results.Ok(await LoadEventsAsync(
+            db, instructorId.Value, tanev ?? AppTime.AcademicYear(DateTime.UtcNow), cancellationToken));
+    }
+
+    // tanev: null vagy "osszes" = minden tanév; egyébként csak a megadott tanév (pl. "2026/2027").
+    private static async Task<List<ReliabilityEventResponse>> LoadEventsAsync(
+        AppDbContext db,
+        int userId,
+        string? tanev,
+        CancellationToken cancellationToken)
+    {
+        var query = db.MegbizhatosagiEsemenyek
             .AsNoTracking()
-            .Where(item => item.FelhasznaloId == userId)
+            .Where(item => item.FelhasznaloId == userId);
+        if (!string.IsNullOrWhiteSpace(tanev) && !string.Equals(tanev, "osszes", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(item => item.Tanev == tanev);
+        }
+
+        return await query
             .OrderByDescending(item => item.EsemenyIdopontja)
             .ThenByDescending(item => item.Id)
             .Select(item => new ReliabilityEventResponse(
@@ -151,8 +192,6 @@ public static class ReliabilityEndpoints
                 item.Indoklas,
                 item.CreatedAt))
             .ToListAsync(cancellationToken);
-
-        return Results.Ok(events);
     }
 
     private static async Task<IResult> GetMyScoreAsync(
@@ -163,7 +202,7 @@ public static class ReliabilityEndpoints
         var instructorId = await GetAuthenticatedUserIdAsync(principal, db, RoleNames.Oktato, cancellationToken);
         if (instructorId is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden("Saját megbízhatósági pontszámot csak oktató kérhet le.");
         }
 
         var instructor = await FindInstructorAsync(instructorId.Value, db, cancellationToken);
@@ -200,7 +239,7 @@ public static class ReliabilityEndpoints
             principal, db, RoleNames.Adminisztrator, cancellationToken);
         if (administratorId is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ApiErrors.AdminOnly);
         }
 
         return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>

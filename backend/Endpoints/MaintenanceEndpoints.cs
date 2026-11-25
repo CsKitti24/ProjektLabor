@@ -96,7 +96,7 @@ public static class MaintenanceEndpoints
             .Select(ResponseProjection)
             .SingleOrDefaultAsync(cancellationToken);
 
-        return item is null ? Results.NotFound() : Results.Ok(item);
+        return item is null ? ApiErrors.NotFound("A karbantartás nem található.") : Results.Ok(item);
     }
 
     private static async Task<IResult> CreateAsync(
@@ -110,7 +110,7 @@ public static class MaintenanceEndpoints
         var administratorId = await GetAdministratorIdAsync(user, db, cancellationToken);
         if (administratorId is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ApiErrors.AdminOnly);
         }
 
         var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
@@ -200,7 +200,7 @@ public static class MaintenanceEndpoints
     {
         if (await GetAdministratorIdAsync(user, db, cancellationToken) is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ApiErrors.AdminOnly);
         }
 
         var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
@@ -220,7 +220,7 @@ public static class MaintenanceEndpoints
             item => item.Id == id, cancellationToken);
         if (item is null)
         {
-            return Results.NotFound();
+            return ApiErrors.NotFound("A karbantartás nem található.");
         }
 
         if (item.EndTime <= nowUtc)
@@ -295,14 +295,14 @@ public static class MaintenanceEndpoints
     {
         if (await GetAdministratorIdAsync(user, db, cancellationToken) is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ApiErrors.AdminOnly);
         }
 
         var item = await db.KarbantartasiIdosavok.SingleOrDefaultAsync(
             item => item.Id == id, cancellationToken);
         if (item is null)
         {
-            return Results.NotFound();
+            return ApiErrors.NotFound("A karbantartás nem található.");
         }
 
         if (item.EndTime <= timeProvider.GetUtcNow().UtcDateTime)

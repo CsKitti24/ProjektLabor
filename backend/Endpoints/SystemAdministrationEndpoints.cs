@@ -112,7 +112,7 @@ public static class SystemAdministrationEndpoints
                 user => user.Id == userId && user.Role == "Adminisztrator",
                 cancellationToken))
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ApiErrors.AdminOnly);
         }
 
         var oldValue = parameter.Ertek;

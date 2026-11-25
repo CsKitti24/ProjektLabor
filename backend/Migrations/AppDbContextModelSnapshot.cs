@@ -158,6 +158,13 @@ namespace backend.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("FelfuggesztesOka")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("FoglalasFelfuggesztveEddig")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("JelszoHash")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -243,6 +250,8 @@ namespace backend.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("FelhasznaloId");
+
+                    b.HasIndex("Status", "StartTime");
 
                     b.HasIndex("TeremId", "StartTime", "EndTime");
 

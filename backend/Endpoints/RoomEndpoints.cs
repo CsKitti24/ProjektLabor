@@ -10,6 +10,9 @@ namespace ProjektLabor.Endpoints
 {
     public static class RoomEndpoints
     {
+        // A terem befogadóképességének felső korlátja (létrehozáskor és szerkesztéskor is).
+        private const int MaxCapacity = 10_000;
+
         public static RouteGroupBuilder MapRoomEndpoints(this IEndpointRouteBuilder routes)
         {
             var group = routes.MapGroup("/api/rooms")
@@ -132,9 +135,9 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = "A terem nevének megadása kötelező." });
                 }
 
-                if (request.Kapacitas < 1)
+                if (request.Kapacitas < 1 || request.Kapacitas > MaxCapacity)
                 {
-                    return Results.BadRequest(new { message = "A terem kapacitásának legalább 1-nek kell lennie." });
+                    return Results.BadRequest(new { message = "A terem kapacitása 1 és 10 000 között lehet." });
                 }
 
                 var normalizedName = request.Nev.Trim();
@@ -196,9 +199,9 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú terem nem található." });
                 }
 
-                if (request.Kapacitas.HasValue && request.Kapacitas.Value < 1)
+                if (request.Kapacitas.HasValue && (request.Kapacitas.Value < 1 || request.Kapacitas.Value > MaxCapacity))
                 {
-                    return Results.BadRequest(new { message = "A terem kapacitásának legalább 1-nek kell lennie." });
+                    return Results.BadRequest(new { message = "A terem kapacitása 1 és 10 000 között lehet." });
                 }
 
                 var changes = new List<string>();

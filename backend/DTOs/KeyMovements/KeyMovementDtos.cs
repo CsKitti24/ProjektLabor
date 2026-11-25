@@ -89,9 +89,9 @@ namespace ProjektLabor.DTOs.KeyMovements
         public string TeremNev { get; set; } = string.Empty;
         public DateTime KiadasIdeje { get; set; }
         public int? FoglalasId { get; set; }
-        public DateTime? FoglalasVége { get; set; }
+        public DateTime? FoglalasVege { get; set; }
         public string? BirtokosNev { get; set; }
         public string? BirtokosEmail { get; set; }
-        public double KésésPercekben { get; set; }
+        public double KesesPercekben { get; set; }
     }
 }

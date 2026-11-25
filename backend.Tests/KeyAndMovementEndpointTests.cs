@@ -515,7 +515,7 @@ namespace backend.Tests
             var key = Assert.Single(overdue);
             Assert.Equal(keyId, key.KulcsId);
             Assert.Equal("Teszt oktató", key.BirtokosNev);
-            Assert.True(key.KésésPercekben > 0);
+            Assert.True(key.KesesPercekben > 0);
         }
 
         [Fact]

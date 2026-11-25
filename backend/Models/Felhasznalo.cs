@@ -34,6 +34,13 @@ namespace ProjektLabor.Models
         public int PinHibasProbalkozasok { get; set; }
         public DateTime? PinZarolvaEddig { get; set; }
 
+        // Foglalási jog felfüggesztése (pl. sok büntetőpont miatt, adminisztratív döntés): a megadott időpontig
+        // az oktató nem foglalhat, de be tud lépni és a meglévő foglalásait láthatja. null = nincs felfüggesztve.
+        public DateTime? FoglalasFelfuggesztveEddig { get; set; }
+
+        [MaxLength(500)]
+        public string? FelfuggesztesOka { get; set; }
+
         // Az utolsó jelszócsere ideje (UTC): az ennél korábban kiadott bejelentkezési tokenek érvénytelenek.
         public DateTime? JelszoValtozas { get; set; }
 

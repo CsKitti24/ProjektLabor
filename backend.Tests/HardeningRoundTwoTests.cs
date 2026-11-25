@@ -124,6 +124,61 @@ public sealed class HardeningRoundTwoTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public async Task RoomCapacity_UpperLimit_AppliesOnEditToo()
+    {
+        var (admin, _, _) = await SeedUsersAsync();
+        using var client = CreateClient(admin);
+
+        var tooBig = await client.PostAsJsonAsync("/api/rooms", new { nev = "D-101", kapacitas = 10_001 });
+        Assert.Equal(HttpStatusCode.BadRequest, tooBig.StatusCode);
+
+        var created = await client.PostAsJsonAsync("/api/rooms", new { nev = "D-101", kapacitas = 10_000 });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var roomId = (await created.Content.ReadFromJsonAsync<RoomIdResponse>())!.Id;
+
+        var edit = await client.PutAsJsonAsync($"/api/rooms/{roomId}", new { kapacitas = 50_000 });
+        Assert.Equal(HttpStatusCode.BadRequest, edit.StatusCode);
+    }
+
+    [Fact]
+    public async Task BookingSuspension_BlocksNewBookings_UntilLifted()
+    {
+        var (admin, instructor, _) = await SeedUsersAsync();
+        using var adminClient = CreateClient(admin);
+
+        var missingReason = await adminClient.PutAsJsonAsync($"/api/users/{instructor.Id}/booking-suspension",
+            new { eddig = DateTime.UtcNow.AddDays(7) });
+        Assert.Equal(HttpStatusCode.BadRequest, missingReason.StatusCode);
+
+        var suspend = await adminClient.PutAsJsonAsync($"/api/users/{instructor.Id}/booking-suspension",
+            new { eddig = DateTime.UtcNow.AddDays(7), indoklas = "Ismételt no-show" });
+        Assert.Equal(HttpStatusCode.OK, suspend.StatusCode);
+
+        var room = await adminClient.PostAsJsonAsync("/api/rooms", new { nev = "E-101", kapacitas = 20 });
+        var roomId = (await room.Content.ReadFromJsonAsync<RoomIdResponse>())!.Id;
+        var start = TestTime.LocalWorkday(3).AddHours(10).AddMinutes(15);
+
+        using var instructorClient = CreateClient(instructor);
+        var blocked = await instructorClient.PostAsJsonAsync("/api/bookings",
+            new { teremId = roomId, startTime = start, endTime = start.AddMinutes(90) });
+        Assert.True(blocked.StatusCode == HttpStatusCode.Forbidden, await blocked.Content.ReadAsStringAsync());
+        Assert.Contains("fel van függesztve", await blocked.Content.ReadAsStringAsync());
+
+        // Rossz időpontnál is a felfüggesztés okát kapja vissza, nem az időszelet-hibát.
+        var misaligned = await instructorClient.PostAsJsonAsync("/api/bookings",
+            new { teremId = roomId, startTime = start.AddMinutes(7), endTime = start.AddMinutes(60) });
+        Assert.Equal(HttpStatusCode.Forbidden, misaligned.StatusCode);
+
+        var lift = await adminClient.PutAsJsonAsync($"/api/users/{instructor.Id}/booking-suspension",
+            new { eddig = (DateTime?)null });
+        Assert.Equal(HttpStatusCode.OK, lift.StatusCode);
+
+        var allowed = await instructorClient.PostAsJsonAsync("/api/bookings",
+            new { teremId = roomId, startTime = start, endTime = start.AddMinutes(90) });
+        Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
+    }
+
+    [Fact]
     public async Task ReliabilityCorrection_RejectsOutOfRangePoints()
     {
         var (admin, instructor, _) = await SeedUsersAsync();
