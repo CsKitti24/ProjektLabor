@@ -5,8 +5,22 @@ using ProjektLabor.Models;
 
 namespace ProjektLabor.Services;
 
+/// <summary>
+/// Átfedő foglalás (vagy karbantartás) miatt a foglalás nem menthető. Magyar üzenetet hordoz, amely
+/// közvetlenül a felhasználónak szól (409 Conflict).
+/// </summary>
+public sealed class BookingConflictException(string message) : InvalidOperationException(message);
+
 public static class BookingRules
 {
+    public const string OverlapMessage = "A megadott idősáv ütközik egy már meglévő foglalással.";
+    public const string MaintenanceOverlapMessage = "A terem a megadott időszakban karbantartás alatt áll.";
+
+    // Legfeljebb ennyi nappal előre lehet foglalni (kb. egy félév).
+    public const int MaxAdvanceDays = 180;
+
+    // Egy oktatónak egyszerre legfeljebb ennyi jövőbeli, aktív foglalása lehet.
+    public const int MaxActiveFutureBookingsPerInstructor = 40;
     public const string ActiveStatus = "Aktiv";
     public const string DoneStatus = "Kesz";
     public const string CancelledStatus = "Megszuntetve";
@@ -52,6 +66,43 @@ public static class BookingRules
         return null;
     }
 
+    /// <summary>
+    /// Foglalási korlátok: hétvégére nem lehet foglalni, és legfeljebb <see cref="MaxAdvanceDays"/> nappal előre.
+    /// </summary>
+    public static string? ValidateBookingWindow(DateTime start, DateTime nowUtc)
+    {
+        var localStart = AppTime.ToLocal(start);
+        if (localStart.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+        {
+            return "Hétvégére nem lehet foglalni.";
+        }
+
+        if (AppTime.LocalDate(start) > AppTime.LocalDate(nowUtc).AddDays(MaxAdvanceDays))
+        {
+            return $"Legfeljebb {MaxAdvanceDays} nappal előre lehet foglalni.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Az oktató jövőbeli, aktív foglalásainak száma elérte-e a korlátot.
+    /// </summary>
+    public static async Task<string?> ValidateInstructorQuotaAsync(
+        AppDbContext db,
+        int userId,
+        DateTime nowUtc,
+        CancellationToken cancellationToken = default)
+    {
+        var activeFutureCount = await db.Foglalasok.CountAsync(booking =>
+            booking.FelhasznaloId == userId &&
+            booking.Status == ActiveStatus &&
+            booking.EndTime > nowUtc, cancellationToken);
+        return activeFutureCount >= MaxActiveFutureBookingsPerInstructor
+            ? $"Egy oktatónak egyszerre legfeljebb {MaxActiveFutureBookingsPerInstructor} jövőbeli foglalása lehet."
+            : null;
+    }
+
     public static bool IsActive(string status) =>
         !status.Equals(CancelledStatus, StringComparison.OrdinalIgnoreCase) &&
         !status.Equals(NoShowStatus, StringComparison.OrdinalIgnoreCase);
@@ -81,7 +132,7 @@ public static class BookingRules
                     start < f.EndTime &&
                     end > f.StartTime, cancellationToken))
         {
-            return "A megadott idősáv ütközik egy már meglévő foglalással.";
+            return OverlapMessage;
         }
 
         if (await db.KarbantartasiIdosavok.AnyAsync(m =>
@@ -89,7 +140,7 @@ public static class BookingRules
                 start < m.EndTime &&
                 end > m.StartTime, cancellationToken))
         {
-            return "A terem a megadott időszakban karbantartás alatt áll.";
+            return MaintenanceOverlapMessage;
         }
 
         return null;

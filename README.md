@@ -27,7 +27,7 @@ A rendszer négy jól elkülönülő szerepkört támogat, mindegyikhez dedikál
 | **ORM / Migráció** | Entity Framework Core 8 | Code-first megközelítés, automatikus séma-migrációk indításkor. |
 | **Hitelesítés** | JSON Web Token HttpOnly sütiben + BCrypt | A token JavaScriptből nem olvasható; minden kérésnél adatbázis-ellenőrzés (aktív felhasználó, egyező szerepkör), bejelentkezési kéréskorlát, PIN-zárolás. |
 | **Dokumentáció** | Swagger / OpenAPI v1 | Fejlesztői módban interaktív tesztelő felület (`/swagger`). |
-| **Tesztelés & CI** | xUnit, WebApplicationFactory, Vitest, GitHub Actions | 185 backend teszt (valódi SQL Serveren is) és 31 frontend teszt, linting, Docker-build ellenőrzés. |
+| **Tesztelés & CI** | xUnit, WebApplicationFactory, Vitest, GitHub Actions | 195 backend teszt (valódi SQL Serveren is) és 31 frontend teszt, linting, Docker-build ellenőrzés. |
 
 ---
 
@@ -299,7 +299,7 @@ docker compose down
 
 Az adatbázis az induláskor `APPLY_MIGRATIONS=true` beállítással futó backend
 által alkalmazza a függő EF Core migrációkat. Meglévő helyi vagy megosztott
-adatbázis frissítése előtt készíts és ellenőrizz mentést; a részletes, tizennyolc
+adatbázis frissítése előtt készíts és ellenőrizz mentést; a részletes, tizenkilenc
 migrációt felsoroló leírást lásd a [database/README.md](./database/README.md)
 fájlban. Éles vagy közös adatbázist ne frissíts automatikusan külön jóváhagyás
 nélkül.

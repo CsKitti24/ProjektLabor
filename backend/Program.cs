@@ -249,6 +249,14 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
     var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("UnhandledException");
 
+    // Átfedő foglalás (utolsó védvonal a mentéskor): magyar üzenettel 409.
+    if (exception is BookingConflictException bookingConflict)
+    {
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        await context.Response.WriteAsJsonAsync(new { message = bookingConflict.Message, traceId = context.TraceIdentifier });
+        return;
+    }
+
     // Párhuzamos kérések ütközése: nem szerverhiba, a felhasználó frissítés után újrapróbálhatja.
     if (exception is not null && SqlServerLocking.IsUniqueConstraintViolation(exception))
     {

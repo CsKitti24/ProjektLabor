@@ -237,7 +237,9 @@ namespace ProjektLabor.Endpoints
                     !await db.MesterkulcsJogosultsagok.AnyAsync(access =>
                         access.KulcsId == key.Id && access.FelhasznaloId == recipientId))
                 {
-                    return Results.Forbid();
+                    return Results.Json(
+                        new { message = $"{recipientName} nem jogosult ennek a mesterkulcsnak az átvételére." },
+                        statusCode: StatusCodes.Status403Forbidden);
                 }
 
                 var movement = new Kulcsmozgas
@@ -335,157 +337,53 @@ namespace ProjektLabor.Endpoints
                     return Results.Unauthorized();
                 }
 
-                return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
-                {
-                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
-                    ? null
-                    : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
-                await SqlServerLocking.AcquireAsync(db, $"key-issue:{request.KulcsId}");
-
-                var key = await db.Kulcsok.FirstOrDefaultAsync(k => k.Id == request.KulcsId);
-
-                if (key is null)
-                {
-                    return Results.NotFound(new { message = $"A(z) {request.KulcsId} azonosítójú kulcs nem található." });
-                }
-
-                var lastMovement = await GetLatestMovementAsync(db, key.Id);
-                if (lastMovement == null || !KeyMovementTypes.IsIssue(lastMovement.MozgasTipus))
-                {
-                    return Results.Conflict(new { message = "A kulcs jelenleg nincs kiadva, nem lehet visszavenni." });
-                }
-
-                var recipientId = lastMovement.AtvevoFelhasznaloId;
-                if (!recipientId.HasValue && lastMovement.FoglalasId.HasValue)
-                {
-                    recipientId = await db.Foglalasok
-                        .Where(booking => booking.Id == lastMovement.FoglalasId.Value)
-                        .Select(booking => (int?)booking.FelhasznaloId)
-                        .SingleOrDefaultAsync();
-                }
-
-                if (!recipientId.HasValue)
-                {
-                    return Results.Conflict(new { message = "A kulcs korábbi átvevője nem azonosítható, ezért PIN-ellenőrzéssel nem vehető vissza." });
-                }
-                var recipient = await db.Felhasznalok.SingleOrDefaultAsync(user => user.Id == recipientId.Value);
-                if (recipient is null)
-                {
-                    return Results.Conflict(new { message = "A kulcs korábbi átvevője nem található." });
-                }
-
-                var now = timeProvider.GetUtcNow().UtcDateTime;
-                var pinResult = await CheckRecipientPinAsync(db, transaction, recipient, request.Pin, now);
-                if (pinResult is not null)
-                {
-                    return pinResult;
-                }
-
-                // A visszavétel ugyanarra a teremre vonatkozik, amelyre a kulcsot kiadták
-                // (mesterkulcsnál ez eltérhet a kulcs saját termétől).
-                var issuedRoomId = lastMovement.TeremId
-                    ?? (lastMovement.FoglalasId.HasValue
-                        ? await db.Foglalasok
-                            .Where(booking => booking.Id == lastMovement.FoglalasId.Value)
-                            .Select(booking => (int?)booking.TeremId)
-                            .SingleOrDefaultAsync()
-                        : null)
-                    ?? (key.Tipus == "Mesterkulcs" ? null : key.TeremId);
-
-                int returnRoomId;
-                if (issuedRoomId.HasValue)
-                {
-                    if (request.TeremId.HasValue && request.TeremId.Value != issuedRoomId.Value)
-                    {
-                        return Results.BadRequest(new { message = "A megadott terem nem egyezik a kiadás termével." });
-                    }
-                    returnRoomId = issuedRoomId.Value;
-                }
-                else
-                {
-                    // Régi adat: foglalás nélkül kiadott mesterkulcs, a kiadás terme nincs tárolva.
-                    if (!request.TeremId.HasValue)
-                    {
-                        return Results.BadRequest(new
-                        {
-                            message = "A mesterkulcs kiadásának terme nem ismert, ezért a visszavételnél meg kell adni, melyik teremből hozták vissza.",
-                            teremMegadasaSzukseges = true
-                        });
-                    }
-                    if (!await db.KulcsTermek.AnyAsync(access =>
-                            access.KulcsId == key.Id && access.TeremId == request.TeremId.Value))
-                    {
-                        return Results.BadRequest(new { message = "A mesterkulcs nincs hozzárendelve a megadott teremhez." });
-                    }
-                    returnRoomId = request.TeremId.Value;
-                }
-                var returnMovement = new Kulcsmozgas
-                {
-                    KulcsId = key.Id,
-                    FoglalasId = lastMovement.FoglalasId,
-                    TeremId = returnRoomId,
-                    AtvevoFelhasznaloId = recipientId,
-                    MozgasTipus = KeyMovementTypes.Return,
-                    Idopont = now,
-                    OperátorId = operatorId.Value,
-                    Megjegyzes = request.Megjegyzes ?? string.Empty,
-                    TeremAllapot = request.TeremAllapot.Trim(),
-                    SerulesLeiras = NormalizeDamageDescription(request.SerulesLeiras),
-                    CreatedAt = now
-                };
-
-                db.Kulcsmozgasok.Add(returnMovement);
-                var conditionTicket = AddConditionTicket(
-                    db,
-                    operatorId.Value,
-                    returnRoomId,
-                    returnMovement.SerulesLeiras,
-                    now);
-                await db.SaveChangesAsync();
-
-                await auditService.LogAsync(
-                    caller,
-                    muveletTipus: "KEY_RETURN",
-                    entitasTipus: "Kulcsmozgas",
-                    entitasId: returnMovement.Id.ToString(),
-                    ujErtek: $"KulcsId: {key.Id}, AtvevoFelhasznaloId: {recipientId}, TeremAllapot: {returnMovement.TeremAllapot}, SerulesLeiras: {returnMovement.SerulesLeiras}");
-                if (conditionTicket is not null)
-                {
-                    await auditService.LogAsync(
-                        caller, "CREATE", "Hibajegy", conditionTicket.Id.ToString(),
-                        ujErtek: $"TeremId: {conditionTicket.TeremId}; Kategoria: {conditionTicket.Kategoria}; KulcsmozgasId: {returnMovement.Id}");
-                }
-                if (transaction is not null)
-                {
-                    await transaction.CommitAsync();
-                }
-                var opUser = await db.Felhasznalok.FindAsync(operatorId.Value);
-                var recipientName = recipient.Nev;
-
-                var result = new KeyMovementItemDto
-                {
-                    Id = returnMovement.Id,
-                    KulcsId = key.Id,
-                    KulcsSzam = key.Szam,
-                    MozgasTipus = returnMovement.MozgasTipus,
-                    Idopont = returnMovement.Idopont,
-                    FoglalasId = returnMovement.FoglalasId,
-                    AtvevoFelhasznaloId = recipientId,
-                    AtvevoNev = recipientName,
-                    OperatorId = operatorId.Value,
-                    OperatorNev = opUser?.Nev ?? string.Empty,
-                    Megjegyzes = returnMovement.Megjegyzes,
-                    TeremAllapot = returnMovement.TeremAllapot,
-                    SerulesLeiras = returnMovement.SerulesLeiras
-                };
-
-                return Results.Ok(result);
-                });
+                return await RecordReturnAsync(
+                    db, auditService, caller, timeProvider, operatorId.Value,
+                    request.KulcsId, request.TeremId, request.Pin, request.TeremAllapot,
+                    request.SerulesLeiras, request.Megjegyzes, forcedReason: null);
             })
             .WithName("ReturnKey")
             .WithSummary("Kulcs visszavételének rögzítése")
             .RequireAuthorization("Portas")
             .Produces<KeyMovementItemDto>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden);
+
+            // KM2b – POST /api/key-movements/force-return
+            // Ha a kulcs fizikailag visszakerült a portára, de az átvevő nincs jelen (pl. kolléga hozta vissza,
+            // vagy a kulcs elveszett és előkerült), a portás vagy az adminisztrátor PIN nélkül, indoklással
+            // rögzítheti a visszavételt; így a kulcs nem ragad "kiadva" állapotban.
+            group.MapPost("/force-return", async (
+                ForceReturnKeyRequestDto request,
+                AppDbContext db,
+                AuditService auditService,
+                ClaimsPrincipal caller,
+                TimeProvider timeProvider) =>
+            {
+                if (string.IsNullOrWhiteSpace(request.TeremAllapot) || string.IsNullOrWhiteSpace(request.Indoklas))
+                {
+                    return Results.BadRequest(new { message = "A terem állapota és a kényszerített visszavétel indoklása kötelező." });
+                }
+
+                var operatorId = GetCallerId(caller);
+                if (operatorId is null ||
+                    !await db.Felhasznalok.AnyAsync(user => user.Id == operatorId.Value))
+                {
+                    return Results.Unauthorized();
+                }
+
+                return await RecordReturnAsync(
+                    db, auditService, caller, timeProvider, operatorId.Value,
+                    request.KulcsId, request.TeremId, pin: null, request.TeremAllapot,
+                    request.SerulesLeiras, request.Megjegyzes, forcedReason: request.Indoklas.Trim());
+            })
+            .WithName("ForceReturnKey")
+            .WithSummary("Kulcs kényszerített visszavétele PIN nélkül, indoklással")
+            .RequireAuthorization("AdminOrPortas")
+            .Produces<KeyMovementItemDto>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -501,8 +399,7 @@ namespace ProjektLabor.Endpoints
                 int? pageSize,
                 AppDbContext db) =>
             {
-                var normalizedPage = page.GetValueOrDefault(1);
-                normalizedPage = normalizedPage <= 0 ? 1 : normalizedPage;
+                var normalizedPage = Pagination.NormalizePage(page);
                 var normalizedPageSize = pageSize.GetValueOrDefault(20);
                 normalizedPageSize = normalizedPageSize <= 0 ? 20 : Math.Min(normalizedPageSize, 100);
 
@@ -717,6 +614,182 @@ namespace ProjektLabor.Endpoints
             return group;
         }
 
+        /// <summary>
+        /// Kulcs visszavételének rögzítése. Normál esetben az átvevő PIN-jével; kényszerített visszavételnél
+        /// (<paramref name="forcedReason"/> megadva) PIN nélkül, indoklással.
+        /// </summary>
+        private static async Task<IResult> RecordReturnAsync(
+            AppDbContext db,
+            AuditService auditService,
+            ClaimsPrincipal caller,
+            TimeProvider timeProvider,
+            int operatorId,
+            int kulcsId,
+            int? teremId,
+            string? pin,
+            string teremAllapot,
+            string? serulesLeiras,
+            string? megjegyzes,
+            string? forcedReason)
+        {
+            return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
+            {
+                await using var transaction = db.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory"
+                    ? null
+                    : await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+                await SqlServerLocking.AcquireAsync(db, $"key-issue:{kulcsId}");
+
+                var key = await db.Kulcsok.FirstOrDefaultAsync(k => k.Id == kulcsId);
+
+                if (key is null)
+                {
+                    return Results.NotFound(new { message = $"A(z) {kulcsId} azonosítójú kulcs nem található." });
+                }
+
+                var lastMovement = await GetLatestMovementAsync(db, key.Id);
+                if (lastMovement == null || !KeyMovementTypes.IsIssue(lastMovement.MozgasTipus))
+                {
+                    return Results.Conflict(new { message = "A kulcs jelenleg nincs kiadva, nem lehet visszavenni." });
+                }
+
+                var recipientId = lastMovement.AtvevoFelhasznaloId;
+                if (!recipientId.HasValue && lastMovement.FoglalasId.HasValue)
+                {
+                    recipientId = await db.Foglalasok
+                        .Where(booking => booking.Id == lastMovement.FoglalasId.Value)
+                        .Select(booking => (int?)booking.FelhasznaloId)
+                        .SingleOrDefaultAsync();
+                }
+
+                if (!recipientId.HasValue && forcedReason is null)
+                {
+                    return Results.Conflict(new { message = "A kulcs korábbi átvevője nem azonosítható, ezért PIN-ellenőrzéssel nem vehető vissza; használd a kényszerített visszavételt." });
+                }
+                var recipient = recipientId.HasValue
+                    ? await db.Felhasznalok.SingleOrDefaultAsync(user => user.Id == recipientId.Value)
+                    : null;
+                if (recipient is null && forcedReason is null)
+                {
+                    return Results.Conflict(new { message = "A kulcs korábbi átvevője nem található." });
+                }
+
+                var now = timeProvider.GetUtcNow().UtcDateTime;
+                // Kényszerített visszavételnél (a kulcs fizikailag a portán van, de az átvevő nincs jelen)
+                // nincs PIN-ellenőrzés; helyette kötelező indoklás kerül a mozgásba és az auditnaplóba.
+                if (forcedReason is null)
+                {
+                    var pinResult = await CheckRecipientPinAsync(db, transaction, recipient!, pin ?? string.Empty, now);
+                    if (pinResult is not null)
+                    {
+                        return pinResult;
+                    }
+                }
+
+                // A visszavétel ugyanarra a teremre vonatkozik, amelyre a kulcsot kiadták
+                // (mesterkulcsnál ez eltérhet a kulcs saját termétől).
+                var issuedRoomId = lastMovement.TeremId
+                    ?? (lastMovement.FoglalasId.HasValue
+                        ? await db.Foglalasok
+                            .Where(booking => booking.Id == lastMovement.FoglalasId.Value)
+                            .Select(booking => (int?)booking.TeremId)
+                            .SingleOrDefaultAsync()
+                        : null)
+                    ?? (key.Tipus == "Mesterkulcs" ? null : key.TeremId);
+
+                int returnRoomId;
+                if (issuedRoomId.HasValue)
+                {
+                    if (teremId.HasValue && teremId.Value != issuedRoomId.Value)
+                    {
+                        return Results.BadRequest(new { message = "A megadott terem nem egyezik a kiadás termével." });
+                    }
+                    returnRoomId = issuedRoomId.Value;
+                }
+                else
+                {
+                    // Régi adat: foglalás nélkül kiadott mesterkulcs, a kiadás terme nincs tárolva.
+                    if (!teremId.HasValue)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            message = "A mesterkulcs kiadásának terme nem ismert, ezért a visszavételnél meg kell adni, melyik teremből hozták vissza.",
+                            teremMegadasaSzukseges = true
+                        });
+                    }
+                    if (!await db.KulcsTermek.AnyAsync(access =>
+                            access.KulcsId == key.Id && access.TeremId == teremId.Value))
+                    {
+                        return Results.BadRequest(new { message = "A mesterkulcs nincs hozzárendelve a megadott teremhez." });
+                    }
+                    returnRoomId = teremId.Value;
+                }
+                var returnMovement = new Kulcsmozgas
+                {
+                    KulcsId = key.Id,
+                    FoglalasId = lastMovement.FoglalasId,
+                    TeremId = returnRoomId,
+                    AtvevoFelhasznaloId = recipientId,
+                    MozgasTipus = KeyMovementTypes.Return,
+                    Idopont = now,
+                    OperátorId = operatorId,
+                    Megjegyzes = forcedReason is null
+                        ? megjegyzes ?? string.Empty
+                        : $"Kényszerített visszavétel: {forcedReason}" + (string.IsNullOrWhiteSpace(megjegyzes) ? string.Empty : $" ({megjegyzes.Trim()})"),
+                    TeremAllapot = teremAllapot.Trim(),
+                    SerulesLeiras = NormalizeDamageDescription(serulesLeiras),
+                    CreatedAt = now
+                };
+
+                db.Kulcsmozgasok.Add(returnMovement);
+                var conditionTicket = AddConditionTicket(
+                    db,
+                    operatorId,
+                    returnRoomId,
+                    returnMovement.SerulesLeiras,
+                    now);
+                await db.SaveChangesAsync();
+
+                await auditService.LogAsync(
+                    caller,
+                    muveletTipus: forcedReason is null ? "KEY_RETURN" : "KEY_FORCED_RETURN",
+                    entitasTipus: "Kulcsmozgas",
+                    entitasId: returnMovement.Id.ToString(),
+                    ujErtek: $"KulcsId: {key.Id}, AtvevoFelhasznaloId: {recipientId}, TeremAllapot: {returnMovement.TeremAllapot}, SerulesLeiras: {returnMovement.SerulesLeiras}",
+                    indoklas: forcedReason);
+                if (conditionTicket is not null)
+                {
+                    await auditService.LogAsync(
+                        caller, "CREATE", "Hibajegy", conditionTicket.Id.ToString(),
+                        ujErtek: $"TeremId: {conditionTicket.TeremId}; Kategoria: {conditionTicket.Kategoria}; KulcsmozgasId: {returnMovement.Id}");
+                }
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                }
+                var opUser = await db.Felhasznalok.FindAsync(operatorId);
+                var recipientName = recipient?.Nev ?? string.Empty;
+
+                var result = new KeyMovementItemDto
+                {
+                    Id = returnMovement.Id,
+                    KulcsId = key.Id,
+                    KulcsSzam = key.Szam,
+                    MozgasTipus = returnMovement.MozgasTipus,
+                    Idopont = returnMovement.Idopont,
+                    FoglalasId = returnMovement.FoglalasId,
+                    AtvevoFelhasznaloId = recipientId,
+                    AtvevoNev = recipientName,
+                    OperatorId = operatorId,
+                    OperatorNev = opUser?.Nev ?? string.Empty,
+                    Megjegyzes = returnMovement.Megjegyzes,
+                    TeremAllapot = returnMovement.TeremAllapot,
+                    SerulesLeiras = returnMovement.SerulesLeiras
+                };
+
+                return Results.Ok(result);
+            });
+        }
+
         private const int MaxPinAttempts = 5;
         private static readonly TimeSpan PinLockDuration = TimeSpan.FromMinutes(15);
 
@@ -775,7 +848,10 @@ namespace ProjektLabor.Endpoints
                 await transaction.CommitAsync();
             }
 
-            return Results.Forbid();
+            var message = recipient.PinZarolvaEddig > now
+                ? $"Hibás PIN-kód. Túl sok hibás próbálkozás miatt a PIN {AppTime.ToLocal(recipient.PinZarolvaEddig.Value):HH:mm}-ig zárolva van."
+                : $"Hibás PIN-kód. Még {MaxPinAttempts - recipient.PinHibasProbalkozasok} próbálkozás után a PIN {PinLockDuration.TotalMinutes:0} percre zárolódik.";
+            return Results.Json(new { message }, statusCode: StatusCodes.Status403Forbidden);
         }
 
         private static int? GetCallerId(ClaimsPrincipal caller)

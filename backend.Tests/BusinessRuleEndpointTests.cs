@@ -96,7 +96,7 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
         var (_, instructorId) = await CreateUserClientAsync(RoleNames.Oktato);
         var roomId = await SeedRoomAsync();
         var bookingId = await SeedBookingAsync(instructorId, roomId, DateTime.UtcNow.AddMinutes(-10), BookingRules.ActiveStatus);
-        var newStart = TestTime.LocalToday.AddDays(3).AddHours(10).AddMinutes(15);
+        var newStart = TestTime.LocalWorkday(3).AddHours(10).AddMinutes(15);
 
         var response = await admin.PutAsJsonAsync($"/api/bookings/{bookingId}", new UpdateBookingRequestDto
         {
@@ -547,7 +547,7 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
         });
         Assert.Equal(HttpStatusCode.BadRequest, invalidEmail.StatusCode);
 
-        var start = TestTime.LocalToday.AddDays(5).AddHours(10).AddMinutes(15);
+        var start = TestTime.LocalWorkday(5).AddHours(10).AddMinutes(15);
         var tooLongNeeds = await instructor.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
         {
             TeremId = roomId,
@@ -795,7 +795,7 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
         var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
         var (_, porterId) = await CreateUserClientAsync(RoleNames.Portas);
         var roomId = await SeedRoomAsync();
-        var start = TestTime.LocalToday.AddDays(4).AddHours(10).AddMinutes(15);
+        var start = TestTime.LocalWorkday(4).AddHours(10).AddMinutes(15);
 
         var response = await admin.PostAsJsonAsync("/api/bookings", new CreateBookingRequestDto
         {
@@ -855,7 +855,7 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
             (await db.Termek.SingleAsync(room => room.Id == inactiveRoomId)).Aktivalva = false;
             await db.SaveChangesAsync();
         }
-        var start = TestTime.LocalToday.AddDays(10).AddHours(8);
+        var start = TestTime.LocalWorkday(10).AddHours(8);
 
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync("/api/maintenance",
             new { teremId = inactiveRoomId, startTime = start, endTime = start.AddHours(2), leiras = "Festés" })).StatusCode);

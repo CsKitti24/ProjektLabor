@@ -25,6 +25,7 @@ namespace ProjektLabor.Models
         [Required]
         public DateTime EndTime { get; set; }
 
+        [MaxLength(500)]
         public string? Leiras { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

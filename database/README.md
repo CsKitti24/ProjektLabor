@@ -21,6 +21,7 @@ migrációs lánca. A jelenlegi, időrendi sorrend:
 16. `20261117203019_GiveSampleInstructorsDistinctPins`
 17. `20261117204241_LinkSampleKeyIssuesToBookings`
 18. `20261124134617_HardenSchemaAndAuditNames`
+19. `20261125084342_AddNotificationMessageAndMaintenanceLimits`
 
 Az 8. és 9. migráció a `Termek.Felszereltseg`,
 `Foglalasok.SpecialisIgenyek`, `Felhasznalok.PinHash`,
@@ -49,7 +50,9 @@ teszi a teremnevet (a meglévő azonos nevű termek közül a nem minta- és leg
 tartja meg a nevét, a többi neve mögé `(#azonosító)` kerül), indexeket ad a kulcsok
 mozgásaihoz, a foglalások ütközésvizsgálatához és az auditnaplóhoz, az állapot-,
 szerepkör- és típusoszlopokat `nvarchar(50)`-re szűkíti, és az auditnapló magyar
-szöveges művelettípusait egységes kódokra cseréli. Mindegyik migráció visszavonható.
+szöveges művelettípusait egységes kódokra cseréli. A 19. migráció az értesítésekhez
+szöveges `Uzenet` oszlopot ad (pl. a foglalás lemondásának oka), és a karbantartás
+leírását 500 karakterre korlátozza. Mindegyik migráció visszavonható.
 
 A mintaadatok (mintafiókok, `B-101`/`B-102` mintaterem, `MINTA-*` kulcsok és
 előzményeik) csak fejlesztéshez és bemutatóhoz valók: ha a `SampleAccounts:Enabled`

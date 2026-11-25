@@ -7,6 +7,7 @@ interface Notification {
   id: number
   foglalasId: number | null
   ertesitesTipus: string
+  uzenet?: string | null
   idoPont: string
   allapot: string
   createdAt: string
@@ -35,6 +36,8 @@ function formatDate(value: string | null): string {
 function getNotificationTitle(type: string): string {
   if (type === 'BeforeEnd') return 'A foglalásod hamarosan véget ér'
   if (type === 'EveningKeyReturn') return 'Esti kulcsvisszavétel szükséges'
+  if (type === 'BookingCancelled') return 'A foglalásodat lemondták'
+  if (type === 'BookingChanged') return 'A foglalásod módosult'
   return `Értesítés: ${type}`
 }
 
@@ -167,6 +170,9 @@ export default function NotificationsPage() {
                       Foglalás #{notification.foglalasId ?? '—'}: {formatDate(notification.foglalasKezdete)} – {formatDate(notification.foglalasVege)}
                     </span>
                   </div>
+                )}
+                {notification.uzenet && (
+                  <p style={{ margin: 0, color: 'var(--color-gray-700)', fontSize: 13 }}>{notification.uzenet}</p>
                 )}
                 <div style={{ color: 'var(--color-gray-500)', fontSize: 12 }}>
                   Értesítés rögzítve: {formatDate(notification.idoPont)}

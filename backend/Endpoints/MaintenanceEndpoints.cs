@@ -104,6 +104,7 @@ public static class MaintenanceEndpoints
         ClaimsPrincipal user,
         [FromServices] AppDbContext db,
         [FromServices] AuditService auditService,
+        [FromServices] TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         var administratorId = await GetAdministratorIdAsync(user, db, cancellationToken);
@@ -112,7 +113,8 @@ public static class MaintenanceEndpoints
             return Results.Forbid();
         }
 
-        var validationError = ValidateRequest(request);
+        var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+        var validationError = ValidateRequest(request, nowUtc);
         if (validationError is not null)
         {
             return Results.BadRequest(new { message = validationError });
@@ -150,10 +152,18 @@ public static class MaintenanceEndpoints
         }
 
         var conflicts = await GetBookingConflictsAsync(db, request, cancellationToken);
-        if (conflicts.Count > 0)
+        var remainingConflicts = conflicts
+            .Where(conflict => request.LemondandoFoglalasIds?.Contains(conflict.FoglalasId) != true)
+            .ToList();
+        if (remainingConflicts.Count > 0)
         {
-            return BookingConflict(conflicts);
+            return BookingConflict(remainingConflicts);
         }
+
+        // A kifejezetten lemondásra jelölt ütköző foglalásokat ugyanebben a tranzakcióban mondjuk le:
+        // ha a karbantartás nem jön létre, a foglalások is érintetlenek maradnak.
+        var cancelledBookings = await CancelConflictingBookingsAsync(
+            db, conflicts, targetRoom.Nev, nowUtc, cancellationToken);
 
         var item = new KarbantartasiIdosav
         {
@@ -161,11 +171,12 @@ public static class MaintenanceEndpoints
             TeremId = request.TeremId,
             StartTime = request.StartTime,
             EndTime = request.EndTime,
-            Leiras = request.Leiras
+            Leiras = string.IsNullOrWhiteSpace(request.Leiras) ? null : request.Leiras.Trim()
         };
 
         db.KarbantartasiIdosavok.Add(item);
         await db.SaveChangesAsync(cancellationToken);
+        await AuditCancellationsAsync(auditService, user, cancelledBookings, targetRoom.Nev);
         await auditService.LogAsync(user, "CREATE", "KarbantartasiIdosav", item.Id.ToString(),
             ujErtek: $"TeremId: {item.TeremId}; Start: {item.StartTime:O}; End: {item.EndTime:O}");
         if (transaction is not null)
@@ -184,6 +195,7 @@ public static class MaintenanceEndpoints
         ClaimsPrincipal user,
         [FromServices] AppDbContext db,
         [FromServices] AuditService auditService,
+        [FromServices] TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         if (await GetAdministratorIdAsync(user, db, cancellationToken) is null)
@@ -191,7 +203,8 @@ public static class MaintenanceEndpoints
             return Results.Forbid();
         }
 
-        var validationError = ValidateRequest(request);
+        var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+        var validationError = ValidateRequest(request, nowUtc);
         if (validationError is not null)
         {
             return Results.BadRequest(new { message = validationError });
@@ -208,6 +221,11 @@ public static class MaintenanceEndpoints
         if (item is null)
         {
             return Results.NotFound();
+        }
+
+        if (item.EndTime <= nowUtc)
+        {
+            return Results.Conflict(new { message = "Lezárult karbantartás nem módosítható (az előzmény megmarad)." });
         }
 
         var targetRoom = await db.Termek
@@ -239,16 +257,23 @@ public static class MaintenanceEndpoints
         }
 
         var conflicts = await GetBookingConflictsAsync(db, request, cancellationToken);
-        if (conflicts.Count > 0)
+        var remainingConflicts = conflicts
+            .Where(conflict => request.LemondandoFoglalasIds?.Contains(conflict.FoglalasId) != true)
+            .ToList();
+        if (remainingConflicts.Count > 0)
         {
-            return BookingConflict(conflicts);
+            return BookingConflict(remainingConflicts);
         }
+
+        var cancelledBookings = await CancelConflictingBookingsAsync(
+            db, conflicts, targetRoom.Nev, nowUtc, cancellationToken);
 
         item.TeremId = request.TeremId;
         item.StartTime = request.StartTime;
         item.EndTime = request.EndTime;
-        item.Leiras = request.Leiras;
+        item.Leiras = string.IsNullOrWhiteSpace(request.Leiras) ? null : request.Leiras.Trim();
         await db.SaveChangesAsync(cancellationToken);
+        await AuditCancellationsAsync(auditService, user, cancelledBookings, targetRoom.Nev);
         await auditService.LogAsync(user, "UPDATE", "KarbantartasiIdosav", item.Id.ToString(),
             ujErtek: $"TeremId: {item.TeremId}; Start: {item.StartTime:O}; End: {item.EndTime:O}");
         if (transaction is not null)
@@ -265,6 +290,7 @@ public static class MaintenanceEndpoints
         ClaimsPrincipal user,
         [FromServices] AppDbContext db,
         [FromServices] AuditService auditService,
+        [FromServices] TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         if (await GetAdministratorIdAsync(user, db, cancellationToken) is null)
@@ -277,6 +303,11 @@ public static class MaintenanceEndpoints
         if (item is null)
         {
             return Results.NotFound();
+        }
+
+        if (item.EndTime <= timeProvider.GetUtcNow().UtcDateTime)
+        {
+            return Results.Conflict(new { message = "Lezárult karbantartás nem törölhető (az előzmény megmarad)." });
         }
 
         return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
@@ -318,7 +349,10 @@ public static class MaintenanceEndpoints
             .SingleOrDefaultAsync(cancellationToken);
     }
 
-    private static string? ValidateRequest(MaintenanceRequest request)
+    private const int MaxMaintenanceDays = 90;
+    private const int MaxDescriptionLength = 500;
+
+    private static string? ValidateRequest(MaintenanceRequest request, DateTime nowUtc)
     {
         if (request.TeremId <= 0)
         {
@@ -331,7 +365,74 @@ public static class MaintenanceEndpoints
             return "A záró időpontnak későbbinek kell lennie a kezdő időpontnál.";
         }
 
+        var startUtc = AppTime.ToUtc(request.StartTime);
+        var endUtc = AppTime.ToUtc(request.EndTime);
+        if (endUtc <= nowUtc)
+        {
+            return "Már lezárult időszakra nem rögzíthető karbantartás.";
+        }
+
+        if (endUtc - startUtc > TimeSpan.FromDays(MaxMaintenanceDays))
+        {
+            return $"Egy karbantartási idősáv legfeljebb {MaxMaintenanceDays} napos lehet.";
+        }
+
+        if (request.Leiras?.Trim().Length > MaxDescriptionLength)
+        {
+            return $"A leírás legfeljebb {MaxDescriptionLength} karakter lehet.";
+        }
+
         return null;
+    }
+
+    // A karbantartás miatt lemondandó (a kérésben kifejezetten megjelölt) ütköző foglalások lemondása,
+    // értesítéssel a foglaló oktatónak. A mentés a hívó tranzakciójában történik.
+    private static async Task<List<Foglalas>> CancelConflictingBookingsAsync(
+        AppDbContext db,
+        IReadOnlyList<BookingConflictResponse> conflicts,
+        string roomName,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        if (conflicts.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = conflicts.Select(conflict => conflict.FoglalasId).ToList();
+        var bookings = await db.Foglalasok
+            .Where(booking => ids.Contains(booking.Id))
+            .ToListAsync(cancellationToken);
+        foreach (var booking in bookings)
+        {
+            booking.Status = BookingRules.CancelledStatus;
+            booking.UpdatedAt = nowUtc;
+            BookingNotifications.AddCancelled(
+                db,
+                booking,
+                $"A(z) {roomName} terem foglalását karbantartás miatt lemondtuk ({AppTime.ToLocal(booking.StartTime):yyyy.MM.dd. HH:mm}).",
+                nowUtc);
+        }
+
+        return bookings;
+    }
+
+    private static async Task AuditCancellationsAsync(
+        AuditService auditService,
+        ClaimsPrincipal user,
+        IEnumerable<Foglalas> bookings,
+        string roomName)
+    {
+        foreach (var booking in bookings)
+        {
+            await auditService.LogAsync(
+                user,
+                muveletTipus: "CANCEL",
+                entitasTipus: "Foglalas",
+                entitasId: booking.Id.ToString(),
+                ujErtek: $"Status: {BookingRules.CancelledStatus}",
+                indoklas: $"A(z) {roomName} terem karbantartása miatt lemondva.");
+        }
     }
 
     // Ugyanarra a teremre egymást átfedő karbantartási idősávok nem rögzíthetők.
@@ -395,7 +496,9 @@ public static class MaintenanceEndpoints
         int TeremId,
         DateTime StartTime,
         DateTime EndTime,
-        string? Leiras);
+        string? Leiras,
+        // Az ütköző foglalások közül ezeket a karbantartással együtt (atomikusan) le kell mondani.
+        IReadOnlyList<int>? LemondandoFoglalasIds = null);
 
     public sealed record MaintenanceResponse(
         int Id,

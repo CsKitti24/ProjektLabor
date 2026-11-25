@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ProjektLabor.Data;
 using ProjektLabor.Models;
+using ProjektLabor.Services;
 using Xunit;
 
 namespace backend.Tests
@@ -49,8 +50,8 @@ namespace backend.Tests
             db.Foglalasok.Add(conflictingBooking);
 
             // Act & Assert
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
-            Assert.Contains("overlaps with an existing booking", ex.Message);
+            var ex = await Assert.ThrowsAsync<BookingConflictException>(() => db.SaveChangesAsync());
+            Assert.Equal(BookingRules.OverlapMessage, ex.Message);
         }
 
         [Fact]
