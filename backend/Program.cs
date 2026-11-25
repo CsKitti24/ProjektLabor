@@ -121,6 +121,9 @@ builder.Services.AddAuthorization(options =>
         policy.RequireRole(RoleNames.Adminisztrator, RoleNames.Portas, RoleNames.Oktato));
     options.AddPolicy("Authenticated", policy => policy.RequireAuthenticatedUser());
 });
+// A szerepkör-szabályok elutasításakor is magyar JSON-üzenet (üres 401/403 helyett).
+builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, ApiAuthorizationResultHandler>();
+
 
 builder.Services.AddSingleton(jwtSettings);
 builder.Services.AddScoped<AuthService>();
