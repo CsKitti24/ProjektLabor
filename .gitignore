@@ -27,3 +27,8 @@ obj/
 Thumbs.db
 .local/
 Library/
+
+# Adatbázismentések és HTTPS-tanúsítványok
+backups/
+deploy/https/certs/
+.env.bak*

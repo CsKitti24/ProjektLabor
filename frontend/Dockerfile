@@ -10,7 +10,8 @@ COPY . .
 RUN npm run build
 
 # --- Kiszolgálás: statikus fájlok nginx-szel, az /api kérések továbbítása a backendre ---
-FROM nginx:1.27-alpine AS runtime
+# Az nginx támogatott, stabil ága (1.30.x); a javítóverziókat a címke magától követi.
+FROM nginx:1.30-alpine AS runtime
 
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html

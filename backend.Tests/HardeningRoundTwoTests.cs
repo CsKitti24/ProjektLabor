@@ -179,6 +179,53 @@ public sealed class HardeningRoundTwoTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public async Task SessionRefresh_ExtendsToken_ButNotBeyondMaxSession()
+    {
+        var (_, instructor, _) = await SeedUsersAsync();
+        using var client = CreateClient(instructor);
+
+        var refresh = await client.PostAsync("/api/auth/refresh", null);
+        Assert.Equal(HttpStatusCode.OK, refresh.StatusCode);
+        var body = await refresh.Content.ReadFromJsonAsync<SessionRefreshResponse>();
+        Assert.True(body!.ExpiresAt > DateTime.UtcNow.AddHours(7));
+        Assert.True(body.ExpiresAt <= body.SessionEndsAt);
+        Assert.Contains(refresh.Headers.GetValues("Set-Cookie"), cookie => cookie.Contains("HttpOnly", StringComparison.OrdinalIgnoreCase));
+
+        // A bejelentkezés óta eltelt idő meghaladja a munkamenet felső határát: nincs megújítás.
+        using var scope = _factory.Services.CreateScope();
+        var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var oldToken = auth.GenerateJwtToken(instructor, DateTime.UtcNow.AddHours(-20), DateTime.UtcNow.AddMinutes(30));
+        using var oldClient = _factory.CreateClient();
+        oldClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", oldToken);
+        var expired = await oldClient.PostAsync("/api/auth/refresh", null);
+        Assert.Equal(HttpStatusCode.Unauthorized, expired.StatusCode);
+    }
+
+    [Fact]
+    public async Task OpenTicketFilter_CountsOnlyOpenAndInProgressTickets()
+    {
+        var (admin, instructor, _) = await SeedUsersAsync();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var room = new Terem { Nev = $"T-{Guid.NewGuid():N}"[..10], Kapacitas = 10, Aktivalva = true };
+            db.Termek.Add(room);
+            await db.SaveChangesAsync();
+            foreach (var status in new[] { "Nyitva", "Folyamatban", "Megoldva", "Zarva", "Nyitva" })
+            {
+                db.Hibajegyek.Add(new Hibajegy { TeremId = room.Id, FelhasznaloId = instructor.Id, Kategoria = "Egyeb", Leiras = "teszt", Statusz = status });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        using var client = CreateClient(admin);
+        var open = await client.GetFromJsonAsync<TicketCountResponse>("/api/tickets?nyitott=true&page=1&pageSize=1");
+        Assert.Equal(3, open!.TotalCount);
+        var closed = await client.GetFromJsonAsync<TicketCountResponse>("/api/tickets?nyitott=false&page=1&pageSize=1");
+        Assert.Equal(2, closed!.TotalCount);
+    }
+
+    [Fact]
     public async Task ReliabilityCorrection_RejectsOutOfRangePoints()
     {
         var (admin, instructor, _) = await SeedUsersAsync();
@@ -363,4 +410,8 @@ public sealed class HardeningRoundTwoTests : IClassFixture<WebApplicationFactory
     }
 
     private sealed record RoomIdResponse(int Id);
+
+    private sealed record SessionRefreshResponse(DateTime ExpiresAt, DateTime SessionEndsAt);
+
+    private sealed record TicketCountResponse(int TotalCount);
 }

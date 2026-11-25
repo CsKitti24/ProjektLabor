@@ -52,7 +52,6 @@ export default function UsersPage() {
   const [successMsg, setSuccessMsg] = useState('')
   const [editingId, setEditingId] = useState<string | number | null>(null)
   const [editRole, setEditRole] = useState('')
-  const [editPin, setEditPin] = useState('')
   const [editPassword, setEditPassword] = useState('')
   const [editPasswordConfirmation, setEditPasswordConfirmation] = useState('')
   const [isSaving, setIsSaving] = useState(false)
@@ -118,7 +117,6 @@ export default function UsersPage() {
     setEditRole(user.role)
     setEditNev(user.nev ?? '')
     setEditEmail(user.email ?? '')
-    setEditPin('')
     setEditPassword('')
     setEditPasswordConfirmation('')
   }
@@ -149,23 +147,16 @@ export default function UsersPage() {
     }
   }
 
-  const handleSavePin = async (id: string | number) => {
-    if (!/^[0-9]{4,8}$/.test(editPin)) {
-      setError('A PIN-kód 4–8 számjegyből állhat.')
-      return
-    }
-
+  // A PIN az oktató titka: az admin csak nullázni tudja (pl. elfelejtett PIN), újat az oktató ad meg.
+  const handleResetPin = async (user: UserItem) => {
     setIsSaving(true)
     try {
-      await client.put(`/users/${id}/pin`, { pin: editPin })
-      setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, hasPin: true } : u)))
-      setEditPin('')
+      const response = await client.delete<{ message?: string }>(`/users/${user.id}/pin`)
+      setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, hasPin: false } : u)))
       setError('')
-      setSuccessMsg('A kulcsátvételi PIN sikeresen beállítva.')
-      setTimeout(() => setSuccessMsg(''), 3000)
+      showSuccess(response.data?.message || 'A PIN-kód nullázva; újat az oktató a profiljában adhat meg.')
     } catch (err: unknown) {
-      const axErr = err as { response?: { data?: { message?: string } } }
-      setError(axErr.response?.data?.message || 'A PIN-kód beállítása sikertelen.')
+      setError(errorMessage(err, 'A PIN-kód nullázása sikertelen.'))
     } finally {
       setIsSaving(false)
     }
@@ -418,19 +409,6 @@ export default function UsersPage() {
                             ))}
                           </select>
                           <input
-                            aria-label={`${user.nev || user.username} kulcsátvételi PIN`}
-                            className="form-input"
-                            type="password"
-                            inputMode="numeric"
-                            pattern="[0-9]{4,8}"
-                            minLength={4}
-                            maxLength={8}
-                            placeholder="Új PIN (4–8 számjegy)"
-                            autoComplete="new-password"
-                            value={editPin}
-                            onChange={(e) => setEditPin(e.target.value)}
-                          />
-                          <input
                             aria-label={`${user.nev || user.username} új jelszó`}
                             className="form-input"
                             type="password"
@@ -497,14 +475,17 @@ export default function UsersPage() {
                           >
                             Adatok mentése
                           </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            disabled={isSaving || !editPin}
-                            onClick={() => handleSavePin(user.id)}
-                          >
-                            PIN mentése
-                          </button>
+                          {user.role === 'Oktato' && user.hasPin !== false && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={isSaving}
+                              title="Az oktató ezután a profiljában ad meg új PIN-t."
+                              onClick={() => handleResetPin(user)}
+                            >
+                              PIN nullázása
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"

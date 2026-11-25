@@ -208,13 +208,26 @@ builder.Services.AddCors(options =>
 });
 
 // A frontend nginx-e proxyként továbbítja a kéréseket; a kliens valódi IP-címét (kéréskorláthoz,
-// naplózáshoz) csak privát hálózatból (pl. a Docker belső hálózatából) érkező proxytól fogadjuk el.
+// naplózáshoz) csak megbízható proxytól fogadjuk el (alapból a Docker belső, privát hálózatai).
+// Ha a frontend elé HTTPS-proxy is kerül, két proxy van a kliens és a backend között: ekkor
+// ForwardedHeaders:ForwardLimit = 2, különben a HTTPS-proxy címe számítana a kliens IP-jének, és
+// a bejelentkezési korlát minden felhasználónál közös lenne.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    foreach (var network in new[] { "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16" })
+    options.ForwardLimit = Math.Clamp(builder.Configuration.GetValue("ForwardedHeaders:ForwardLimit", 1), 1, 5);
+
+    var knownNetworks = builder.Configuration.GetSection("ForwardedHeaders:KnownNetworks").Get<string[]>();
+    foreach (var network in knownNetworks is { Length: > 0 } ? knownNetworks : ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"])
     {
-        options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
+        options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network.Trim()));
+    }
+
+    // Egyedi proxycímek (pl. a gépen futó HTTPS-proxy), vesszővel elválasztva.
+    var knownProxies = builder.Configuration.GetValue<string>("ForwardedHeaders:KnownProxies") ?? string.Empty;
+    foreach (var proxy in knownProxies.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        options.KnownProxies.Add(System.Net.IPAddress.Parse(proxy));
     }
 });
 
@@ -444,6 +457,32 @@ api.MapPost("/api/auth/logout", async (HttpContext context, AuditService auditSe
     .RequireAuthorization("Authenticated")
     .Produces(StatusCodes.Status200OK)
     .Produces(StatusCodes.Status401Unauthorized);
+
+// Munkamenet megújítása (hosszú műszak): a felület aktivitás közben időnként meghívja, így a portás
+// nem jelentkezik ki műszak közben. A megújítás a bejelentkezéstől számított Jwt:MaxSessionHours óráig
+// lehetséges; utána 401, és újra be kell lépni.
+api.MapPost("/api/auth/refresh", async (HttpContext context, AuthService authService) =>
+{
+    var result = await authService.RefreshSessionAsync(context.User);
+    if (result is null)
+    {
+        return Results.Json(
+            new { message = "A munkamenet lejárt, kérjük, jelentkezz be újra." },
+            statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    context.Response.Cookies.Append(
+        AuthCookie.Name,
+        result.Token,
+        AuthCookie.CreateOptions(context.Request, result.ExpiresAt));
+    return Results.Ok(new { expiresAt = result.ExpiresAt, sessionEndsAt = result.SessionEndsAt });
+})
+.WithName("RefreshSession")
+.WithSummary("A bejelentkezési munkamenet megújítása (csúszó lejárat, felső határral)")
+.WithTags("Auth")
+.RequireAuthorization("Authenticated")
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status401Unauthorized);
 
 api.MapGet("/api/auth/me", async (HttpContext context, AuthService authService) =>
 {

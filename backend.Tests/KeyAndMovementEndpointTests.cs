@@ -519,21 +519,23 @@ namespace backend.Tests
         }
 
         [Fact]
-        public async Task AdminCanSetAHashedUserPin()
+        public async Task AdminCanOnlyResetUserPin()
         {
             var (adminClient, _) = await CreateClientWithRoleAsync("Adminisztrator");
             var userId = await SeedInstructorAsync();
 
-            var response = await adminClient.PutAsJsonAsync(
+            var setAttempt = await adminClient.PutAsJsonAsync(
                 $"/api/users/{userId}/pin",
                 new { pin = "9876" });
+            Assert.Equal(HttpStatusCode.MethodNotAllowed, setAttempt.StatusCode);
 
-            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            var reset = await adminClient.DeleteAsync($"/api/users/{userId}/pin");
+
+            Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
             using var scope = _factory.Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var user = await db.Felhasznalok.FindAsync(userId);
-            Assert.NotNull(user?.PinHash);
-            Assert.True(BCrypt.Net.BCrypt.Verify("9876", user.PinHash));
+            Assert.Null(user?.PinHash);
         }
     }
 }

@@ -31,7 +31,6 @@ export default function CreateUserModal({ onClose, onCreated }: CreateUserModalP
   const [role, setRole] = useState('Oktato')
   const [password, setPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
-  const [pin, setPin] = useState('')
   const [error, setError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
@@ -55,29 +54,17 @@ export default function CreateUserModal({ onClose, onCreated }: CreateUserModalP
       setError('A két jelszó nem egyezik.')
       return
     }
-    if (role === 'Oktato' && pin && !/^[0-9]{4,8}$/.test(pin)) {
-      setError('A PIN-kód 4–8 számjegyből állhat.')
-      return
-    }
 
     setIsSaving(true)
     try {
-      const response = await client.post<{ id: number }>('/users', {
+      await client.post('/users', {
         nev: nev.trim(),
         username: username.trim(),
         email: email.trim(),
         role,
         jelszo: password,
       })
-      let message = `${nev.trim()} felhasználó létrehozva.`
-      if (role === 'Oktato' && pin) {
-        try {
-          await client.put(`/users/${response.data.id}/pin`, { pin })
-        } catch {
-          message += ' A PIN-kód beállítása nem sikerült, a felhasználó szerkesztésénél pótolható.'
-        }
-      }
-      onCreated(message)
+      onCreated(`${nev.trim()} felhasználó létrehozva.`)
     } catch (err: unknown) {
       setError(errorMessage(err, 'A felhasználó létrehozása nem sikerült.'))
     } finally {
@@ -141,11 +128,9 @@ export default function CreateUserModal({ onClose, onCreated }: CreateUserModalP
               autoComplete="new-password" onChange={(e) => setPasswordConfirmation(e.target.value)} required />
           </div>
           {role === 'Oktato' && (
-            <div className="form-group">
-              <label className="form-label" htmlFor="new-user-pin">Kulcsátvételi PIN (4–8 számjegy, később is megadható)</label>
-              <input id="new-user-pin" className="form-input" type="password" inputMode="numeric" maxLength={8}
-                value={pin} autoComplete="new-password" onChange={(e) => setPin(e.target.value)} />
-            </div>
+            <p style={{ fontSize: 12.5, color: 'var(--color-gray-500)', marginBottom: 12 }}>
+              A kulcsátvételi PIN-kódot az oktató az első belépés után a saját profiljában adja meg.
+            </p>
           )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>

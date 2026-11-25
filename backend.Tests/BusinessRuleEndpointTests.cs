@@ -711,7 +711,7 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
     }
 
     [Fact]
-    public async Task SettingNewPin_ClearsPinLockout()
+    public async Task ResettingPin_ClearsLockout_AndInstructorsNewPinWorks()
     {
         var (porter, _) = await CreateUserClientAsync(RoleNames.Portas);
         var (admin, _) = await CreateUserClientAsync(RoleNames.Adminisztrator);
@@ -723,8 +723,21 @@ public class BusinessRuleEndpointTests : IClassFixture<WebApplicationFactory<Pro
             await porter.PostAsJsonAsync("/api/key-movements/issue", request);
         }
 
-        Assert.Equal(HttpStatusCode.NoContent,
+        // Az admin csak nullázni tudja a PIN-t; beállítani nem.
+        Assert.Equal(HttpStatusCode.OK, (await admin.DeleteAsync($"/api/users/{instructorId}/pin")).StatusCode);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed,
             (await admin.PutAsJsonAsync($"/api/users/{instructorId}/pin", new { pin = "5678" })).StatusCode);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await db.Felhasznalok.FindAsync(instructorId);
+            Assert.Null(user!.PinHash);
+            Assert.Equal(0, user.PinHibasProbalkozasok);
+            Assert.Null(user.PinZarolvaEddig);
+            // Az oktató a profiljában új PIN-t ad meg (itt közvetlenül rögzítjük).
+            user.PinHash = BCrypt.Net.BCrypt.HashPassword("5678", workFactor: 4);
+            await db.SaveChangesAsync();
+        }
 
         request.Pin = "5678";
         Assert.Equal(HttpStatusCode.Created, (await porter.PostAsJsonAsync("/api/key-movements/issue", request)).StatusCode);

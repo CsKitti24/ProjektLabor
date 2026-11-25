@@ -25,6 +25,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [showForgot, setShowForgot] = useState(false)
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -126,6 +127,31 @@ export default function LoginPage() {
               </>
             )}
           </button>
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ marginTop: 12, width: '100%' }}
+            aria-expanded={showForgot}
+            aria-controls="forgot-password-help"
+            onClick={() => setShowForgot((open) => !open)}
+          >
+            Elfelejtetted a jelszavad?
+          </button>
+          {showForgot && (
+            <div id="forgot-password-help" className="alert alert-info" style={{ marginTop: 8, display: 'block', fontSize: 13 }}>
+              <p style={{ margin: 0 }}>
+                Új jelszót a rendszer adminisztrátora tud adni: keresd meg személyesen vagy a szokásos belső
+                csatornán, és mondd meg a felhasználónevedet. Biztonsági okból jelszót e-mailben vagy telefonon
+                nem adunk ki.
+              </p>
+              <p style={{ margin: '6px 0 0' }}>
+                Az admin ideiglenes jelszót állít be; az első belépés után a <strong>Profil</strong> oldalon
+                cseréld le a sajátodra. Ha a kulcsátvételi PIN-kódodat felejtetted el, az admin nullázza, és
+                újat a profilodban adhatsz meg.
+              </p>
+            </div>
+          )}
         </form>
 
       </div>

@@ -50,6 +50,7 @@ namespace ProjektLabor.Endpoints
                 int? teremId,
                 string? statusz,
                 string? kategoria,
+                bool? nyitott,
                 int? page,
                 int? pageSize,
                 AppDbContext db,
@@ -88,6 +89,17 @@ namespace ProjektLabor.Endpoints
                 if (!string.IsNullOrWhiteSpace(kategoria))
                 {
                     query = query.Where(h => h.Kategoria == kategoria);
+                }
+
+                // nyitott=true: a még nem lezárt (Nyitva vagy Folyamatban) hibajegyek. Az áttekintő pageSize=1-gyel
+                // csak a darabszámot (totalCount) kéri le, nem tölti le az összes hibajegyet.
+                if (nyitott == true)
+                {
+                    query = query.Where(h => h.Statusz == "Nyitva" || h.Statusz == "Folyamatban");
+                }
+                else if (nyitott == false)
+                {
+                    query = query.Where(h => h.Statusz != "Nyitva" && h.Statusz != "Folyamatban");
                 }
 
                 int totalCount = await query.CountAsync();
