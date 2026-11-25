@@ -226,6 +226,26 @@ public sealed class HardeningRoundTwoTests : IClassFixture<WebApplicationFactory
     }
 
     [Fact]
+    public async Task PolicyRejections_ReturnHungarianMessages_BeforeInputValidation()
+    {
+        var (_, instructor, _) = await SeedUsersAsync();
+        using var instructorClient = CreateClient(instructor);
+
+        var forbiddenRoom = await instructorClient.PostAsJsonAsync("/api/rooms", new { nev = "X-1", kapacitas = 10 });
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenRoom.StatusCode);
+        Assert.Contains("nincs jogosultságod", await forbiddenRoom.Content.ReadAsStringAsync());
+
+        // Üres (hibás) törzzsel is 403, nem 400: a szerepkört a bemenet ellenőrzése előtt nézzük.
+        var forbiddenCorrection = await instructorClient.PostAsJsonAsync("/api/reliability/correction", new { });
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenCorrection.StatusCode);
+
+        using var anonymous = _factory.CreateClient();
+        var unauthenticated = await anonymous.GetAsync("/api/rooms");
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
+        Assert.Contains("bejelentkezés szükséges", await unauthenticated.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task ReliabilityCorrection_RejectsOutOfRangePoints()
     {
         var (admin, instructor, _) = await SeedUsersAsync();

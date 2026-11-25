@@ -31,7 +31,9 @@ public static class ReliabilityEndpoints
             .WithName("GetMyReliabilityScore");
         reliability.MapGet("/my/events", GetMyEventsAsync)
             .WithName("GetMyReliabilityEvents");
+        // A szerepkört a bemenet ellenőrzése előtt nézzük, így jogosulatlan hívó 403-at kap (nem 400-at).
         reliability.MapPost("/correction", CorrectScoreAsync)
+            .RequireAuthorization("Adminisztrator")
             .WithName("CreateReliabilityCorrection");
 
         return endpoints;
