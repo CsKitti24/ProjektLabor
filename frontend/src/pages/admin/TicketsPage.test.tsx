@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { AxiosHeaders, type AxiosResponse } from 'axios'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import client from '../../api/client'
 import { useAuth, type UserRole } from '../../auth/AuthContext'
@@ -72,10 +72,25 @@ describe('TicketsPage role access', () => {
     render(<TicketsPage />)
 
     const select = await screen.findByLabelText('#7 hibajegy állapotának módosítása')
-    expect(screen.queryByRole('option', { name: 'Folyamatban' })).toBeNull()
+    expect(within(select).queryByRole('option', { name: 'Folyamatban' })).toBeNull()
     fireEvent.change(select, { target: { value: 'Zarva' } })
 
     expect(await screen.findByText('A(z) #7 hibajegy állapota: Lezárva.')).toBeTruthy()
     expect(client.put).toHaveBeenCalledWith('/tickets/7/status', { statusz: 'Zarva' })
+  })
+
+  it('filters by category including automatically created damage tickets', async () => {
+    setRole('Adminisztrator')
+    vi.mocked(client.get).mockResolvedValue(axiosResponse([]))
+    render(<TicketsPage />)
+
+    const categorySelect = await screen.findByLabelText('Szűrés kategória szerint')
+    expect(screen.getByRole('option', { name: 'Sérülés' })).toBeTruthy()
+    fireEvent.change(categorySelect, { target: { value: 'Sérülés' } })
+    fireEvent.change(screen.getByLabelText('Szűrés állapot szerint'), { target: { value: 'Nyitva' } })
+
+    await vi.waitFor(() => expect(client.get).toHaveBeenCalledWith('/tickets', {
+      params: { page: 1, pageSize: 50, kategoria: 'Sérülés', statusz: 'Nyitva' },
+    }))
   })
 })

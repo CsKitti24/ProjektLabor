@@ -238,6 +238,11 @@ namespace ProjektLabor.Endpoints
                     // foglalás mellett a terem nem deaktiválható.
                     if (!request.Aktivalva.Value)
                     {
+                        if (await IsRoomKeyIssuedAsync(db, id))
+                        {
+                            return Results.Conflict(new { message = "A terem kulcsa jelenleg ki van adva. Deaktiválás előtt vedd vissza a kulcsot." });
+                        }
+
                         var now = DateTime.UtcNow;
                         var futureBookings = await db.Foglalasok.CountAsync(booking =>
                             booking.TeremId == id &&

@@ -1,83 +1,13 @@
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard,
-  Users,
-  DoorOpen,
-  Key,
-  CalendarDays,
-  PlusCircle,
-  Wrench,
-  FileText,
-  BarChart2,
-  Star,
-  ArrowDownLeft,
-  ArrowUpRight,
-  List,
   Shield,
-  Bell,
-  ClipboardList,
-  Settings,
 } from 'lucide-react'
+import { useUnreadNotifications } from './useUnreadNotifications'
+import { getNavItems } from './navItems'
 import type { UserRole } from '../auth/AuthContext'
 
 interface SidebarProps {
   role: UserRole
-}
-
-interface NavItem {
-  to: string
-  label: string
-  icon: React.ReactNode
-}
-
-function getNavItems(role: UserRole): NavItem[] {
-  switch (role) {
-    case 'Oktato':
-      return [
-        { to: '/my-bookings', label: 'Foglalásaim', icon: <CalendarDays size={17} strokeWidth={1.5} /> },
-        { to: '/new-booking', label: 'Új foglalás', icon: <PlusCircle size={17} strokeWidth={1.5} /> },
-        { to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> },
-        { to: '/profile', label: 'Megbízhatóságom', icon: <Star size={17} strokeWidth={1.5} /> },
-        { to: '/notifications', label: 'Értesítéseim', icon: <Bell size={17} strokeWidth={1.5} /> },
-        { to: '/tickets', label: 'Hibajegyek', icon: <FileText size={17} strokeWidth={1.5} /> },
-      ]
-    case 'Portas':
-      return [
-        { to: '/key-issue', label: 'Kulcskiadás', icon: <ArrowUpRight size={17} strokeWidth={1.5} /> },
-        { to: '/key-return', label: 'Kulcsvisszavétel', icon: <ArrowDownLeft size={17} strokeWidth={1.5} /> },
-        { to: '/key-movements', label: 'Kulcsmozgások', icon: <List size={17} strokeWidth={1.5} /> },
-        { to: '/active-keys', label: 'Aktív kulcsok', icon: <Key size={17} strokeWidth={1.5} /> },
-        { to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> },
-        { to: '/notifications', label: 'Értesítéseim', icon: <Bell size={17} strokeWidth={1.5} /> },
-      ]
-    case 'Adminisztrator':
-      return [
-        { to: '/admin', label: 'Áttekintés', icon: <LayoutDashboard size={17} strokeWidth={1.5} /> },
-        { to: '/users', label: 'Felhasználók', icon: <Users size={17} strokeWidth={1.5} /> },
-        { to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> },
-        { to: '/keys', label: 'Kulcsok', icon: <Key size={17} strokeWidth={1.5} /> },
-        { to: '/active-keys', label: 'Aktív kulcsok', icon: <Key size={17} strokeWidth={1.5} /> },
-        { to: '/key-movements', label: 'Kulcsmozgások', icon: <List size={17} strokeWidth={1.5} /> },
-        { to: '/bookings', label: 'Foglalások', icon: <CalendarDays size={17} strokeWidth={1.5} /> },
-        { to: '/maintenance', label: 'Karbantartás', icon: <Wrench size={17} strokeWidth={1.5} /> },
-        { to: '/tickets', label: 'Hibajegyek', icon: <FileText size={17} strokeWidth={1.5} /> },
-        { to: '/reports', label: 'Riportok', icon: <BarChart2 size={17} strokeWidth={1.5} /> },
-        { to: '/audit', label: 'Auditnapló', icon: <ClipboardList size={17} strokeWidth={1.5} /> },
-        { to: '/parameters', label: 'Rendszerparaméterek', icon: <Settings size={17} strokeWidth={1.5} /> },
-      ]
-    case 'UzemeltetesiIgazgato':
-      return [
-        { to: '/admin', label: 'Áttekintés', icon: <LayoutDashboard size={17} strokeWidth={1.5} /> },
-        { to: '/reports', label: 'Riportok', icon: <BarChart2 size={17} strokeWidth={1.5} /> },
-        { to: '/audit', label: 'Auditnapló', icon: <ClipboardList size={17} strokeWidth={1.5} /> },
-        { to: '/parameters', label: 'Rendszerparaméterek', icon: <Settings size={17} strokeWidth={1.5} /> },
-        { to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> },
-        { to: '/tickets', label: 'Hibajegyek', icon: <FileText size={17} strokeWidth={1.5} /> },
-        { to: '/profile', label: 'Profil és státusz', icon: <Star size={17} strokeWidth={1.5} /> },
-      ]
-    default:
-      return [{ to: '/rooms', label: 'Termek', icon: <DoorOpen size={17} strokeWidth={1.5} /> }]
-  }
 }
 
 function getRoleLabel(role: UserRole): string {
@@ -97,6 +27,7 @@ function getRoleLabel(role: UserRole): string {
 
 export default function Sidebar({ role }: SidebarProps) {
   const navItems = getNavItems(role)
+  const unreadCount = useUnreadNotifications(role === 'Oktato' || role === 'Portas')
 
   return (
     <aside className="sidebar">
@@ -119,6 +50,15 @@ export default function Sidebar({ role }: SidebarProps) {
           >
             <span className="sidebar-link-icon">{item.icon}</span>
             <span className="sidebar-link-label">{item.label}</span>
+            {item.to === '/notifications' && unreadCount > 0 && (
+              <span
+                className="badge badge-primary"
+                style={{ marginLeft: 'auto', fontSize: 11, padding: '1px 7px' }}
+                aria-label={`${unreadCount} olvasatlan értesítés`}
+              >
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>

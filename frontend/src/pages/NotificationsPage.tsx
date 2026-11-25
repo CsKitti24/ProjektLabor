@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bell, CalendarClock, Check, RefreshCw } from 'lucide-react'
 import client from '../api/client'
+import { notifyNotificationsChanged } from '../components/useUnreadNotifications'
 import Pagination, { DEFAULT_PAGE_SIZE } from '../components/Pagination'
 
 interface Notification {
@@ -90,6 +91,7 @@ export default function NotificationsPage() {
     setReadError('')
     try {
       await client.patch(`/notifications/${id}/read`)
+      notifyNotificationsChanged()
       setNotifications((current) =>
         current?.map((notification) =>
           notification.id === id ? { ...notification, olvasva: true } : notification,
@@ -105,6 +107,24 @@ export default function NotificationsPage() {
   useEffect(() => {
     void Promise.resolve().then(() => loadNotifications())
   }, [loadNotifications])
+
+  // Az új értesítések percenként, a lista eltüntetése nélkül (háttérben) frissülnek.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      client
+        .get<Notification[]>('/notifications/my', { params: { page, pageSize: DEFAULT_PAGE_SIZE } })
+        .then((response) => {
+          if (!Array.isArray(response.data)) return
+          setNotifications(response.data)
+          const headerTotal = Number(response.headers?.['x-total-count'])
+          setTotalCount(Number.isFinite(headerTotal) && headerTotal > 0 ? headerTotal : response.data.length)
+        })
+        .catch(() => {
+          // Háttérfrissítési hiba: a meglévő lista marad, a következő körben újra próbáljuk.
+        })
+    }, 60_000)
+    return () => window.clearInterval(timer)
+  }, [page])
 
   return (
     <div>

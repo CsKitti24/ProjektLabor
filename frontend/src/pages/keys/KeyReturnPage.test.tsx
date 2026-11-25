@@ -62,4 +62,26 @@ describe('KeyReturnPage', () => {
       pin: '1234',
     }))
   })
+
+  it('records a forced return without PIN only with a reason', async () => {
+    render(<KeyReturnPage />)
+
+    await screen.findByRole('option', { name: 'B2' }, { timeout: 5000 })
+    fireEvent.change(screen.getByLabelText('Melyik teremből hozták vissza? *'), { target: { value: '12' } })
+    fireEvent.click(screen.getByLabelText('Az átvevő nincs jelen (kényszerített visszavétel PIN nélkül)'))
+    expect(screen.queryByLabelText('Az átvevő PIN-kódja *')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Terem állapota *'), { target: { value: 'Rendben' } })
+    fireEvent.click(screen.getByRole('button', { name: /Visszavétel jóváhagyása/ }))
+    expect(client.post).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Indoklás *'), { target: { value: 'Kolléga hozta vissza' } })
+    fireEvent.click(screen.getByRole('button', { name: /Visszavétel jóváhagyása/ }))
+
+    expect(await screen.findByText(/kényszerített visszavétele rögzítve/)).toBeTruthy()
+    expect(client.post).toHaveBeenCalledWith('/key-movements/force-return', expect.objectContaining({
+      kulcsId: 7,
+      teremId: 12,
+      indoklas: 'Kolléga hozta vissza',
+    }))
+  })
 })

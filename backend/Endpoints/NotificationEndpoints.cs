@@ -67,6 +67,7 @@ public static class NotificationEndpoints
         HttpContext httpContext,
         int? page,
         int? pageSize,
+        bool? csakOlvasatlan,
         CancellationToken cancellationToken)
     {
         // Lapozás: a válasz továbbra is lista, az összes elem számát az X-Total-Count fejléc adja.
@@ -98,6 +99,12 @@ public static class NotificationEndpoints
                 (notification.CimzettFelhasznaloId == null &&
                  notification.Foglalas != null &&
                  notification.Foglalas.FelhasznaloId == userId));
+        // Az olvasatlan-jelvényhez: csak az olvasatlanok (pageSize=1 mellett az X-Total-Count adja a számot).
+        if (csakOlvasatlan == true)
+        {
+            query = query.Where(notification => !notification.Olvasva);
+        }
+
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
             .OrderByDescending(notification => notification.IdoPont)

@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { BarChart2, Calendar, TrendingUp, Award, DoorOpen, Key, RefreshCw } from 'lucide-react'
 import client from '../../api/client'
+import { localDateInputValue } from '../../utils/dateTime'
 
 interface WeeklyReport {
   hetKezdete?: string
   hetVege?: string
+  datum?: string
   osszesKulcskiadas: number
   osszesKulcsvisszavetel: number
   osszesKesedelmesFoglalas: number
@@ -30,6 +32,27 @@ interface RoomUtilization {
     rendelkezesreAlloOra: number
     kihasznaltsagSzazalek: number
   }>
+}
+
+interface KeyTrafficReport {
+  kezdet?: string
+  veg?: string
+  osszesMozgas: number
+  osszesKiadas: number
+  osszesVisszavetel: number
+  kulcsok?: Array<{
+    kulcsId: number
+    kulcsSzam: string
+    teremNev: string
+    osszesMozgas: number
+    kiadasok: number
+    visszavetelok: number
+  }>
+}
+
+function firstDayOfMonth(): string {
+  const now = new Date()
+  return localDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1))
 }
 
 interface ReliabilityReport {
@@ -65,7 +88,8 @@ function scoreBadgeClass(score: number): string {
   return 'badge badge-success'
 }
 
-type TabType = 'weekly' | 'utilization' | 'reliability'
+type TabType = 'weekly' | 'utilization' | 'keyTraffic' | 'reliability'
+type TrafficPeriod = 'day' | 'week'
 
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('weekly')
@@ -77,13 +101,27 @@ export default function ReportsPage() {
   const [utilizationData, setUtilizationData] = useState<RoomUtilization | null>(null)
   const [reliabilityData, setReliabilityData] = useState<ReliabilityReport | null>(null)
   const [instructorScores, setInstructorScores] = useState<InstructorReliabilityList | null>(null)
+  const [keyTrafficData, setKeyTrafficData] = useState<KeyTrafficReport | null>(null)
+
+  // Időszak-választás: a forgalom egy napra vagy a kiválasztott nap hetére, a többi riport tetszőleges
+  // kezdő és záró napra (alapból a hónap eleje és a mai nap között).
+  const [trafficPeriod, setTrafficPeriod] = useState<TrafficPeriod>('week')
+  const [trafficDate, setTrafficDate] = useState(() => localDateInputValue())
+  const [rangeStart, setRangeStart] = useState(firstDayOfMonth)
+  const [rangeEnd, setRangeEnd] = useState(() => localDateInputValue())
+
+  const reload = () => {
+    setError('')
+    setIsLoading(true)
+    setRetryVersion((version) => version + 1)
+  }
 
   useEffect(() => {
     let ignore = false
 
     if (activeTab === 'weekly') {
       client
-        .get<WeeklyReport>('/reports/weekly')
+        .get<WeeklyReport>(trafficPeriod === 'day' ? '/reports/daily' : '/reports/weekly', { params: { datum: trafficDate } })
         .then((res) => {
           if (!ignore) {
             if (!Number.isFinite(res.data.osszesKulcskiadas) ||
@@ -98,7 +136,7 @@ export default function ReportsPage() {
         .catch(() => {
           if (!ignore) {
             setWeeklyData(null)
-            setError('A heti riport betöltése nem sikerült.')
+            setError('A forgalmi riport betöltése nem sikerült.')
           }
         })
         .finally(() => {
@@ -106,7 +144,7 @@ export default function ReportsPage() {
         })
     } else if (activeTab === 'utilization') {
       client
-        .get<RoomUtilization>('/reports/room-utilization')
+        .get<RoomUtilization>('/reports/room-utilization', { params: { kezdet: rangeStart, veg: rangeEnd } })
         .then((res) => {
           if (!ignore) {
             if (!Number.isFinite(res.data.kihasznaltsagSzazalek) ||
@@ -121,6 +159,26 @@ export default function ReportsPage() {
           if (!ignore) {
             setUtilizationData(null)
             setError('A kihasználtsági riport betöltése nem sikerült.')
+          }
+        })
+        .finally(() => {
+          if (!ignore) setIsLoading(false)
+        })
+    } else if (activeTab === 'keyTraffic') {
+      client
+        .get<KeyTrafficReport>('/reports/key-traffic', { params: { kezdet: rangeStart, veg: rangeEnd } })
+        .then((res) => {
+          if (!ignore) {
+            if (!Number.isFinite(res.data.osszesMozgas) || !Array.isArray(res.data.kulcsok)) {
+              throw new Error('A kulcsforgalmi riport válasza hiányos.')
+            }
+            setKeyTrafficData(res.data)
+          }
+        })
+        .catch(() => {
+          if (!ignore) {
+            setKeyTrafficData(null)
+            setError('A kulcsforgalmi riport betöltése nem sikerült (ellenőrizd az időszakot).')
           }
         })
         .finally(() => {
@@ -158,6 +216,9 @@ export default function ReportsPage() {
     return () => {
       ignore = true
     }
+    // A dátumok változásakor a reload() indítja az újratöltést (retryVersion), így a lekérés a beállított
+    // értékekkel fut.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, retryVersion])
 
   return (
@@ -185,7 +246,7 @@ export default function ReportsPage() {
           }}
         >
           <Calendar size={14} strokeWidth={1.5} />
-          <span>Heti kulcs- és teremforgalom</span>
+          <span>Kulcs- és teremforgalom</span>
         </button>
         <button
           type="button"
@@ -202,6 +263,17 @@ export default function ReportsPage() {
         </button>
         <button
           type="button"
+          className={`report-tab-btn ${activeTab === 'keyTraffic' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTab('keyTraffic')
+            reload()
+          }}
+        >
+          <Key size={14} strokeWidth={1.5} />
+          <span>Kulcsforgalom</span>
+        </button>
+        <button
+          type="button"
           className={`report-tab-btn ${activeTab === 'reliability' ? 'active' : ''}`}
           onClick={() => {
             setActiveTab('reliability')
@@ -214,6 +286,60 @@ export default function ReportsPage() {
           <span>Megbízhatósági statisztika</span>
         </button>
       </div>
+
+      {activeTab === 'weekly' && (
+        <div className="report-period" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 16 }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label" htmlFor="report-period">Időszak</label>
+            <select
+              id="report-period"
+              className="form-select"
+              value={trafficPeriod}
+              onChange={(e) => { setTrafficPeriod(e.target.value as TrafficPeriod); reload() }}
+            >
+              <option value="day">Egy nap</option>
+              <option value="week">A nap hete (hétfő–vasárnap)</option>
+            </select>
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label" htmlFor="report-date">Nap</label>
+            <input
+              id="report-date"
+              type="date"
+              className="form-input"
+              value={trafficDate}
+              onChange={(e) => { if (e.target.value) { setTrafficDate(e.target.value); reload() } }}
+            />
+          </div>
+        </div>
+      )}
+
+      {(activeTab === 'utilization' || activeTab === 'keyTraffic') && (
+        <div className="report-period" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 16 }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label" htmlFor="report-range-start">Kezdő nap</label>
+            <input
+              id="report-range-start"
+              type="date"
+              className="form-input"
+              max={rangeEnd}
+              value={rangeStart}
+              onChange={(e) => { if (e.target.value) { setRangeStart(e.target.value); reload() } }}
+            />
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label" htmlFor="report-range-end">Záró nap</label>
+            <input
+              id="report-range-end"
+              type="date"
+              className="form-input"
+              min={rangeStart}
+              value={rangeEnd}
+              onChange={(e) => { if (e.target.value) { setRangeEnd(e.target.value); reload() } }}
+            />
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
@@ -246,7 +372,7 @@ export default function ReportsPage() {
                   </div>
                   <div className="stat-card-body">
                     <div className="stat-card-value">{weeklyData?.osszesKulcskiadas ?? '—'}</div>
-                    <div className="stat-card-label">Kulcskiadás ezen a héten</div>
+                    <div className="stat-card-label">Kulcskiadás a kiválasztott {trafficPeriod === 'day' ? 'napon' : 'héten'}</div>
                   </div>
                 </div>
 
@@ -295,7 +421,7 @@ export default function ReportsPage() {
                       {weeklyData.termenkintiForgalom.length === 0 ? (
                         <tr>
                           <td colSpan={3} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 30 }}>
-                            Erre a hétre még nincs forgalmi adat.
+                            Erre az időszakra nincs forgalmi adat.
                           </td>
                         </tr>
                       ) : (
@@ -370,6 +496,67 @@ export default function ReportsPage() {
                   </table>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'keyTraffic' && (
+            <div>
+              <div className="stats-grid">
+                <div className="stat-card">
+                  <div className="stat-card-icon"><Key size={18} strokeWidth={1.5} /></div>
+                  <div className="stat-card-body">
+                    <div className="stat-card-value">{keyTrafficData?.osszesKiadas ?? '—'}</div>
+                    <div className="stat-card-label">Kulcskiadás az időszakban</div>
+                  </div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-card-icon"><Key size={18} strokeWidth={1.5} /></div>
+                  <div className="stat-card-body">
+                    <div className="stat-card-value">{keyTrafficData?.osszesVisszavetel ?? '—'}</div>
+                    <div className="stat-card-label">Visszavétel az időszakban</div>
+                  </div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-card-icon"><TrendingUp size={18} strokeWidth={1.5} /></div>
+                  <div className="stat-card-body">
+                    <div className="stat-card-value">{keyTrafficData?.osszesMozgas ?? '—'}</div>
+                    <div className="stat-card-label">Összes kulcsmozgás</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="table-container" style={{ marginTop: 20 }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Kulcs</th>
+                      <th>Terem</th>
+                      <th>Kiadások</th>
+                      <th>Visszavételek</th>
+                      <th>Összes mozgás</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(keyTrafficData?.kulcsok ?? []).length === 0 ? (
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 30 }}>
+                          Erre az időszakra nincs kulcsmozgás.
+                        </td>
+                      </tr>
+                    ) : (
+                      keyTrafficData?.kulcsok?.map((item) => (
+                        <tr key={item.kulcsId}>
+                          <td style={{ fontWeight: 600 }}>{item.kulcsSzam}</td>
+                          <td>{item.teremNev}</td>
+                          <td>{item.kiadasok} db</td>
+                          <td>{item.visszavetelok} db</td>
+                          <td>{item.osszesMozgas} db</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

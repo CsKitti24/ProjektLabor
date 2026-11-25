@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react'
-import { Wrench, Plus, X, AlertCircle, Check, Trash2, RefreshCw } from 'lucide-react'
+import { Wrench, Plus, X, AlertCircle, Check, Trash2, RefreshCw, Pencil } from 'lucide-react'
 import client from '../../api/client'
 import { localDateInputValue, localDateTimeToIso, localInputToIso } from '../../utils/dateTime'
 
@@ -53,7 +53,8 @@ function formatDateRange(start?: string, end?: string): string {
     if (!end) return `${sDate} ${sTime}`
     const dEnd = new Date(end)
     const eTime = dEnd.toLocaleTimeString('hu-HU', { hour: '2-digit', minute: '2-digit' })
-    return `${sDate} ${sTime} – ${eTime}`
+    const eDate = dEnd.toLocaleDateString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    return eDate === sDate ? `${sDate} ${sTime} – ${eTime}` : `${sDate} ${sTime} – ${eDate} ${eTime}`
   } catch {
     return `${start} – ${end || ''}`
   }
@@ -69,6 +70,10 @@ export default function MaintenancePage() {
   const [showModal, setShowModal] = useState(false)
   const [teremId, setTeremId] = useState('')
   const [startDate, setStartDate] = useState(() => localDateInputValue())
+  // Több napos karbantartásnál a záró nap eltér a kezdőtől.
+  const [endDate, setEndDate] = useState(() => localDateInputValue())
+  // Szerkesztéskor a módosított karbantartás azonosítója; null esetén új karbantartás készül.
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [startTime, setStartTime] = useState('07:00')
   const [endTime, setEndTime] = useState('08:00')
   const [leiras, setLeiras] = useState('')
@@ -109,8 +114,12 @@ export default function MaintenancePage() {
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault()
-    if (!teremId || !startDate || !startTime || !endTime) {
+    if (!teremId || !startDate || !endDate || !startTime || !endTime) {
       setModalError('Kérjük töltsd ki az összes kötelező mezőt!')
+      return
+    }
+    if (new Date(`${endDate}T${endTime}:00`) <= new Date(`${startDate}T${startTime}:00`)) {
+      setModalError('A befejezésnek a kezdés után kell lennie.')
       return
     }
 
@@ -130,19 +139,26 @@ export default function MaintenancePage() {
   // ha a karbantartás nem jön létre, a foglalások sem szűnnek meg.
   const createMaintenance = async (lemondandoFoglalasIds: number[] = []) => {
     const startIso = localDateTimeToIso(startDate, startTime)
-    const endIso = localDateTimeToIso(startDate, endTime)
-    await client.post('/maintenance', {
+    const endIso = localDateTimeToIso(endDate, endTime)
+    const body = {
       teremId: Number(teremId),
       startTime: startIso,
       endTime: endIso,
       leiras: leiras.trim() || undefined,
       lemondandoFoglalasIds: lemondandoFoglalasIds.length > 0 ? lemondandoFoglalasIds : undefined,
-    })
+    }
+    if (editingId !== null) {
+      await client.put(`/maintenance/${editingId}`, body)
+    } else {
+      await client.post('/maintenance', body)
+    }
+    const wasEditing = editingId !== null
+    setEditingId(null)
     setShowModal(false)
     setConflicts([])
     setConflictActions({})
     setLeiras('')
-    setSuccessMsg('Karbantartási idősáv sikeresen ütemezve!')
+    setSuccessMsg(wasEditing ? 'A karbantartás módosítva.' : 'Karbantartási idősáv sikeresen ütemezve!')
     setTimeout(() => setSuccessMsg(''), 4000)
     loadData()
   }
@@ -154,7 +170,7 @@ export default function MaintenancePage() {
     setConflicts(newConflicts)
     setConflictActions(Object.fromEntries(newConflicts.map((item) => [item.foglalasId, ''])))
     setMoveStartTimes(Object.fromEntries(newConflicts.map((item) => {
-      const maintenanceEnd = new Date(`${startDate}T${endTime}:00`)
+      const maintenanceEnd = new Date(`${endDate}T${endTime}:00`)
       const bookingEnd = new Date(item.endTime)
       const proposed = maintenanceEnd > bookingEnd ? maintenanceEnd : bookingEnd
       return [item.foglalasId, toLocalDateTimeInput(proposed.toISOString())]
@@ -214,13 +230,42 @@ export default function MaintenancePage() {
     }
   }
 
+  const openCreateModal = () => {
+    setEditingId(null)
+    setTeremId(String(rooms[0]?.id ?? ''))
+    setStartDate(localDateInputValue())
+    setEndDate(localDateInputValue())
+    setStartTime('07:00')
+    setEndTime('08:00')
+    setLeiras('')
+    setConflicts([])
+    setModalError('')
+    setShowModal(true)
+  }
+
+  const openEditModal = (item: MaintenanceItem) => {
+    const [itemStartDate, itemStartTime] = toLocalDateTimeInput(item.startTime).split('T')
+    const [itemEndDate, itemEndTime] = toLocalDateTimeInput(item.endTime).split('T')
+    setEditingId(item.id)
+    setTeremId(String(item.teremId))
+    setStartDate(itemStartDate)
+    setStartTime(itemStartTime)
+    setEndDate(itemEndDate)
+    setEndTime(itemEndTime)
+    setLeiras(item.leiras ?? '')
+    setConflicts([])
+    setModalError('')
+    setShowModal(true)
+  }
+
   const handleDelete = async (id: number) => {
     if (!window.confirm('Biztosan törölni szeretnéd ezt a karbantartást?')) return
     try {
       await client.delete(`/maintenance/${id}`)
       setItems((prev) => prev.filter((item) => item.id !== id))
-    } catch {
-      alert('Törlés sikertelen.')
+    } catch (err: unknown) {
+      const axErr = err as { response?: { data?: { message?: string } } }
+      setError(axErr.response?.data?.message || 'Törlés sikertelen.')
     }
   }
 
@@ -238,7 +283,7 @@ export default function MaintenancePage() {
         <button
           type="button"
           className="btn btn-primary"
-          onClick={() => setShowModal(true)}
+          onClick={openCreateModal}
         >
           <Plus size={15} strokeWidth={1.5} />
           <span>Új karbantartás</span>
@@ -295,16 +340,32 @@ export default function MaintenancePage() {
                     <td>{formatDateRange(item.startTime, item.endTime)}</td>
                     <td>{item.felhasznaloNev || 'Üzemeltetés'}</td>
                     <td style={{ color: 'var(--color-gray-600)' }}>{item.leiras || '—'}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        style={{ color: 'var(--color-danger)' }}
-                        onClick={() => handleDelete(item.id)}
-                        title="Törlés"
-                      >
-                        <Trash2 size={14} strokeWidth={1.5} />
-                      </button>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {new Date(item.endTime) > new Date() ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => openEditModal(item)}
+                            aria-label={`${item.teremNev} karbantartás szerkesztése`}
+                            title="Szerkesztés"
+                          >
+                            <Pencil size={14} strokeWidth={1.5} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ color: 'var(--color-danger)' }}
+                            onClick={() => handleDelete(item.id)}
+                            aria-label={`${item.teremNev} karbantartás törlése`}
+                            title="Törlés"
+                          >
+                            <Trash2 size={14} strokeWidth={1.5} />
+                          </button>
+                        </>
+                      ) : (
+                        <span className="badge badge-neutral">Lezárult</span>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -320,7 +381,7 @@ export default function MaintenancePage() {
           <div className="modal" style={{ maxWidth: 460 }}>
             <div className="modal-header">
               <div>
-                <h2 className="modal-title">Karbantartás ütemezése</h2>
+                <h2 className="modal-title">{editingId !== null ? 'Karbantartás módosítása' : 'Karbantartás ütemezése'}</h2>
                 <p style={{ fontSize: 12.5, color: 'var(--color-gray-500)', marginTop: 2 }}>
                   Terem zárolása karbantartási munkák idejére
                 </p>
@@ -420,21 +481,27 @@ export default function MaintenancePage() {
                 </section>
               )}
 
-              <div className="form-group">
-                <label className="form-label">Dátum *</label>
-                <input
-                  type="date"
-                  className="form-input"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  required
-                />
-              </div>
-
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
-                  <label className="form-label">Kezdés *</label>
+                  <label className="form-label" htmlFor="maintenance-start-date">Kezdő nap *</label>
                   <input
+                    id="maintenance-start-date"
+                    type="date"
+                    className="form-input"
+                    value={startDate}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setStartDate(value)
+                      // A záró nap nem lehet korábbi a kezdőnél.
+                      if (!endDate || endDate < value) setEndDate(value)
+                    }}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="maintenance-start-time">Kezdés *</label>
+                  <input
+                    id="maintenance-start-time"
                     type="time"
                     className="form-input"
                     value={startTime}
@@ -443,8 +510,21 @@ export default function MaintenancePage() {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Befejezés *</label>
+                  <label className="form-label" htmlFor="maintenance-end-date">Záró nap *</label>
                   <input
+                    id="maintenance-end-date"
+                    type="date"
+                    className="form-input"
+                    min={startDate}
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor="maintenance-end-time">Befejezés *</label>
+                  <input
+                    id="maintenance-end-time"
                     type="time"
                     className="form-input"
                     value={endTime}
@@ -455,9 +535,11 @@ export default function MaintenancePage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Karbantartás leírása</label>
+                <label className="form-label" htmlFor="maintenance-description">Karbantartás leírása</label>
                 <textarea
+                  id="maintenance-description"
                   className="form-textarea"
+                  maxLength={500}
                   rows={3}
                   placeholder="pl. Projektor izzócsere, hálózati karbantartás..."
                   value={leiras}
@@ -478,7 +560,7 @@ export default function MaintenancePage() {
                   className="btn btn-primary"
                   disabled={isSaving}
                 >
-                  {isSaving ? 'Rögzítés…' : 'Karbantartás rögzítése'}
+                  {isSaving ? 'Rögzítés…' : editingId !== null ? 'Módosítás mentése' : 'Karbantartás rögzítése'}
                 </button>
               </div>
             </form>

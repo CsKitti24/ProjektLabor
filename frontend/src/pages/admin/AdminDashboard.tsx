@@ -9,6 +9,7 @@ import {
   BarChart2,
   ArrowRight,
   RefreshCw,
+  Bell,
 } from 'lucide-react'
 import client from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
@@ -18,6 +19,8 @@ interface Stats {
   activeKeys: number
   todayBookings: number
   openTickets: number
+  // Olvasatlan vagy küldés alatt álló értesítések (csak adminisztrátornak; null, ha nem elérhető).
+  pendingNotifications: number | null
 }
 
 interface BookingListResponse {
@@ -58,8 +61,20 @@ async function fetchAllTickets(): Promise<Ticket[]> {
   return tickets
 }
 
+// A függő értesítések száma (GET /notifications/pending, X-Total-Count). Nem kritikus: hiba esetén null.
+async function countPendingNotifications(): Promise<number | null> {
+  try {
+    const response = await client.get('/notifications/pending', { params: { page: 1, pageSize: 1 } })
+    const total = Number(response.headers?.['x-total-count'])
+    return Number.isFinite(total) ? total : null
+  } catch {
+    return null
+  }
+}
+
 export default function AdminDashboard() {
   const { user } = useAuth()
+  const isAdmin = user?.role === 'Adminisztrator'
   const [stats, setStats] = useState<Stats | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
@@ -85,12 +100,13 @@ export default function AdminDashboard() {
             ig: endOfDay.toISOString(),
           },
         })
-      const [roomsRes, keysRes, activeBookingsRes, doneBookingsRes, ticketsData] = await Promise.all([
+      const [roomsRes, keysRes, activeBookingsRes, doneBookingsRes, ticketsData, pendingNotifications] = await Promise.all([
         client.get<Array<{ aktivalva?: boolean }>>('/rooms'),
         client.get<Array<{ jelenlegiAllapot?: string }>>('/keys'),
         countTodayBookings('Aktiv'),
         countTodayBookings('Kesz'),
         fetchAllTickets(),
+        isAdmin ? countPendingNotifications() : Promise.resolve(null),
       ])
 
       if (!Array.isArray(roomsRes.data) || !Array.isArray(keysRes.data) ||
@@ -109,13 +125,14 @@ export default function AdminDashboard() {
         activeKeys,
         todayBookings: activeBookingsRes.data.totalCount + doneBookingsRes.data.totalCount,
         openTickets,
+        pendingNotifications,
       })
     } catch {
       setError('Az áttekintő adatok betöltése nem sikerült. Ellenőrizd a kapcsolatot, majd próbáld újra.')
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [isAdmin])
 
   useEffect(() => {
     void Promise.resolve().then(() => loadDashboard())
@@ -189,6 +206,18 @@ export default function AdminDashboard() {
                 <div className="stat-card-label">Nyitott hibajegyek</div>
               </div>
             </div>
+
+            {stats.pendingNotifications !== null && (
+              <div className="stat-card">
+                <div className="stat-card-icon">
+                  <Bell size={18} strokeWidth={1.5} />
+                </div>
+                <div className="stat-card-body">
+                  <div className="stat-card-value">{stats.pendingNotifications}</div>
+                  <div className="stat-card-label">Olvasatlan értesítések (oktatók, portások)</div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Gyorshivatkozások */}

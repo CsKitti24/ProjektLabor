@@ -27,6 +27,8 @@ namespace ProjektLabor.Endpoints
             // U1 – GET /api/users
             group.MapGet("/", async (
                 string? role,
+                string? kereses,
+                bool? aktiv,
                 int? page,
                 int? pageSize,
                 AppDbContext db) =>
@@ -42,10 +44,26 @@ namespace ProjektLabor.Endpoints
                     query = query.Where(u => u.Role == role);
                 }
 
+                if (aktiv.HasValue)
+                {
+                    query = query.Where(u => u.Aktiv == aktiv.Value);
+                }
+
+                // Szabad szöveges keresés névben, felhasználónévben és e-mail-címben (kis- és nagybetűtől függetlenül).
+                if (!string.IsNullOrWhiteSpace(kereses))
+                {
+                    var term = kereses.Trim().ToLower();
+                    query = query.Where(u =>
+                        u.Nev.ToLower().Contains(term) ||
+                        u.Username.ToLower().Contains(term) ||
+                        u.Email.ToLower().Contains(term));
+                }
+
                 int totalCount = await query.CountAsync();
 
                 var items = await query
-                    .OrderBy(u => u.Id)
+                    .OrderBy(u => u.Nev)
+                    .ThenBy(u => u.Id)
                     .Skip((normalizedPage - 1) * normalizedPageSize)
                     .Take(normalizedPageSize)
                     .Select(u => new UserDto
@@ -71,7 +89,7 @@ namespace ProjektLabor.Endpoints
                 });
             })
             .WithName("GetUsers")
-            .WithSummary("Felhasználók listázása lapozással és szerepkör szerinti szűréssel")
+            .WithSummary("Felhasználók listázása lapozással, szerepkör/aktív állapot szerinti szűréssel és kereséssel")
             .Produces<UserListDto>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden);
