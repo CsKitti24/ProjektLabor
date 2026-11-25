@@ -75,6 +75,8 @@ namespace ProjektLabor.Endpoints
                         Role = u.Role,
                         Aktiv = u.Aktiv,
                         HasPin = u.PinHash != null,
+                        FoglalasFelfuggesztveEddig = u.FoglalasFelfuggesztveEddig,
+                        FelfuggesztesOka = u.FelfuggesztesOka,
                         CreatedAt = u.CreatedAt,
                         UpdatedAt = u.UpdatedAt
                     })
@@ -109,6 +111,8 @@ namespace ProjektLabor.Endpoints
                         Role = u.Role,
                         Aktiv = u.Aktiv,
                         HasPin = u.PinHash != null,
+                        FoglalasFelfuggesztveEddig = u.FoglalasFelfuggesztveEddig,
+                        FelfuggesztesOka = u.FelfuggesztesOka,
                         CreatedAt = u.CreatedAt,
                         UpdatedAt = u.UpdatedAt
                     })
@@ -205,6 +209,8 @@ namespace ProjektLabor.Endpoints
                     Role = user.Role,
                     Aktiv = user.Aktiv,
                     HasPin = user.PinHash != null,
+                    FoglalasFelfuggesztveEddig = user.FoglalasFelfuggesztveEddig,
+                    FelfuggesztesOka = user.FelfuggesztesOka,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
                 };
@@ -291,6 +297,8 @@ namespace ProjektLabor.Endpoints
                     Role = user.Role,
                     Aktiv = user.Aktiv,
                     HasPin = user.PinHash != null,
+                    FoglalasFelfuggesztveEddig = user.FoglalasFelfuggesztveEddig,
+                    FelfuggesztesOka = user.FelfuggesztesOka,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
                 };
@@ -349,6 +357,10 @@ namespace ProjektLabor.Endpoints
 
                 user.Aktiv = false;
                 user.UpdatedAt = DateTime.UtcNow;
+                // Inaktiváláskor a mesterkulcs-jogosultságok is megszűnnek, hogy újraaktiváláskor ne jöjjenek
+                // vissza szó nélkül (szükség esetén az admin újra megadja őket).
+                var removedGrants = await db.MesterkulcsJogosultsagok.Where(access => access.FelhasznaloId == id).ToListAsync();
+                db.MesterkulcsJogosultsagok.RemoveRange(removedGrants);
                 await db.SaveChangesAsync();
 
                 await auditService.LogAsync(
@@ -357,7 +369,10 @@ namespace ProjektLabor.Endpoints
                     entitasTipus: "Felhasznalo",
                     entitasId: id.ToString(),
                     regiErtek: $"Username: {user.Username}, Role: {user.Role}, Aktiv: true",
-                    ujErtek: "Aktiv: false");
+                    ujErtek: "Aktiv: false",
+                    indoklas: removedGrants.Count > 0
+                        ? $"{removedGrants.Count} mesterkulcs-jogosultság megszűnt (KulcsId: {string.Join(",", removedGrants.Select(access => access.KulcsId))})."
+                        : null);
 
                 return Results.Ok(new { message = $"A(z) {id} azonosítójú felhasználó inaktiválva lett." });
             })
@@ -492,6 +507,8 @@ namespace ProjektLabor.Endpoints
                     Role = user.Role,
                     Aktiv = user.Aktiv,
                     HasPin = user.PinHash != null,
+                    FoglalasFelfuggesztveEddig = user.FoglalasFelfuggesztveEddig,
+                    FelfuggesztesOka = user.FelfuggesztesOka,
                     CreatedAt = user.CreatedAt,
                     UpdatedAt = user.UpdatedAt
                 });
@@ -542,6 +559,70 @@ namespace ProjektLabor.Endpoints
             .WithName("SetUserPin")
             .WithSummary("Felhasználói PIN beállítása kulcsátvételhez")
             .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden);
+
+            // U8 – PUT /api/users/{id}/booking-suspension
+            // Foglalási jog ideiglenes felfüggesztése (pl. a megbízhatósági pontok miatt hozott adminisztratív
+            // döntés). Az oktató ezalatt be tud lépni, de új foglalást nem rögzíthet (adminisztrátor sem a nevére).
+            group.MapPut("/{id:int}/booking-suspension", async (
+                int id,
+                BookingSuspensionRequestDto request,
+                AppDbContext db,
+                AuditService auditService,
+                ClaimsPrincipal caller,
+                TimeProvider timeProvider) =>
+            {
+                var user = await db.Felhasznalok.FindAsync(id);
+                if (user is null)
+                {
+                    return Results.NotFound(new { message = $"A(z) {id} azonosítójú felhasználó nem található." });
+                }
+
+                if (user.Role != RoleNames.Oktato)
+                {
+                    return Results.BadRequest(new { message = "Foglalási jogot csak oktatónál lehet felfüggeszteni." });
+                }
+
+                var until = request.Eddig.HasValue ? AppTime.ToUtc(request.Eddig.Value) : (DateTime?)null;
+                if (until.HasValue && until.Value <= timeProvider.GetUtcNow().UtcDateTime)
+                {
+                    return Results.BadRequest(new { message = "A felfüggesztés végének a jövőben kell lennie." });
+                }
+                if (until.HasValue && string.IsNullOrWhiteSpace(request.Indoklas))
+                {
+                    return Results.BadRequest(new { message = "A felfüggesztéshez indoklás szükséges." });
+                }
+
+                var previous = user.FoglalasFelfuggesztveEddig;
+                user.FoglalasFelfuggesztveEddig = until;
+                user.FelfuggesztesOka = until.HasValue ? request.Indoklas!.Trim() : null;
+                user.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+
+                await auditService.LogAsync(
+                    caller,
+                    muveletTipus: "BOOKING_SUSPENSION",
+                    entitasTipus: "Felhasznalo",
+                    entitasId: id.ToString(),
+                    regiErtek: previous?.ToString("O") ?? "nincs",
+                    ujErtek: until?.ToString("O") ?? "feloldva",
+                    indoklas: user.FelfuggesztesOka);
+
+                return Results.Ok(new
+                {
+                    message = until.HasValue
+                        ? $"{user.Nev} foglalási joga {AppTime.ToLocal(until.Value):yyyy.MM.dd. HH:mm}-ig felfüggesztve."
+                        : $"{user.Nev} foglalási jogának felfüggesztése feloldva.",
+                    foglalasFelfuggesztveEddig = until,
+                    felfuggesztesOka = user.FelfuggesztesOka
+                });
+            })
+            .WithName("SetBookingSuspension")
+            .WithSummary("Oktató foglalási jogának ideiglenes felfüggesztése vagy feloldása")
+            .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)

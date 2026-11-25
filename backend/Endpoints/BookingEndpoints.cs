@@ -188,7 +188,7 @@ namespace ProjektLabor.Endpoints
                 if (!canReadAnyBooking &&
                     (!caller.IsInRole("Oktato") || dto.FelhasznaloId != callerId))
                 {
-                    return Results.Forbid();
+                    return ApiErrors.Forbidden("Ehhez a foglaláshoz nincs hozzáférésed.");
                 }
 
                 return Results.Ok(dto);
@@ -207,6 +207,35 @@ namespace ProjektLabor.Endpoints
                 ClaimsPrincipal caller,
                 TimeProvider timeProvider) =>
             {
+                if (GetCallerId(caller) is not { } callerId)
+                {
+                    return Results.Unauthorized();
+                }
+
+                var targetUserId = request.FelhasznaloId.HasValue && caller.IsInRole("Adminisztrator")
+                    ? request.FelhasznaloId.Value
+                    : callerId;
+                var targetUser = await db.Felhasznalok.FindAsync(targetUserId);
+                if (targetUser is null || !targetUser.Aktiv)
+                {
+                    return Results.NotFound(new { message = $"A(z) {targetUserId} azonosítójú aktív felhasználó nem található." });
+                }
+
+                // Kulcsot csak oktató vehet át, ezért foglalás is csak oktató nevére szólhat
+                // (különben a foglalás biztosan no-show lenne).
+                if (targetUser.Role != ProjektLabor.Security.RoleNames.Oktato)
+                {
+                    return Results.BadRequest(new { message = "Foglalás csak oktató nevére rögzíthető; adminként add meg az oktatót (felhasznaloId)." });
+                }
+
+                // A felfüggesztést az időpont-ellenőrzések előtt nézzük, hogy az oktató ezt az okot lássa.
+                if (targetUser.FoglalasFelfuggesztveEddig > timeProvider.GetUtcNow().UtcDateTime)
+                {
+                    return ApiErrors.Forbidden(
+                        $"{targetUser.Nev} foglalási joga {AppTime.ToLocal(targetUser.FoglalasFelfuggesztveEddig.Value):yyyy.MM.dd. HH:mm}-ig fel van függesztve" +
+                        (string.IsNullOrWhiteSpace(targetUser.FelfuggesztesOka) ? "." : $": {targetUser.FelfuggesztesOka}"));
+                }
+
                 var timeError = BookingRules.ValidateTimeRange(request.StartTime, request.EndTime);
                 if (timeError is not null)
                 {
@@ -226,11 +255,6 @@ namespace ProjektLabor.Endpoints
                     return Results.BadRequest(new { message = windowError });
                 }
 
-                if (GetCallerId(caller) is not { } callerId)
-                {
-                    return Results.Unauthorized();
-                }
-
                 var room = await db.Termek.FindAsync(request.TeremId);
                 if (room is null)
                 {
@@ -240,22 +264,6 @@ namespace ProjektLabor.Endpoints
                 if (!room.Aktivalva)
                 {
                     return Results.BadRequest(new { message = "Deaktivált teremre nem lehet foglalást rögzíteni." });
-                }
-
-                var targetUserId = request.FelhasznaloId.HasValue && caller.IsInRole("Adminisztrator")
-                    ? request.FelhasznaloId.Value
-                    : callerId;
-                var targetUser = await db.Felhasznalok.FindAsync(targetUserId);
-                if (targetUser is null || !targetUser.Aktiv)
-                {
-                    return Results.NotFound(new { message = $"A(z) {targetUserId} azonosítójú aktív felhasználó nem található." });
-                }
-
-                // Kulcsot csak oktató vehet át, ezért foglalás is csak oktató nevére szólhat
-                // (különben a foglalás biztosan no-show lenne).
-                if (targetUser.Role != ProjektLabor.Security.RoleNames.Oktato)
-                {
-                    return Results.BadRequest(new { message = "Foglalás csak oktató nevére rögzíthető; adminként add meg az oktatót (felhasznaloId)." });
                 }
 
                 return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>
@@ -358,11 +366,11 @@ namespace ProjektLabor.Endpoints
                 bool isAdmin = caller.IsInRole("Adminisztrator");
                 if (!isAdmin && snapshot.FelhasznaloId != callerId)
                 {
-                    return Results.Forbid();
+                    return ApiErrors.Forbidden("Csak a saját foglalásodat módosíthatod.");
                 }
                 if (!isAdmin && request.TeremId.HasValue)
                 {
-                    return Results.Forbid();
+                    return ApiErrors.Forbidden("A foglalás termét csak az adminisztrátor módosíthatja.");
                 }
 
                 string? requestedStatus = null;
@@ -418,7 +426,7 @@ namespace ProjektLabor.Endpoints
                 if (statusChanges &&
                     !BookingRules.IsUserStatusChangeAllowed(booking.Status, resultingStatus, isAdmin))
                 {
-                    return Results.Forbid();
+                    return ApiErrors.Forbidden("A foglalás erre az állapotra nem módosítható (a lezárt és a no-show állapotot a rendszer állítja be, visszaaktiválni csak az adminisztrátor tud).");
                 }
 
                 var hasStarted = booking.StartTime <= now;
@@ -436,6 +444,23 @@ namespace ProjektLabor.Endpoints
                     if (hasStarted)
                     {
                         return Results.BadRequest(new { message = "Már megkezdődött vagy lezajlott foglalás időpontja nem módosítható." });
+                    }
+
+                    // Ha a foglaláshoz már kiadták (korán felvették) a kulcsot, a foglalás nem tehető át másik
+                    // terembe: az oktatónál a régi terem kulcsa van.
+                    if (newRoomId != booking.TeremId && await HasIssuedKeyForBookingAsync(db, booking.Id))
+                    {
+                        return Results.Conflict(new { message = "A foglaláshoz már kiadták a kulcsot; másik terembe csak a kulcs visszavétele után helyezhető át." });
+                    }
+                }
+
+                // Lemondott foglalás visszaaktiválásakor is érvényes az oktatónkénti jövőbeli foglaláskorlát.
+                if (statusChanges && resultingStatus == BookingRules.ActiveStatus)
+                {
+                    var quotaError = await BookingRules.ValidateInstructorQuotaAsync(db, booking.FelhasznaloId, now);
+                    if (quotaError is not null)
+                    {
+                        return Results.Conflict(new { message = quotaError });
                     }
                 }
 
@@ -563,7 +588,7 @@ namespace ProjektLabor.Endpoints
                 bool isAdmin = caller.IsInRole("Adminisztrator");
                 if (!isAdmin && booking.FelhasznaloId != callerId)
                 {
-                    return Results.Forbid();
+                    return ApiErrors.Forbidden("Csak a saját foglalásodat mondhatod le.");
                 }
 
                 if (booking.Status != BookingRules.ActiveStatus)
@@ -616,6 +641,18 @@ namespace ProjektLabor.Endpoints
             var subject = caller.FindFirst("sub")?.Value ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             return int.TryParse(subject, out var userId) && userId > 0 ? userId : null;
         }
+
+        // Van-e a foglaláshoz kötött kiadás, amelynek a kulcsa most is kint van.
+        private static Task<bool> HasIssuedKeyForBookingAsync(AppDbContext db, int bookingId) =>
+            db.Kulcsmozgasok
+                .Where(movement =>
+                    movement.FoglalasId == bookingId &&
+                    (movement.MozgasTipus == KeyMovementTypes.Issue || movement.MozgasTipus == KeyMovementTypes.LegacyIssue) &&
+                    !db.Kulcsmozgasok.Any(newer =>
+                        newer.KulcsId == movement.KulcsId &&
+                        (newer.Idopont > movement.Idopont ||
+                         (newer.Idopont == movement.Idopont && newer.Id > movement.Id))))
+                .AnyAsync();
 
         private static bool IsOverlapException(InvalidOperationException exception) =>
             exception is BookingConflictException;

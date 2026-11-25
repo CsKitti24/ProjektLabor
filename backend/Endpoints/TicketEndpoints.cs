@@ -201,6 +201,13 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {request.TeremId} azonosítójú terem nem található." });
                 }
 
+                // Megszűnt (deaktivált) teremre új hibajegy nem rögzíthető; a portán rögzített sérülések
+                // csak aktív termek kulcsmozgásaihoz keletkeznek.
+                if (!room.Aktivalva)
+                {
+                    return Results.BadRequest(new { message = "Deaktivált teremre nem rögzíthető hibajegy." });
+                }
+
                 var subject = caller.FindFirst("sub")?.Value
                     ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (!int.TryParse(subject, out var userId) || userId <= 0)

@@ -9,7 +9,7 @@ namespace ProjektLabor.DTOs.Rooms
         public string Nev { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "A kapacitás megadása kötelező.")]
-        [Range(1, 10000, ErrorMessage = "A terem kapacitásának legalább 1-nek kell lennie.")]
+        [Range(1, 10000, ErrorMessage = "A terem kapacitása 1 és 10 000 között lehet.")]
         public int Kapacitas { get; set; }
 
         [MaxLength(500, ErrorMessage = "A leírás legfeljebb 500 karakter lehet.")]
@@ -26,7 +26,7 @@ namespace ProjektLabor.DTOs.Rooms
         [MaxLength(100, ErrorMessage = "A terem neve legfeljebb 100 karakter lehet.")]
         public string? Nev { get; set; }
 
-        [Range(1, 10000, ErrorMessage = "A terem kapacitásának legalább 1-nek kell lennie.")]
+        [Range(1, 10000, ErrorMessage = "A terem kapacitása 1 és 10 000 között lehet.")]
         public int? Kapacitas { get; set; }
 
         [MaxLength(500, ErrorMessage = "A leírás legfeljebb 500 karakter lehet.")]

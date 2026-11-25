@@ -23,6 +23,7 @@ namespace ProjektLabor.Endpoints
             group.MapGet("/recipients", async (
                 int kulcsId,
                 AppDbContext db,
+                TimeProvider timeProvider,
                 CancellationToken cancellationToken) =>
             {
                 var key = await db.Kulcsok
@@ -44,17 +45,57 @@ namespace ProjektLabor.Endpoints
                         access => access.KulcsId == key.Id && access.FelhasznaloId == user.Id));
                 }
 
-                var results = await recipients
-                    .OrderBy(user => user.Nev)
-                    .Select(user => new KeyRecipientDto(user.Id, user.Nev, user.Username))
+                // Akinek most esedékes foglalása van a kulcs termére, az kerül előre (a portásnak ő az alapértelmezett).
+                var dueBookings = await GetDueBookingsAsync(db, kulcsId, timeProvider.GetUtcNow().UtcDateTime, cancellationToken);
+                var dueOwners = dueBookings
+                    .GroupBy(booking => booking.FelhasznaloId)
+                    .ToDictionary(group => group.Key, group => group.Min(booking => booking.StartTime));
+
+                var users = await recipients
+                    .Select(user => new { user.Id, user.Nev, user.Username, HasPin = user.PinHash != null })
                     .ToListAsync(cancellationToken);
+                var results = users
+                    .Select(user => new KeyRecipientDto(
+                        user.Id,
+                        user.Nev,
+                        user.Username,
+                        user.HasPin,
+                        dueOwners.TryGetValue(user.Id, out var start) ? start : null))
+                    .OrderBy(user => user.EsedekesFoglalasKezdete is null)
+                    .ThenBy(user => user.EsedekesFoglalasKezdete)
+                    .ThenBy(user => user.Nev, StringComparer.Create(new CultureInfo("hu-HU"), ignoreCase: true))
+                    .ToList();
 
                 return Results.Ok(results);
             })
             .WithName("GetKeyRecipients")
-            .WithSummary("A kiválasztott kulcs átvevőjeként jogosult oktatók")
+            .WithSummary("A kiválasztott kulcs átvevőjeként jogosult oktatók (a most esedékes foglalók elöl)")
             .RequireAuthorization("Portas")
-            .Produces<List<KeyRecipientDto>>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden);
+
+            // KM0b – GET /api/key-movements/due-bookings
+            // A kulccsal nyitható termek most esedékes aktív foglalásai (kezdés előtt legfeljebb 2 órával,
+            // a foglalás végéig). Helyettesítő átvevőnél a portás ebből választja ki, kinek a foglalásához veszik fel.
+            group.MapGet("/due-bookings", async (
+                int kulcsId,
+                AppDbContext db,
+                TimeProvider timeProvider,
+                CancellationToken cancellationToken) =>
+            {
+                if (!await db.Kulcsok.AnyAsync(item => item.Id == kulcsId, cancellationToken))
+                {
+                    return Results.NotFound(new { message = "A kulcs nem található." });
+                }
+
+                return Results.Ok(await GetDueBookingsAsync(db, kulcsId, timeProvider.GetUtcNow().UtcDateTime, cancellationToken));
+            })
+            .WithName("GetDueBookingsForKey")
+            .WithSummary("A kulcs termeire most esedékes aktív foglalások")
+            .RequireAuthorization("Portas")
+            .Produces<List<DueBookingDto>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden);
@@ -108,6 +149,9 @@ namespace ProjektLabor.Endpoints
                 var now = timeProvider.GetUtcNow().UtcDateTime;
                 Felhasznalo recipient;
                 int issueRoomId;
+                // Helyettesítő átvevő: egy kolléga veszi fel a kulcsot a foglaló helyett. A kiadás ekkor is a
+                // foglaláshoz kötődik (nem lesz NoShow), a késésért járó pont pedig a foglalót terheli.
+                string? substituteNote = null;
                 if (request.FoglalasId.HasValue)
                 {
                     var booking = await db.Foglalasok
@@ -136,10 +180,21 @@ namespace ProjektLabor.Endpoints
                     {
                         return Results.BadRequest(new { message = "Kulcs átvevője csak oktató lehet." });
                     }
+                    Felhasznalo? substitute = null;
                     if (request.AtvevoFelhasznaloId.HasValue &&
                         request.AtvevoFelhasznaloId.Value != booking.FelhasznaloId)
                     {
-                        return Results.BadRequest(new { message = "A foglaláshoz tartozó átvevő nem módosítható." });
+                        substitute = await db.Felhasznalok
+                            .SingleOrDefaultAsync(user => user.Id == request.AtvevoFelhasznaloId.Value);
+                        if (substitute is null)
+                        {
+                            return Results.NotFound(new { message = "A megadott helyettesítő átvevő nem található." });
+                        }
+                        if (substitute.Role != RoleNames.Oktato)
+                        {
+                            return Results.BadRequest(new { message = "Helyettesítő átvevő is csak oktató lehet." });
+                        }
+                        substituteNote = $"Helyettesítő átvevő – a foglaló: {booking.Felhasznalo.Nev}";
                     }
 
                     if (key.Tipus == "Mesterkulcs")
@@ -161,7 +216,7 @@ namespace ProjektLabor.Endpoints
                     }
 
                     issueRoomId = booking.TeremId;
-                    recipient = booking.Felhasznalo;
+                    recipient = substitute ?? booking.Felhasznalo;
                 }
                 else
                 {
@@ -201,6 +256,12 @@ namespace ProjektLabor.Endpoints
                     issueRoomId = key.Tipus == "Mesterkulcs"
                         ? request.TeremId!.Value
                         : key.TeremId;
+                }
+
+                // Deaktivált (megszűnt) terem kulcsa nem adható ki, mesterkulcs sem nyithat inaktív termet.
+                if (!await db.Termek.AnyAsync(room => room.Id == issueRoomId && room.Aktivalva))
+                {
+                    return Results.BadRequest(new { message = "A terem deaktivált, ezért a kulcsa nem adható ki." });
                 }
 
                 if (!recipient.Aktiv)
@@ -251,7 +312,9 @@ namespace ProjektLabor.Endpoints
                     MozgasTipus = KeyMovementTypes.Issue,
                     Idopont = now,
                     OperátorId = operatorId.Value,
-                    Megjegyzes = request.Megjegyzes ?? string.Empty,
+                    Megjegyzes = substituteNote is null
+                        ? request.Megjegyzes ?? string.Empty
+                        : substituteNote + (string.IsNullOrWhiteSpace(request.Megjegyzes) ? string.Empty : $" ({request.Megjegyzes.Trim()})"),
                     TeremAllapot = request.TeremAllapot.Trim(),
                     SerulesLeiras = NormalizeDamageDescription(request.SerulesLeiras),
                     CreatedAt = now
@@ -594,15 +657,15 @@ namespace ProjektLabor.Endpoints
                             TeremNev = roomNames.GetValueOrDefault(last.RoomId, string.Empty),
                             KiadasIdeje = last.Idopont,
                             FoglalasId = last.FoglalasId,
-                            FoglalasVége = last.FoglalasVege,
+                            FoglalasVege = last.FoglalasVege,
                             BirtokosNev = last.BirtokosNev,
                             BirtokosEmail = last.BirtokosEmail,
-                            KésésPercekben = Math.Round((now - deadline).TotalMinutes, 1)
+                            KesesPercekben = Math.Round((now - deadline).TotalMinutes, 1)
                         });
                     }
                 }
 
-                return Results.Ok(overdueList.OrderByDescending(o => o.KésésPercekben).ToList());
+                return Results.Ok(overdueList.OrderByDescending(o => o.KesesPercekben).ToList());
             })
             .WithName("GetOverdueKeys")
             .WithSummary("Lejárt vagy le nem adott kulcsok listázása")
@@ -918,6 +981,48 @@ namespace ProjektLabor.Endpoints
             return ticket;
         }
 
-        private sealed record KeyRecipientDto(int Id, string Nev, string Username);
+        private sealed record KeyRecipientDto(int Id, string Nev, string Username, bool HasPin, DateTime? EsedekesFoglalasKezdete);
+
+        public sealed record DueBookingDto(int FoglalasId, int FelhasznaloId, string FelhasznaloNev, int TeremId, string TeremNev, DateTime StartTime, DateTime EndTime);
+
+        // A kulccsal nyitható termek (osztálykulcsnál a saját terme, mesterkulcsnál a hozzárendelt termek)
+        // most esedékes aktív foglalásai.
+        private static async Task<List<DueBookingDto>> GetDueBookingsAsync(
+            AppDbContext db,
+            int keyId,
+            DateTime nowUtc,
+            CancellationToken cancellationToken)
+        {
+            var key = await db.Kulcsok.AsNoTracking()
+                .Where(item => item.Id == keyId)
+                .Select(item => new { item.Tipus, item.TeremId })
+                .SingleOrDefaultAsync(cancellationToken);
+            if (key is null)
+            {
+                return [];
+            }
+
+            var roomIds = key.Tipus == "Mesterkulcs"
+                ? await db.KulcsTermek.Where(link => link.KulcsId == keyId).Select(link => link.TeremId).ToListAsync(cancellationToken)
+                : [key.TeremId];
+            var latestStart = nowUtc.Add(BookingRules.KeyIssueLeadTime);
+            return await db.Foglalasok
+                .AsNoTracking()
+                .Where(booking =>
+                    roomIds.Contains(booking.TeremId) &&
+                    booking.Status == BookingRules.ActiveStatus &&
+                    booking.StartTime <= latestStart &&
+                    booking.EndTime > nowUtc)
+                .OrderBy(booking => booking.StartTime)
+                .Select(booking => new DueBookingDto(
+                    booking.Id,
+                    booking.FelhasznaloId,
+                    booking.Felhasznalo.Nev,
+                    booking.TeremId,
+                    booking.Terem.Nev,
+                    booking.StartTime,
+                    booking.EndTime))
+                .ToListAsync(cancellationToken);
+        }
     }
 }

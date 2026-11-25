@@ -4,6 +4,7 @@ import { User as UserIcon, LogOut, Shield, Mail, Award, RefreshCw, KeyRound } fr
 import axios from 'axios'
 import { useAuth, type UserRole } from '../auth/AuthContext'
 import client from '../api/client'
+import { formatDateTime } from '../utils/dateTime'
 
 function getRoleLabel(role: UserRole): string {
   switch (role) {
@@ -18,6 +19,20 @@ function getRoleLabel(role: UserRole): string {
     default:
       return role
   }
+}
+
+interface ReliabilityEvent {
+  id: number
+  esemenyTipus: string
+  pont: number
+  esemenyIdopontja: string
+  indoklas?: string | null
+}
+
+const EVENT_LABELS: Record<string, string> = {
+  LeNemAdott: 'A kulcs a napi zárásig nem került vissza',
+  'Késedelmesen leadott': 'Késedelmes leadás',
+  'Manuális korrekció': 'Kézi korrekció',
 }
 
 interface ReliabilityData {
@@ -35,6 +50,26 @@ export default function ProfilePage() {
   const [isLoadingReliability, setIsLoadingReliability] = useState(false)
   const [reliabilityError, setReliabilityError] = useState('')
   const canViewReliability = user?.role === 'Oktato'
+  // A pontszám okai (az aktuális tanév eseményei): csak kérésre töltjük be.
+  const [events, setEvents] = useState<ReliabilityEvent[] | null>(null)
+  const [eventsError, setEventsError] = useState('')
+  const [showEvents, setShowEvents] = useState(false)
+
+  const toggleEvents = async () => {
+    if (showEvents) {
+      setShowEvents(false)
+      return
+    }
+    setShowEvents(true)
+    if (events !== null) return
+    try {
+      const response = await client.get<ReliabilityEvent[]>('/reliability/my/events')
+      setEvents(Array.isArray(response.data) ? response.data : [])
+      setEventsError('')
+    } catch {
+      setEventsError('Az események betöltése nem sikerült.')
+    }
+  }
 
   const loadReliability = useCallback(async () => {
     if (!canViewReliability) return
@@ -232,6 +267,29 @@ export default function ProfilePage() {
                   <p className="profile-stat-desc">
                     A magasabb pont több rögzített hibát jelent. Tanév: {reliability.tanev}.
                   </p>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => void toggleEvents()} aria-expanded={showEvents}>
+                    {showEvents ? 'Események elrejtése' : 'Miért kaptam pontot?'}
+                  </button>
+                  {showEvents && (
+                    eventsError ? (
+                      <div className="alert alert-error" role="alert">{eventsError}</div>
+                    ) : events === null ? (
+                      <span className="spinner spinner-primary" />
+                    ) : events.length === 0 ? (
+                      <p className="profile-stat-desc">Ebben a tanévben nincs rögzített eseményed.</p>
+                    ) : (
+                      <ul aria-label="Megbízhatósági eseményeim" style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 6 }}>
+                        {events.map((item) => (
+                          <li key={item.id} style={{ fontSize: 12.5, borderTop: '1px solid var(--color-gray-100)', paddingTop: 6 }}>
+                            <strong>{item.pont > 0 ? `+${item.pont}` : item.pont} pont</strong> – {EVENT_LABELS[item.esemenyTipus] ?? item.esemenyTipus}
+                            <div style={{ color: 'var(--color-gray-500)' }}>
+                              {formatDateTime(item.esemenyIdopontja)}{item.indoklas ? ` · ${item.indoklas}` : ''}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )
+                  )}
                 </>
               ) : reliabilityError ? (
                 <div className="alert alert-error" role="alert">

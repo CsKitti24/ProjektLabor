@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Key, AlertCircle, RefreshCw, Clock } from 'lucide-react'
 import client from '../../api/client'
-import { formatDelay } from '../../utils/dateTime'
+import { formatDateTime, formatDelay } from '../../utils/dateTime'
 
 interface KeyItem {
   id: number | string
@@ -10,6 +10,9 @@ interface KeyItem {
   teremNev?: string
   jelenlegiAllapot?: string
   aktivalva?: boolean
+  birtokosNev?: string | null
+  kiadasIdeje?: string | null
+  kiadottTeremNev?: string | null
 }
 
 interface OverdueKey {
@@ -19,7 +22,7 @@ interface OverdueKey {
   kiadasIdeje: string
   birtokosNev?: string
   birtokosEmail?: string
-  késésPercekben: number
+  kesesPercekben: number
   hatarido?: string
 }
 
@@ -140,7 +143,7 @@ export default function ActiveKeysPage() {
                     <td>#{key.kulcsSzam}</td>
                     <td>{key.teremNev}</td>
                     <td>{key.birtokosNev || key.birtokosEmail || 'Ismeretlen átvevő'}</td>
-                    <td>{formatDelay(key.késésPercekben)}</td>
+                    <td>{formatDelay(key.kesesPercekben)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -160,14 +163,15 @@ export default function ActiveKeysPage() {
               <tr>
                 <th>Kulcsszám</th>
                 <th>Típus</th>
-                <th>Hozzárendelt terem</th>
-                <th>Állapot</th>
+                <th>Kiadás terme</th>
+                <th>Kinél van</th>
+                <th>Kiadva</th>
               </tr>
             </thead>
             <tbody>
               {issuedKeys.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 36 }}>
+                  <td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-gray-500)', padding: 36 }}>
                     Jelenleg egyetlen kulcs sincs kint, minden kulcs a helyén a portán.
                   </td>
                 </tr>
@@ -180,10 +184,10 @@ export default function ActiveKeysPage() {
                     <td>
                       <span className="badge badge-neutral">{k.tipus || 'Osztálykulcs'}</span>
                     </td>
-                    <td>{k.teremNev || '—'}</td>
-                    <td>
-                      <span className="badge badge-warning">Kiadva</span>
-                    </td>
+                    {/* Mesterkulcsnál a kiadás terme számít, nem a kulcs saját terme. */}
+                    <td>{k.kiadottTeremNev || k.teremNev || '—'}</td>
+                    <td style={{ fontWeight: 600 }}>{k.birtokosNev || 'Ismeretlen átvevő'}</td>
+                    <td>{k.kiadasIdeje ? formatDateTime(k.kiadasIdeje) : '—'}</td>
                   </tr>
                 ))
               )}

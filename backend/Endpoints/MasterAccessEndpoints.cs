@@ -36,7 +36,7 @@ public static class MasterAccessEndpoints
     {
         if (await GetAdministratorIdAsync(principal, db, cancellationToken) is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ApiErrors.AdminOnly);
         }
 
         if (!await IsMasterKeyAsync(id, db, cancellationToken))
@@ -68,7 +68,7 @@ public static class MasterAccessEndpoints
     {
         if (await GetAdministratorIdAsync(principal, db, cancellationToken) is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ApiErrors.AdminOnly);
         }
 
         if (request.UserId <= 0)
@@ -137,7 +137,7 @@ public static class MasterAccessEndpoints
     {
         if (await GetAdministratorIdAsync(principal, db, cancellationToken) is null)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden(ApiErrors.AdminOnly);
         }
 
         if (!await IsMasterKeyAsync(id, db, cancellationToken))
@@ -152,6 +152,21 @@ public static class MasterAccessEndpoints
         if (access is null)
         {
             return Results.NotFound(new { message = "A jogosultság nem található." });
+        }
+
+        // Amíg a mesterkulcs ennél az oktatónál van, a jogosultsága nem vonható vissza (előbb vissza kell venni).
+        var latestMovement = await db.Kulcsmozgasok
+            .AsNoTracking()
+            .Where(movement => movement.KulcsId == id)
+            .OrderByDescending(movement => movement.Idopont)
+            .ThenByDescending(movement => movement.Id)
+            .Select(movement => new { movement.MozgasTipus, movement.AtvevoFelhasznaloId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (latestMovement is not null &&
+            KeyMovementTypes.IsIssue(latestMovement.MozgasTipus) &&
+            latestMovement.AtvevoFelhasznaloId == userId)
+        {
+            return Results.Conflict(new { message = "A mesterkulcs jelenleg ennél az oktatónál van; a jogosultság a kulcs visszavétele után vonható vissza." });
         }
 
         return await SqlServerLocking.ExecuteWithRetryAsync<IResult>(db, async () =>

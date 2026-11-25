@@ -154,7 +154,8 @@ export default function TicketsPage() {
     setIsLoadingRooms(true)
     setRoomsError('')
     try {
-      const response = await client.get<RoomOption[]>('/rooms')
+      // Hibajegy csak aktív teremre rögzíthető.
+      const response = await client.get<RoomOption[]>('/rooms', { params: { aktivalva: true } })
       if (!Array.isArray(response.data)) {
         throw new Error('A teremlista formátuma érvénytelen.')
       }

@@ -3,6 +3,7 @@ import { Users, AlertCircle, Check, Shield, UserPlus, Search } from 'lucide-reac
 import client from '../../api/client'
 import Pagination, { DEFAULT_PAGE_SIZE } from '../../components/Pagination'
 import CreateUserModal from './CreateUserModal'
+import { formatDateTime } from '../../utils/dateTime'
 
 interface UserItem {
   id: number | string
@@ -12,6 +13,12 @@ interface UserItem {
   email?: string
   aktiv?: boolean
   hasPin?: boolean
+  foglalasFelfuggesztveEddig?: string | null
+  felfuggesztesOka?: string | null
+}
+
+function isSuspended(user: UserItem): boolean {
+  return !!user.foglalasFelfuggesztveEddig && new Date(user.foglalasFelfuggesztveEddig).getTime() > Date.now()
 }
 
 function errorMessage(err: unknown, fallback: string): string {
@@ -58,6 +65,9 @@ export default function UsersPage() {
   const [roleFilter, setRoleFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
+  const [suspendingId, setSuspendingId] = useState<string | number | null>(null)
+  const [suspendUntil, setSuspendUntil] = useState('')
+  const [suspendReason, setSuspendReason] = useState('')
 
   // A keresés gépelés közben, rövid várakozás után frissül (nem minden billentyűleütésre).
   useEffect(() => {
@@ -212,6 +222,32 @@ export default function UsersPage() {
     } catch (err: unknown) {
       setConfirmDeactivateId(null)
       setError(errorMessage(err, 'A felhasználó inaktiválása sikertelen.'))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const submitSuspension = async (user: UserItem, until: string | null) => {
+    if (until !== null && (!until || !suspendReason.trim())) {
+      setError('A felfüggesztéshez add meg a végét és az indoklást.')
+      return
+    }
+    setIsSaving(true)
+    setError('')
+    try {
+      const response = await client.put<{ message: string; foglalasFelfuggesztveEddig: string | null; felfuggesztesOka: string | null }>(
+        `/users/${user.id}/booking-suspension`,
+        { eddig: until, indoklas: until ? suspendReason.trim() : null },
+      )
+      setUsers((prev) => prev.map((u) => (u.id === user.id
+        ? { ...u, foglalasFelfuggesztveEddig: response.data.foglalasFelfuggesztveEddig, felfuggesztesOka: response.data.felfuggesztesOka }
+        : u)))
+      setSuspendingId(null)
+      setSuspendUntil('')
+      setSuspendReason('')
+      showSuccess(response.data.message)
+    } catch (err: unknown) {
+      setError(errorMessage(err, 'A foglalási jog módosítása sikertelen.'))
     } finally {
       setIsSaving(false)
     }
@@ -430,6 +466,15 @@ export default function UsersPage() {
                               Nincs PIN
                             </span>
                           )}
+                          {user.role === 'Oktato' && isSuspended(user) && (
+                            <span
+                              className="badge badge-warning"
+                              style={{ marginLeft: 6 }}
+                              title={user.felfuggesztesOka ?? undefined}
+                            >
+                              Foglalás felfüggesztve {formatDateTime(user.foglalasFelfuggesztveEddig)}-ig
+                            </span>
+                          )}
                         </>
                       )}
                     </td>
@@ -485,6 +530,41 @@ export default function UsersPage() {
                         >
                           Újraaktiválás
                         </button>
+                      ) : suspendingId === user.id ? (
+                        <div style={{ display: 'inline-grid', gap: 6, justifyItems: 'end' }}>
+                          <input
+                            aria-label={`${user.nev || user.username} foglalási felfüggesztés vége`}
+                            className="form-input"
+                            type="datetime-local"
+                            value={suspendUntil}
+                            onChange={(e) => setSuspendUntil(e.target.value)}
+                          />
+                          <input
+                            aria-label={`${user.nev || user.username} felfüggesztés indoklása`}
+                            className="form-input"
+                            placeholder="Indoklás"
+                            maxLength={500}
+                            value={suspendReason}
+                            onChange={(e) => setSuspendReason(e.target.value)}
+                          />
+                          <div style={{ display: 'inline-flex', gap: 6 }}>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              disabled={isSaving || !suspendUntil || !suspendReason.trim()}
+                              onClick={() => submitSuspension(user, suspendUntil)}
+                            >
+                              Felfüggesztés
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setSuspendingId(null)}
+                            >
+                              Mégse
+                            </button>
+                          </div>
+                        </div>
                       ) : confirmDeactivateId === user.id ? (
                         <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                           <span style={{ fontSize: 12, color: 'var(--color-gray-600)' }}>Biztosan inaktiválod?</span>
@@ -513,6 +593,24 @@ export default function UsersPage() {
                           >
                             Módosítás
                           </button>
+                          {user.role === 'Oktato' && (isSuspended(user) ? (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              disabled={isSaving}
+                              onClick={() => submitSuspension(user, null)}
+                            >
+                              Foglalás engedélyezése
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => { setSuspendingId(user.id); setSuspendUntil(''); setSuspendReason('') }}
+                            >
+                              Foglalás felfüggesztése
+                            </button>
+                          ))}
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"

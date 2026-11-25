@@ -133,6 +133,11 @@ export default function RoomsPage() {
       setModalError('A terem nevének megadása kötelező.')
       return
     }
+    const capacity = Number(newKapacitas)
+    if (!Number.isInteger(capacity) || capacity < 1 || capacity > 10000) {
+      setModalError('A terem kapacitása 1 és 10 000 között lehet.')
+      return
+    }
 
     setModalError('')
     setIsSubmitting(true)
@@ -454,7 +459,7 @@ export default function RoomsPage() {
                   type="number"
                   className="form-input"
                   min={1}
-                  max={1000}
+                  max={10000}
                   value={newKapacitas}
                   onChange={(e) => setNewKapacitas(Number(e.target.value))}
                   required

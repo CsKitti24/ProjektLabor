@@ -66,6 +66,10 @@ namespace ProjektLabor.Data
                 .HasIndex(movement => new { movement.KulcsId, movement.Idopont, movement.Id });
             modelBuilder.Entity<Foglalas>()
                 .HasIndex(booking => new { booking.TeremId, booking.StartTime, booking.EndTime });
+            // A NoShow- és lezáró feldolgozó percenként az aktív, elkezdődött foglalásokat keresi: index nélkül
+            // a Serializable olvasás a tábla nagy részét zárolná.
+            modelBuilder.Entity<Foglalas>()
+                .HasIndex(booking => new { booking.Status, booking.StartTime });
             modelBuilder.Entity<AuditLog>()
                 .HasIndex(entry => entry.LetrehozasIdeje);
 

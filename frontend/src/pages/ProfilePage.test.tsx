@@ -88,4 +88,18 @@ describe('ProfilePage password change', () => {
     expect(await screen.findByText('A kulcsátvételi PIN-kód beállítva.')).toBeTruthy()
     expect(client.put).toHaveBeenCalledWith('/auth/pin', { jelenlegiJelszo: 'RegiJelszo12345', pin: '4821' })
   })
+
+  it('shows the reasons of the own reliability points on request', async () => {
+    mockAuth.role = 'Oktato'
+    vi.mocked(client.get).mockImplementation((url) => Promise.resolve(axiosResponse(url === '/reliability/my/events'
+      ? [{ id: 1, esemenyTipus: 'LeNemAdott', pont: 3, esemenyIdopontja: '2026-11-10T21:00:00Z', indoklas: 'A kulcs a napi zárási időpontig nem került vissza.' }]
+      : { userId: 5, nev: 'Oktató', tanev: '2026/2027', pontszam: 3, kovetkezmeny: 'Nincs' })))
+    render(<MemoryRouter><ProfilePage /></MemoryRouter>)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Miért kaptam pontot?' }))
+
+    const list = await screen.findByRole('list', { name: 'Megbízhatósági eseményeim' })
+    expect(list.textContent).toContain('+3 pont')
+    expect(list.textContent).toContain('A kulcs a napi zárásig nem került vissza')
+  })
 })

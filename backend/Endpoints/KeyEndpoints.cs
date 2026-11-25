@@ -44,22 +44,33 @@ namespace ProjektLabor.Endpoints
                 }
 
                 // Kulcsonként csak a legutolsó mozgást kérjük le (nem az összes előzményt), így a lista
-                // akkor is gyors marad, ha a kulcsoknak több ezer mozgása van.
+                // akkor is gyors marad, ha a kulcsoknak több ezer mozgása van. Kiadott kulcsnál az átvevő
+                // és a kiadás terme is kell (a portás ebből tudja, kinek a PIN-jét kérje vissza).
                 var list = await query
                     .OrderBy(k => k.Szam)
                     .Select(k => new
                     {
                         Key = k,
                         TeremNev = k.Terem.Nev,
+                        TeremAktiv = k.Terem.Aktivalva,
                         LastMovement = k.Kulcsmozgasok
                             .OrderByDescending(km => km.Idopont)
                             .ThenByDescending(km => km.Id)
-                            .Select(km => new Kulcsmozgas
+                            .Select(km => new
                             {
-                                Id = km.Id,
-                                MozgasTipus = km.MozgasTipus,
-                                TeremId = km.TeremId,
-                                FoglalasId = km.FoglalasId
+                                km.Id,
+                                km.MozgasTipus,
+                                km.TeremId,
+                                km.FoglalasId,
+                                km.Idopont,
+                                HolderId = km.AtvevoFelhasznaloId ??
+                                    (km.Foglalas != null ? (int?)km.Foglalas.FelhasznaloId : null),
+                                HolderName = km.AtvevoFelhasznalo != null
+                                    ? km.AtvevoFelhasznalo.Nev
+                                    : km.Foglalas != null ? km.Foglalas.Felhasznalo.Nev : null,
+                                IssuedRoomName = km.TeremId != null
+                                    ? db.Termek.Where(room => room.Id == km.TeremId).Select(room => room.Nev).FirstOrDefault()
+                                    : km.Foglalas != null ? km.Foglalas.Terem.Nev : null
                             })
                             .FirstOrDefault()
                     })
@@ -68,8 +79,12 @@ namespace ProjektLabor.Endpoints
                 var results = list.Select(item =>
                 {
                     var k = item.Key;
-                    var lastMovement = item.LastMovement;
+                    var last = item.LastMovement;
+                    var lastMovement = last is null
+                        ? null
+                        : new Kulcsmozgas { Id = last.Id, MozgasTipus = last.MozgasTipus, TeremId = last.TeremId, FoglalasId = last.FoglalasId };
                     var allapot = GetState(k, lastMovement);
+                    var issued = allapot == "Kiadva" && last is not null;
 
                     return new KeyDto
                     {
@@ -79,8 +94,13 @@ namespace ProjektLabor.Endpoints
                         Aktivalva = k.Aktivalva,
                         TeremId = k.TeremId,
                         TeremNev = item.TeremNev ?? string.Empty,
+                        TeremAktiv = item.TeremAktiv,
                         JelenlegiAllapot = allapot,
-                        KiadottTeremIsmeretlen = IsIssuedRoomUnknown(k, lastMovement, allapot)
+                        KiadottTeremIsmeretlen = IsIssuedRoomUnknown(k, lastMovement, allapot),
+                        BirtokosId = issued ? last!.HolderId : null,
+                        BirtokosNev = issued ? last!.HolderName : null,
+                        KiadasIdeje = issued ? last!.Idopont : null,
+                        KiadottTeremNev = issued ? last!.IssuedRoomName ?? (k.Tipus == "Mesterkulcs" ? null : item.TeremNev) : null
                     };
                 }).ToList();
 
@@ -99,7 +119,6 @@ namespace ProjektLabor.Endpoints
                 var k = await db.Kulcsok
                     .AsNoTracking()
                     .Include(k => k.Terem)
-                    .Include(k => k.Kulcsmozgasok)
                     .FirstOrDefaultAsync(k => k.Id == id);
 
                 if (k is null)
@@ -107,10 +126,13 @@ namespace ProjektLabor.Endpoints
                     return Results.NotFound(new { message = $"A(z) {id} azonosítójú kulcs nem található." });
                 }
 
-                var lastMovement = k.Kulcsmozgasok?
+                // Csak a legutolsó mozgás kell az állapothoz (nem az összes előzmény).
+                var lastMovement = await db.Kulcsmozgasok
+                    .AsNoTracking()
+                    .Where(km => km.KulcsId == id)
                     .OrderByDescending(km => km.Idopont)
                     .ThenByDescending(km => km.Id)
-                    .FirstOrDefault();
+                    .FirstOrDefaultAsync();
 
                 var allapot = GetState(k, lastMovement);
 

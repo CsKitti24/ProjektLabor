@@ -89,7 +89,7 @@ public static class NotificationEndpoints
                 cancellationToken);
         if (!userExists)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden("Értesítéseket csak oktató és portás kap.");
         }
 
         var query = db.Ertesitesek
@@ -140,7 +140,7 @@ public static class NotificationEndpoints
                 cancellationToken);
         if (!userExists)
         {
-            return Results.Forbid();
+            return ApiErrors.Forbidden("Értesítéseket csak oktató és portás kap.");
         }
 
         var notification = await db.Ertesitesek
@@ -153,7 +153,7 @@ public static class NotificationEndpoints
                 cancellationToken);
         if (notification is null)
         {
-            return Results.NotFound();
+            return ApiErrors.NotFound("Az értesítés nem található.");
         }
 
         if (!notification.Olvasva)
