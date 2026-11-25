@@ -270,8 +270,14 @@ A migrációk minden adatbázisba felveszik az alábbi fiókokat és egy bemutat
 | `oktato` | `Oktatojelszo1!` | Oktató |
 | `portas` | `Portasjelszo1!` | Portás |
 | `igazgato` | `Igazgatojelszo1!` | Üzemeltetési igazgató |
+| `radli.richard` | `RadliRichard1!` | Oktató (megbízhatósági minta) |
 
-Az `oktato` fiók kulcsátvételi PIN-je `4729`.
+Az `oktato` fiók kulcsátvételi PIN-je `4729`, a `radli.richard` fióké `8153`.
+
+A mintaadatban Rádli Richárdnál van mindkét mintakulcs (`MINTA-B101`, `MINTA-B102`): ezek a portás
+**Aktív kulcsok** oldalán le nem adott kulcsként látszanak (az elmaradt leadások jelzésének bemutatása).
+A foglalás → kiadás → visszavétel folyamat bemutatása előtt a portás vegye vissza az egyiket a
+**Visszavétel** oldalon Rádli Richárd PIN-jével (`8153`).
 Bemutatóhoz a `.env`-ben állítsd be: `SAMPLE_ACCOUNTS_ENABLED=true`. Éles üzemben hagyd `false`-on. A saját jelszavát minden felhasználó a **Profil → Jelszó módosítása** űrlapon cserélheti le (ilyenkor a más eszközökön nyitva hagyott bejelentkezései megszűnnek); a megváltoztatott jelszavú mintafiókokat a rendszer már nem tiltja le. Az oktatók a kulcsátvételi PIN-kódjukat is maguk állíthatják be a **Profil → Kulcsátvételi PIN-kód** űrlapon; az adminisztrátor a felhasználólistában látja, kinek nincs még PIN-je.
 
 ### HTTPS éles üzemben
@@ -403,6 +409,11 @@ dotnet build ProjektLabor.sln
 # Adatbázist nem igénylő tesztek
 dotnet test ProjektLabor.sln --configuration Release \
   --filter "FullyQualifiedName!~SqlServerIntegrationTests"
+
+# Ugyanez lefedettségméréssel (Cobertura XML a ./coverage mappába)
+dotnet test ProjektLabor.sln --configuration Release \
+  --filter "FullyQualifiedName!~SqlServerIntegrationTests" \
+  --collect:"XPlat Code Coverage" --results-directory ./coverage
 ```
 
 Az SQL Server-integrációs tesztek kizárólag erre elkülönített teszt SQL
@@ -415,6 +426,7 @@ változó nincs beállítva, ezek a tesztek kihagyásra kerülnek (nem buknak el
 cd frontend
 npm ci
 npm test
+npm run test:coverage   # lefedettség: frontend/coverage/index.html
 npm run lint
 npm run build
 ```

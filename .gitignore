@@ -32,3 +32,5 @@ Library/
 backups/
 deploy/https/certs/
 .env.bak*
+coverage/
+coverage-report/
